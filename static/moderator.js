@@ -66,7 +66,6 @@ function renderList() {
       <span class="or-author">${escapeHTML(m.author)}</span>
       ${badge}
       <span class="or-actions">
-        <button class="icon-btn" data-act="first" data-id="${id}" title="В начало">⤒</button>
         <button class="icon-btn" data-act="up" data-id="${id}" title="Выше">↑</button>
         <button class="icon-btn" data-act="down" data-id="${id}" title="Ниже">↓</button>
         <button class="icon-btn" data-act="show" data-id="${id}" title="Показать сейчас">▶</button>
@@ -286,7 +285,6 @@ document.addEventListener('click', (e) => {
   switch (btn.dataset.act) {
     case 'up': move(id, 'up'); break;
     case 'down': move(id, 'down'); break;
-    case 'first': move(id, 'first'); break;
     case 'show': control('show', String(id)); break;
     case 'delete': remove(id); break;
     case 'edit': editText(id); break;

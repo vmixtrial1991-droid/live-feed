@@ -239,6 +239,57 @@ try:
     check("слайдшоу выключено", scr.get("slideshow_visible") is False)
     check("на экране снова слайд ленты", scr.get("active_id") == scr.get("current_id"))
 
+    print("\n=== Длительность слайдшоу своя, не как у ленты ===")
+    scr = screen_state()
+    base_feed = scr.get("interval")
+    base_show = scr.get("slideshow_interval")
+    check("в состоянии есть длительность ленты", isinstance(base_feed, int), str(base_feed))
+    check("в состоянии есть длительность слайдшоу",
+          isinstance(base_show, int), str(base_show))
+
+    st, _ = mod.post_json(f"/e/{slug}/api/moderator/screen",
+                          {"action": "interval", "value": "7"})
+    check("длительность ленты меняется", screen_state().get("interval") == 7)
+    check("и слайдшоу от этого не тронута",
+          screen_state().get("slideshow_interval") == base_show,
+          str(screen_state().get("slideshow_interval")))
+
+    st, _ = mod.post_json(f"/e/{slug}/api/moderator/screen",
+                          {"action": "slideshow-interval", "value": "40"})
+    check("длительность слайдшоу меняется",
+          screen_state().get("slideshow_interval") == 40,
+          str(screen_state().get("slideshow_interval")))
+    check("а лента осталась при своей",
+          screen_state().get("interval") == 7,
+          str(screen_state().get("interval")))
+
+    # настройка должна пережить перезапуск показа, а не жить только в памяти
+    with open(cfg_path, encoding="utf-8") as f:
+        saved = json.load(f)
+    check("длительность слайдшоу записана в настройки события",
+          int(saved.get("slideshow_interval", 0)) == 40,
+          str(saved.get("slideshow_interval")))
+    check("и длительность ленты — тоже",
+          int(saved.get("interval", 0)) == 7, str(saved.get("interval")))
+
+    # границы: ползунокallow 3..120, а сервер не должен доверять мусору
+    st, _ = mod.post_json(f"/e/{slug}/api/moderator/screen",
+                          {"action": "slideshow-interval", "value": "1"})
+    check("слишком малое значение поднято до минимума",
+          screen_state().get("slideshow_interval") == 3,
+          str(screen_state().get("slideshow_interval")))
+    st, _ = mod.post_json(f"/e/{slug}/api/moderator/screen",
+                          {"action": "slideshow-interval", "value": "9999"})
+    check("слишком большое значение урезано до максимума",
+          screen_state().get("slideshow_interval") == 600,
+          str(screen_state().get("slideshow_interval")))
+
+    # вернём к середине, чтобы дальше тест шёл быстро
+    mod.post_json(f"/e/{slug}/api/moderator/screen",
+                  {"action": "slideshow-interval", "value": "15"})
+    mod.post_json(f"/e/{slug}/api/moderator/screen",
+                  {"action": "interval", "value": "12"})
+
     print("\n=== Пустую галерею не запускаем ===")
     st, _ = mod.post_json(f"/e/{slug}/api/moderator/slideshow-clear", {})
     check("галерея очищается", st == 200, str(st))

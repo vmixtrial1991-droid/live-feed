@@ -146,6 +146,16 @@
           Опустошить галерею
         </button>
       </div>
+      <!-- Своя длительность показа, независимая от ленты: снимки в галерее
+           ведущий держит дольше, чем идёт обычная лента, и одна настройка
+           на оба режима заставляла выбирать что-то одно -->
+      <div class="control-slider">
+        <label class="slider-row" for="slideshowInterval">
+          <span>Каждый снимок по <b id="slideshowIntervalVal">15</b> секунд</span>
+          <input type="range" id="slideshowInterval" min="3" max="120" step="1" value="15">
+        </label>
+      </div>
+
       <p class="muted slideshow-state" id="slideshowState">
         Слайдшоу выключено, на экране обычная лента.
       </p>

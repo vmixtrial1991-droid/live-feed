@@ -16,6 +16,8 @@ const archiveCount = document.getElementById('archiveCount');
 const archiveDownload = document.getElementById('archiveDownload');
 const archiveWipe = document.getElementById('archiveWipe');
 const archiveStatus = document.getElementById('archiveStatus');
+const slideInterval = document.getElementById('slideshowInterval');
+const slideIntervalVal = document.getElementById('slideshowIntervalVal');
 
 /* ---------------- Вкладки ---------------- */
 function switchTab(which) {
@@ -123,7 +125,26 @@ function renderSlideshowBar() {
   runState.textContent = on
     ? `Слайдшоу идёт: снимок ${state.screen.slideshow_index + 1} из ${total}. Обычная лента ждёт.`
     : `Слайдшоу выключено, на экране обычная лента. В галерее ${total} ${plural(total, 'снимок', 'снимка', 'снимков')}.`;
+
+  // Ползунок длительности: своя настройка у слайдшоу, у ленты она другая.
+  // Пока пользователь тащит ползунок, не перерисовываем его из ответа —
+  // иначе значение прыгает под пальцем.
+  const sec = state.screen.slideshow_interval || 15;
+  slideIntervalVal.textContent = sec;
+  if (document.activeElement !== slideInterval && slideInterval.value !== String(sec)) {
+    slideInterval.value = sec;
+  }
 }
+
+let slideIntervalDebounce = null;
+slideInterval.addEventListener('input', () => {
+  slideIntervalVal.textContent = slideInterval.value;
+});
+slideInterval.addEventListener('change', () => {
+  clearTimeout(slideIntervalDebounce);
+  slideIntervalDebounce = setTimeout(() =>
+    control('slideshow-interval', slideInterval.value), 150);
+});
 
 runBtn.addEventListener('click', () =>
   control('slideshow', state.screen.slideshow_visible ? '0' : '1'));

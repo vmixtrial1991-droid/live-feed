@@ -116,6 +116,23 @@ class ScreenController:
         self.slideshow_items: list[int] = []
         self.slideshow_index = 0
         self.slideshow_visible = False
+        # 4.0: у слайдшоу своя длительность показа, независимая от ленты.
+        # Снимки в галерее ведущий ставит сам и держит их подольше, а
+        # лента крутится быстро; одна настройка на оба не годилась.
+        self.slideshow_interval = interval
+        self._slideshow_deadline = time.monotonic() + self.slideshow_interval
+
+    # У обычной ленты и у слайдшоу свои часы: переключение режима не должно
+    # начинать отсчёт заново у того, что сейчас не показывается.
+    def _due_at(self) -> float:
+        return self._slideshow_deadline if self.slideshow_visible else self._deadline
+
+    def reset_deadline(self) -> None:
+        """Отсчёт с нуля для того режима, который сейчас на экране."""
+        if self.slideshow_visible:
+            self._slideshow_deadline = time.monotonic() + self.slideshow_interval
+        else:
+            self._deadline = time.monotonic() + self.interval
 
     @property
     def current_id(self) -> int | None:
@@ -157,7 +174,7 @@ class ScreenController:
             self.slideshow_index = ids.index(current)
         else:
             self.slideshow_index = 0
-            self._deadline = time.monotonic() + self.interval
+            self._slideshow_deadline = time.monotonic() + self.slideshow_interval
         return True
 
     async def next(self) -> None:
@@ -179,17 +196,25 @@ class ScreenController:
         async with self._lock:
             if message_id in self.slideshow_items:
                 self.slideshow_index = self.slideshow_items.index(message_id)
-                self._deadline = time.monotonic() + self.interval
+                self._slideshow_deadline = time.monotonic() + self.slideshow_interval
 
     async def set_playing(self, playing: bool) -> None:
         async with self._lock:
             self.playing = playing
             self._deadline = time.monotonic() + self.interval
+            self._slideshow_deadline = time.monotonic() + self.slideshow_interval
 
     async def set_interval(self, seconds: int) -> None:
+        """Длительность снимка обычной ленты. У слайдшоу своя."""
         async with self._lock:
             self.interval = max(3, min(300, int(seconds)))
             self._deadline = time.monotonic() + self.interval
+
+    async def set_slideshow_interval(self, seconds: int) -> None:
+        """Длительность снимка в слайдшоу — настраивается отдельно от ленты."""
+        async with self._lock:
+            self.slideshow_interval = max(3, min(600, int(seconds)))
+            self._slideshow_deadline = time.monotonic() + self.slideshow_interval
 
     def _step(self, delta: int) -> None:
         """Переключает слайд в том списке, который сейчас на экране."""
@@ -208,9 +233,10 @@ class ScreenController:
         new_index %= len(items)
         if self.slideshow_visible:
             self.slideshow_index = new_index
+            self._slideshow_deadline = time.monotonic() + self.slideshow_interval
         else:
             self.index = new_index
-        self._deadline = time.monotonic() + self.interval
+            self._deadline = time.monotonic() + self.interval
 
     @property
     def _active_len(self) -> int:
@@ -222,7 +248,7 @@ class ScreenController:
             return False
         if self._active_len <= 1:
             return False
-        return time.monotonic() >= self._deadline
+        return time.monotonic() >= self._due_at()
 
     async def step_if_due(self) -> bool:
         """Переключает слайд, если время пришло. True — если переключили."""
@@ -232,7 +258,7 @@ class ScreenController:
             # пока ждали блокировку, время могло ещё не наступить
             if not self.playing or self.qr_visible or self.splash_visible:
                 return False
-            if self._active_len <= 1 or time.monotonic() < self._deadline:
+            if self._active_len <= 1 or time.monotonic() < self._due_at():
                 return False
             self._step(1)
         return True
@@ -255,6 +281,7 @@ class ScreenController:
             "splash_visible": self.splash_visible,
             # 4.0: слайдшоу. active_id — что на самом деле видно на экране
             "slideshow_visible": self.slideshow_visible,
+            "slideshow_interval": self.slideshow_interval,
             "slideshow_current_id": self.slideshow_current_id,
             "slideshow_total": len(self.slideshow_items),
             "slideshow_index": (

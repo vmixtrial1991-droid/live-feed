@@ -298,6 +298,9 @@ def create_event(
             "mod_password": password,
             "secret": secrets.token_hex(32),
             "interval": 12,
+            # 4.0: у слайдшоу своя длительность показа, по умолчанию
+            # подлиннее: снимки гости держат дольше, чем идёт лента
+            "slideshow_interval": 15,
             "autoplay": True,
             "created_at": time.time(),
         }

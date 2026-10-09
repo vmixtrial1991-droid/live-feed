@@ -78,6 +78,19 @@ def _prepare(event: Event) -> Event:
     """
     if event.slug not in _prepared:
         event.store.init()
+        # Настройки показа подтягиваем из файла события. Раньше они
+        # применялись только при старте сервера, и событие, созданное позже,
+        # жило на значениях по умолчанию: в конфиге могло быть 15 секунд,
+        # а показ шёл по 12. Рабочий объект события берёт дефолт из
+        # конструктора, а не из config.json.
+        try:
+            data = event.load()
+            screen = registry.get(event.slug).screen
+            screen.interval = int(data.get("interval", 12) or 12)
+            screen.slideshow_interval = int(data.get("slideshow_interval", 15) or 15)
+            screen.reset_deadline()
+        except (EventError, OSError, ValueError):
+            pass
         _prepared.add(event.slug)
     return event
 
@@ -726,20 +739,26 @@ async def api_screen_control(slug: str, request: Request, action: str = Form(...
         # начать круг заново и снять отметки «уже показывалось»
         event.store.reset_shown()
         screen.index = 0
-        screen._deadline = time.monotonic() + screen.interval
+        screen.reset_deadline()
     elif action == "interval":
         await screen.set_interval(int(value or 12))
         event.update(interval=screen.interval)
+    elif action == "slideshow-interval":
+        # 4.0: длительность снимка в слайдшоу настраивается отдельно от ленты.
+        # Снимки гости держат дольше, а лента идёт бодрее — одна настройка
+        # на оба режима заставляла выбирать что-то одно.
+        await screen.set_slideshow_interval(int(value or 15))
+        event.update(slideshow_interval=screen.slideshow_interval)
     elif action == "show":
         await screen.go_to(int(value))
     elif action == "qr":
         # QR поверх сообщений: показ встаёт, пока окно не скрыто
         screen.qr_visible = str(value).lower() in ("1", "true", "on", "show")
-        screen._deadline = time.monotonic() + screen.interval
+        screen.reset_deadline()
     elif action == "splash":
         # заставка на весь экран: показ тоже встаёт
         screen.splash_visible = str(value).lower() in ("1", "true", "on", "show")
-        screen._deadline = time.monotonic() + screen.interval
+        screen.reset_deadline()
     elif action == "slideshow":
         # 4.0: галерея слайдшоу занимает экран, обычная лента на это время
         # встаёт — так же, как заставка. Пустую галерею запускать смысла нет:
@@ -751,7 +770,7 @@ async def api_screen_control(slug: str, request: Request, action: str = Form(...
                 detail="В слайдшоу пока нет ни одной фотографии.",
             )
         screen.slideshow_visible = want
-        screen._deadline = time.monotonic() + screen.interval
+        screen.reset_deadline()
     elif action == "slideshow-show":
         # показать снимок из галереи. Если слайдшоу не запущено — запускаем:
         # иначе ведущий нажал «показать сейчас», а на экране обычная лента
@@ -1074,6 +1093,9 @@ async def on_startup() -> None:
             data = event.load()
             runtime = registry.get(event.slug)
             runtime.screen.interval = int(data.get("interval", 12) or 12)
+            runtime.screen.slideshow_interval = int(
+                data.get("slideshow_interval", 15) or 15
+            )
             runtime.screen.playing = bool(data.get("autoplay", True))
             runtime.screen.sync_items(event.store.live_ids())
         except Exception:

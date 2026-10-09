@@ -69,7 +69,8 @@ function setQrVisible(visible) {
   if (visible) wake();
 }
 
-const messages = new Map();   // id -> сообщение
+const messages = new Map();   // id -> сообщение ленты
+const gallery = new Map();    // id -> снимок из галереи слайдшоу
 let order = [];               // id в порядке показа
 let shownId = null;
 let screenState = {
@@ -294,7 +295,9 @@ function fitAuthor(budget) {
    сменили, пока предыдущий ещё прятался, старый отложенный вызов не вставит
    своё содержимое поверх нового. */
 function paint(id) {
-  const m = messages.get(id);
+  // форма одна и та же: и сообщение ленты, и снимок галереи — это id, image,
+  // body, author
+  const m = messages.get(id) || gallery.get(id);
   if (!m) return;
 
   if (m.image) {
@@ -325,8 +328,14 @@ function paint(id) {
 let renderToken = 0;
 let swapTimer = null;
 
+/** Снимок из галереи: рисуем сразу, без задержки переключения ленты. */
+function renderItem(item) {
+  shownId = item.id;
+  paint(item.id);
+}
+
 function render(id) {
-  const m = messages.get(id);
+  const m = messages.get(id) || gallery.get(id);
   if (!m) return;
 
   const token = ++renderToken;
@@ -351,15 +360,19 @@ function showCurrent(state) {
   // говорим об этом, а не показываем пустой кадр: ведущий подумает, что
   // экран сломался
   if (screenState.slideshow_visible) {
+    // 4.0: слайдшоу показывает галерею, а не ленту. Галерея живёт отдельно,
+    // поэтому снимок остаётся на экране, даже если его сообщение из ленты
+    // ведущий уже удалил
     const sid = screenState.slideshow_current_id;
-    if (sid == null || !messages.has(sid)) {
+    const item = sid != null ? gallery.get(sid) : null;
+    if (!item) {
       setOverlay(true, 'Слайдшоу пустое',
         'В галерее пока нет ни одной фотографии.',
         'Откройте кабинет ведущего, вкладка «Слайдшоу»');
       return;
     }
     setOverlay(false);
-    if (sid !== shownId) render(sid);
+    if (sid !== shownId) renderItem(item);
     return;
   }
 
@@ -383,7 +396,9 @@ connectWS(ev('/ws/display'), {
       case 'init':
         // init приходит и при переподключении — старые слайды надо забыть
         messages.clear();
+        gallery.clear();
         (msg.messages || []).forEach((m) => messages.set(m.id, m));
+        (msg.gallery || []).forEach((g) => gallery.set(g.id, g));
         order = byPosition([...messages.keys()]);
         screenState = msg.screen || screenState;
         shownId = null;
@@ -395,6 +410,9 @@ connectWS(ev('/ws/display'), {
         const fresh = new Set();
         (msg.messages || []).forEach((m) => { messages.set(m.id, m); fresh.add(m.id); });
         for (const id of [...messages.keys()]) if (!fresh.has(id)) messages.delete(id);
+        // галерея приходит целиком: снимок мог уйти из ленты и остаться здесь
+        gallery.clear();
+        (msg.gallery || []).forEach((g) => gallery.set(g.id, g));
         order = byPosition([...messages.keys()]);
         screenState = msg.screen || screenState;
         showCurrent();

@@ -41,13 +41,24 @@ CREATE TABLE IF NOT EXISTS messages (
     in_slideshow   INTEGER NOT NULL DEFAULT 0
 );
 
-CREATE INDEX IF NOT EXISTS idx_messages_status  ON messages(status);
-CREATE INDEX IF NOT EXISTS idx_messages_participant ON messages(participant_id);
-CREATE INDEX IF NOT EXISTS idx_messages_position ON messages(status, position);
--- Индекс по in_slideshow создаётся не здесь, а в _migrate: у базы,
--- созданной прошлой версией, этой колонки ещё нет, и CREATE INDEX на
--- несуществующей колонке роняет executescript до того, как миграция
--- успеет её добавить.
+-- Галерея слайдшоу — отдельный набор фотографий, а не флаг у строки ленты.
+-- Так две вещи перестали быть связаны: удаление сообщения из ленты больше
+-- не выбрасывает снимок из слайдшоу, а снятие галочки не трогает ленту.
+-- Раньше слайдшоу жил флагом in_slideshow у сообщения, и удаление из ленты
+-- уносило строку вместе с флагом — снимок исчезал из обоих мест сразу.
+-- Файл здесь только имя: само изображение лежит в uploads/ и живёт столько,
+-- сколько ведущий не нажмёт «удалить все фото».
+CREATE TABLE IF NOT EXISTS gallery (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    image      TEXT NOT NULL,
+    body       TEXT NOT NULL DEFAULT '',
+    author     TEXT NOT NULL DEFAULT '',
+    position   REAL NOT NULL DEFAULT 0,
+    created_at REAL NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_gallery_image ON gallery(image);
+CREATE INDEX IF NOT EXISTS idx_gallery_position ON gallery(position);
 """
 
 
@@ -67,17 +78,25 @@ def _migrate(conn: sqlite3.Connection) -> None:
 
     # 4.0: галочка слайдшоу. DEFAULT нужен, иначе ALTER на таблице с
     # записями упадёт по NOT NULL, а у старых событий флаги должны быть 0.
-    if "in_slideshow" not in have:
-        conn.execute(
-            "ALTER TABLE messages ADD COLUMN in_slideshow INTEGER NOT NULL DEFAULT 0"
-        )
-    # индекс создаём после ALTER, а не в SCHEMA: см. комментарий там
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_messages_slideshow "
-        "ON messages(in_slideshow, image)"
-    )
-    # клининг по фотографии: флаг без картинки смысла не имеет
-    conn.execute("UPDATE messages SET in_slideshow = 0 WHERE image IS NULL")
+    have = _columns(conn, "messages")
+    if "in_slideshow" in have:
+        # Старая схема держала слайдшоу флагом у сообщения: переносим
+        # отмеченное в отдельную таблицу галереи, один раз. Порядок берём
+        # тот же, что был в ленте, — иначе галерея после обновления шла бы
+        # вразнобой с тем, что ведущий уже наставил. INSERT OR IGNORE
+        # страхует от повторного запуска миграции.
+        rows = conn.execute(
+            "SELECT image, body, author, position, created_at FROM messages "
+            "WHERE in_slideshow = 1 AND image IS NOT NULL ORDER BY position, id"
+        ).fetchall()
+        for r in rows:
+            conn.execute(
+                "INSERT OR IGNORE INTO gallery (image, body, author, position, created_at) "
+                "VALUES (?,?,?,?,?)",
+                (r["image"], r["body"] or "", r["author"] or "",
+                 r["position"], r["created_at"]),
+            )
+        conn.execute("DROP INDEX IF EXISTS idx_messages_slideshow")
 
     # модерация убрана, но в старых базах остались её следы
     if "reject_reason" in have:
@@ -96,8 +115,6 @@ def message_to_dict(row: sqlite3.Row | dict) -> dict[str, Any]:
         "position": d["position"],
         "shown_at": d.get("shown_at"),
         "created_at": d["created_at"],
-        # 4.0: есть ли фотография в галерее слайдшоу
-        "in_slideshow": bool(d.get("in_slideshow")),
     }
 
 
@@ -203,6 +220,9 @@ class EventStore:
             if row is None:
                 return False
             conn.execute("DELETE FROM messages WHERE id = ?", (message_id,))
+        # Галерею намеренно не трогаем: снимки живут своей жизнью. Раньше
+        # слайдшоу был флагом у строки, и удаление из ленты уносило снимок
+        # из обоих мест сразу — ведущий терял то, что сам же отметил
         return True
 
     def move_message(self, message_id: int, direction: str) -> bool:
@@ -263,52 +283,99 @@ class EventStore:
         with self.connect() as conn:
             conn.execute("UPDATE messages SET shown_at = NULL WHERE shown_at IS NOT NULL")
 
-    # --- слайдшоу (4.0) --------------------------------------------------
-    # В галерею слайдшоу попадают только фотографии: и чистые, и с текстом.
-    # Текст без картинки ставить нельзя — на экране слайдшоу фотография и
-    # занимает почти весь кадр, а текстовая строка сама по себе там лишняя.
-    def slideshow_messages(self, ascending: bool = True) -> list[dict]:
-        order = "ASC" if ascending else "DESC"
-        with self.connect() as conn:
-            rows = conn.execute(
-                f"SELECT * FROM messages WHERE in_slideshow = 1 AND image IS NOT NULL "
-                f"ORDER BY position {order}, id {order}"
-            ).fetchall()
-        return [message_to_dict(r) for r in rows]
+    # --- галерея слайдшоу (4.0) -------------------------------------
+    # Галерея хранит фотографии сама по себе и ни с чем в ленте не связана.
+    # Раньше слайдшоу был флагом in_slideshow у сообщения, и удаление
+    # сообщения из ленты уносило снимок из слайдшоу вместе с флагом —
+    # ведущий терял то, что сам же и отметил.
 
-    def slideshow_ids(self) -> list[int]:
-        """ID фотографий слайдшоу в порядке показа."""
+    def gallery_items(self) -> list[dict]:
+        """Все снимки галереи в порядке показа."""
         with self.connect() as conn:
             rows = conn.execute(
-                "SELECT id FROM messages WHERE in_slideshow = 1 AND image IS NOT NULL "
-                "ORDER BY position ASC, id ASC"
+                "SELECT * FROM gallery ORDER BY position ASC, id ASC"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def gallery_ids(self) -> list[int]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT id FROM gallery ORDER BY position ASC, id ASC"
             ).fetchall()
         return [r["id"] for r in rows]
 
-    def set_slideshow(self, message_id: int, on: bool) -> dict[str, Any] | None:
-        """Поставить или снять галочку слайдшоу.
+    def gallery_count(self) -> int:
+        with self.connect() as conn:
+            return conn.execute("SELECT COUNT(*) FROM gallery").fetchone()[0]
 
-        None — если сообщения нет либо это не фотография: тогда галочку
-        ставить нельзя, и ведущий должен знать об этом, а не получить
-        молчаливое «ничего не произошло».
+    def gallery_has_image(self, image: str | None) -> bool:
+        """Есть ли этот снимок в галерее — галочка в ленте показывает это."""
+        if not image:
+            return False
+        with self.connect() as conn:
+            return conn.execute(
+                "SELECT 1 FROM gallery WHERE image = ?", (image,)
+            ).fetchone() is not None
+
+    def gallery_add(self, image: str, body: str, author: str) -> dict | None:
+        """Добавить фотографию в галерею. None — если это не фотография.
+
+        Один и тот же снимок дважды не добавляется: галочка должна быть
+        переключателем, а не кнопкой «добавить ещё раз».
         """
-        row = self.get_message(message_id)
-        if row is None or not row.get("image"):
+        if not image:
             return None
+        now = time.time()
         with self.connect() as conn:
+            nxt = conn.execute(
+                "SELECT COALESCE(MAX(position), 0) + 1 FROM gallery"
+            ).fetchone()[0]
             conn.execute(
-                "UPDATE messages SET in_slideshow = ? WHERE id = ?",
-                (1 if on else 0, message_id),
+                "INSERT OR IGNORE INTO gallery (image, body, author, position, created_at) "
+                "VALUES (?,?,?,?,?)",
+                (image, body or "", author or "", nxt, now),
             )
-        return self.get_message(message_id)
+            row = conn.execute(
+                "SELECT * FROM gallery WHERE image = ?", (image,)
+            ).fetchone()
+        return dict(row) if row else None
 
-    def clear_slideshow(self) -> int:
-        """Снять все галочки — например, перед «удалить все фото»."""
+    def gallery_remove(self, gallery_id: int) -> bool:
+        """Убрать снимок из галереи. Файл в uploads/ при этом остаётся."""
         with self.connect() as conn:
-            cur = conn.execute("UPDATE messages SET in_slideshow = 0 WHERE in_slideshow = 1")
+            cur = conn.execute("DELETE FROM gallery WHERE id = ?", (gallery_id,))
+            return bool(cur.rowcount)
+
+    def gallery_remove_image(self, image: str) -> bool:
+        with self.connect() as conn:
+            cur = conn.execute("DELETE FROM gallery WHERE image = ?", (image,))
+            return bool(cur.rowcount)
+
+    def gallery_edit(self, gallery_id: int, body: str) -> dict | None:
+        """Правка текста у снимка в галерее. Имя автора не трогаем."""
+        with self.connect() as conn:
+            conn.execute("UPDATE gallery SET body = ? WHERE id = ?", (body, gallery_id))
+            row = conn.execute("SELECT * FROM gallery WHERE id = ?", (gallery_id,)).fetchone()
+        return dict(row) if row else None
+
+    def gallery_clear(self) -> int:
+        """Опустошить галерею. Файлы фотографий остаются в архиве."""
+        with self.connect() as conn:
+            cur = conn.execute("DELETE FROM gallery")
             return cur.rowcount or 0
 
-    def photo_message_ids(self) -> list[str]:
+    def delete_photo_messages(self) -> int:
+        """Убрать из ленты все сообщения с фотографией. Возвращает число.
+
+        Галерея при этом остаётся: снимки живут в архиве и в галерее сами по
+        себе, а из ленты они просто уходят. Иначе на экране остались бы
+        битые картинки.
+        """
+        with self.connect() as conn:
+            cur = conn.execute("DELETE FROM messages WHERE image IS NOT NULL")
+            return cur.rowcount or 0
+
+    def photo_message_images(self) -> list[str]:
         """Имена файлов всех сообщений с фотографией."""
         with self.connect() as conn:
             rows = conn.execute(
@@ -316,17 +383,7 @@ class EventStore:
             ).fetchall()
         return [r["image"] for r in rows]
 
-    def delete_photo_messages(self) -> int:
-        """Убрать из ленты все сообщения с фотографией. Возвращает число.
-
-        Слайдшоу при этом тоже очищается: фотографий в галерее больше нет,
-        и держать флаги на удалённых строках незачем.
-        """
-        with self.connect() as conn:
-            cur = conn.execute("DELETE FROM messages WHERE image IS NOT NULL")
-            return cur.rowcount or 0
-
-    # --- участники -------------------------------------------------------
+    # --- сообщения ------------------------------------------------------
     def participant_by_token(self, token: str | None) -> dict | None:
         if not token:
             return None

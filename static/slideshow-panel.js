@@ -36,10 +36,10 @@ tabSlideshow.addEventListener('click', () => switchTab('slideshow'));
 
 /* ---------------- Галерея ---------------- */
 function inSlideshow() {
-  // порядок берём тот же, что у ленты, — так ведущий узнаёт свою свадьбу
-  return state.order
-    .map((id) => byId(id))
-    .filter((m) => m && m.in_slideshow && m.image);
+  // 4.0: галерея — отдельный набор фотографий. Раньше она собиралась из
+  // строк ленты с флагом, и удаление строки из ленты убирало снимок из
+  // галереи вместе с флагом. Теперь строки и галерея не связаны.
+  return state.gallery || [];
 }
 
 function fmtBytes(n) {
@@ -74,6 +74,7 @@ function renderGallery() {
       </div>
       <div class="gal-actions">
         <button class="icon-btn" data-gal="show" data-id="${m.id}" title="Показать сейчас">▶</button>
+        <button class="icon-btn" data-gal="edit" data-id="${m.id}" title="Править текст">✎</button>
         <button class="icon-btn danger" data-gal="drop" data-id="${m.id}" title="Убрать из слайдшоу">✕</button>
       </div>`;
     return el;
@@ -92,19 +93,38 @@ async function setSlideshow(id, on) {
   }
 }
 
-/* Снятие галочки и из галереи, и из строки ленты — один обработчик на оба */
+/* Снятие галочки и из галереи, и из строки ленты — один обработчик на оба.
+   В ленте id принадлежит строке сообщения, в галерее — строке галереи,
+   поэтому пути разные, а намерение одно. */
 document.addEventListener('change', (e) => {
   const box = e.target.closest('input[data-act="slideshow"], input[data-gallery]');
   if (!box) return;
-  setSlideshow(Number(box.dataset.id || box.dataset.gallery), box.checked);
+  if (box.dataset.gallery) galleryDrop(Number(box.dataset.gallery));
+  else setSlideshow(Number(box.dataset.id), box.checked);
 });
+
+/** Убрать снимок из галереи. Файл в архиве и в ленте остаётся. */
+async function galleryDrop(galleryId) {
+  try {
+    applyState(await postForm(ev('/api/moderator/gallery/drop'),
+      { gallery_id: galleryId }));
+  } catch (ex) {
+    showToast(ex.message, 'warn');
+  }
+}
 
 document.addEventListener('click', (e) => {
   const btn = e.target.closest('[data-gal]');
   if (!btn) return;
   const id = Number(btn.dataset.id);
-  if (btn.dataset.gal === 'drop') setSlideshow(id, false);
-  else if (btn.dataset.gal === 'show') {
+  if (btn.dataset.gal === 'drop') galleryDrop(id);
+  else if (btn.dataset.gal === 'edit') {
+    // то же окно правки, что и в ленте: openEdit живёт в moderator.js
+    const item = (state.gallery || []).find((g) => g.id === id);
+    if (item && typeof openEdit === 'function') {
+      openEdit('gallery', id, item.body, 'Текст снимка в галерее. Имя не меняется.');
+    }
+  } else if (btn.dataset.gal === 'show') {
     // сначала галерея должна быть запущена, иначе показывать нечего
     const go = state.screen.slideshow_visible
       ? Promise.resolve()

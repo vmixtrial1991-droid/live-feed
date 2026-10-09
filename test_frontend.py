@@ -32,6 +32,21 @@ CALL_PLAIN = re.compile(r"(?<!\$\{)ev\(`[^`]*`\)")
 BROKEN_CALL = re.compile(r"\$\{\s*ev\(`[^`]*`\}")
 
 
+def strip_js_comments(text: str) -> str:
+    """Убирает /* ... */ и // ..., чтобы поиск по коду не цеплялся за текст.
+
+    Без этого проверка «prompt() вычищены» ловила само слово в комментарии
+    «Раньше стояли два системных prompt() подряд» и падала на коде, который
+    как раз и почищен.
+    """
+    out = re.sub(r"/\*.*?\*/", " ", text, flags=re.S)
+    out = re.sub(r"//[^\n]*", " ", out)
+    # строковые литералы тоже убираем: 'показать сейчас' не должно ловиться
+    out = re.sub(r"'([^'\\\n]|\\.)*'", "''", out)
+    out = re.sub(r'"([^"\\\n]|\\.)*"', '""', out)
+    return out
+
+
 def check(name: str, cond: bool, extra: str = "") -> None:
     print(("  OK   " if cond else "  FAIL ") + name + (f"  [{extra}]" if extra else ""))
     if not cond:
@@ -291,8 +306,50 @@ check("slideshow-panel.js: перед удалением спросим",
       "стирание необратимо — без подтверждения нельзя")
 check("slideshow-panel.js: в подтверждении сказано про отмену",
       "Отменить это будет нельзя" in slide_js)
-check("slideshow-panel.js: галерея строится из отмеченных",
-      "m.in_slideshow" in slide_js)
+check("slideshow-panel.js: галерея — отдельный набор, а не флаг у строки",
+      "state.gallery" in slide_js and "m.in_slideshow" not in slide_js,
+      "иначе удаление из ленты снова уносит снимок из слайдшоу")
+check("moderator.js: флага in_slideshow больше нет",
+      "in_slideshow" not in (STATIC / "moderator.js").read_text(encoding="utf-8"),
+      "флаг жил в строке ленты и умирал вместе с ней")
+check("moderator.js: галочка спрашивает набор галереи",
+      "state.galleryImages" in (STATIC / "moderator.js").read_text(encoding="utf-8"))
+check("screen.js: в слайдшоу рисуется галерея, а не лента",
+      "gallery.get(sid)" in screen_js)
+check("screen.js: галерея приходит по сокету",
+      "msg.gallery" in screen_js)
+
+print("\n=== Окно правки текста (4.0) ===")
+mod_js2 = (STATIC / "moderator.js").read_text(encoding="utf-8")
+check("moderator.html: окно правки есть", 'id="editModal"' in mod_html)
+check("moderator.html: поле для текста", 'id="editInput"' in mod_html)
+check("moderator.html: счётчик символов", 'id="editCount"' in mod_html)
+check("moderator.html: кнопка сохранить", 'id="editSave"' in mod_html)
+check("moderator.html: окно спрятано до первого нажатия",
+      re.search(r'id="editModal"[^>]*hidden', mod_html) is not None)
+check("moderator.css: есть стили окна",
+      re.search(r"\.modal-card\s*\{", (STATIC / "moderator.css").read_text(encoding="utf-8")) is not None)
+check("системные prompt() вычищены",
+      "prompt(" not in strip_js_comments(mod_js2)
+      and "prompt(" not in strip_js_comments(slide_js),
+      "два окна подряд выглядели чужеродно, и поле автора было лишним")
+check("поля для имени автора в окне нет",
+      'id="editAuthor"' not in mod_html,
+      "имя автора менять не нужно")
+check("окно открывается функцией openEdit", "function openEdit(" in mod_js2)
+check("в окне есть предел из конфига сервера",
+      "editInput.maxLength = String(MAX_TEXT)" in mod_js2)
+check("лишние символы не молча режутся, а подсвечиваются",
+      "is-full" in mod_js2)
+check("Enter сохраняет, Escape закрывает",
+      "e.key === 'Escape'" in mod_js2 and "e.key === 'Enter'" in mod_js2)
+check("правка галереи идёт тем же окном",
+      "openEdit('gallery'" in slide_js)
+check("правка текста шлёт только текст",
+      re.search(r"postForm\(ev\(path\), fields\)", mod_js2) is not None)
+mod_css = (STATIC / "moderator.css").read_text(encoding="utf-8")
+check("поле подсвечивается у предела",
+      re.search(r"#editInput\.is-full", mod_css) is not None)
 check("slideshow-panel.js: галочка не попадает в общий обработчик",
       "if (btn.tagName === 'INPUT') return;" in (STATIC / "moderator.js").read_text(encoding="utf-8"),
       "иначе щёлчок по квадратику выполнит ещё и чужое действие")

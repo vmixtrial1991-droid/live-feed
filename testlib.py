@@ -120,6 +120,32 @@ def admin_post(path: str, fields: dict) -> tuple[int, dict]:
             return exc.code, {}
 
 
+def admin_get(path: str) -> tuple[int, dict]:
+    """То же, что admin_post, но чтение. Список событий — GET."""
+    opener = urllib.request.build_opener(_KeepsSecureCookies(), NoRedirect())
+    form = {"Host": HOST} if HOST else {}
+
+    req = urllib.request.Request(
+        ROOT + "/api/admin/login",
+        data=urllib.parse.urlencode({"password": admin_password()}).encode(),
+        method="POST",
+        headers={"Content-Type": "application/x-www-form-urlencoded", **form},
+    )
+    with opener.open(req, timeout=20) as resp:
+        resp.read()
+
+    req = urllib.request.Request(ROOT + path, method="GET", headers=form)
+    try:
+        with opener.open(req, timeout=30) as resp:
+            return resp.status, json.loads(resp.read() or b"{}")
+    except urllib.error.HTTPError as exc:
+        body = exc.read()
+        try:
+            return exc.code, json.loads(body or b"{}")
+        except json.JSONDecodeError:
+            return exc.code, {}
+
+
 class EventContext:
     def __init__(self, slug: str, data: dict, password: str) -> None:
         self.slug = slug

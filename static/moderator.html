@@ -195,6 +195,24 @@
 
   </div><!-- /pageSlideshow -->
 
+
+<!-- Окно правки текста. Раньше стояли два системных prompt() подряд: сначала
+     текст, потом имя автора. Во-первых, имя менять не нужно, во-вторых,
+     системное окно на телефоне выглядит чужеродно и не даёт показать счётчик
+     символов. Своё окно рисует приложение и знает про предел. -->
+<div class="modal" id="editModal" hidden>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="editTitle">
+    <h2 id="editTitle">Исправить текст</h2>
+    <p class="muted" id="editHint"></p>
+    <textarea id="editInput" rows="3" maxlength="56" spellcheck="false"></textarea>
+    <p class="modal-count muted"><b id="editCount">0</b> из 56 символов</p>
+    <div class="modal-actions">
+      <button class="btn ghost" id="editCancel">Отмена</button>
+      <button class="btn" id="editSave">Сохранить</button>
+    </div>
+  </div>
+</div>
+
 </main>
 
 <script src="/static/common.js"></script>

@@ -19,7 +19,7 @@ import urllib.parse
 import urllib.request
 from http.cookiejar import CookieJar
 
-from testlib import admin_post
+from testlib import admin_get, admin_post
 
 ROOT = os.environ.get("LF_TEST_ROOT", "http://127.0.0.1:8123").rstrip("/")
 DEMO_PASSWORD = "654321"
@@ -109,10 +109,33 @@ def form(fields: list[tuple[str, str | bytes, str | None]]) -> tuple[bytes, str]
     return b"".join(parts), f"multipart/form-data; boundary={boundary}"
 
 
+def drop_old_demos() -> list[str]:
+    """Убрать демо-события прошлых запусков.
+
+    Сервер сам называет папку demo-pokaza-2, demo-pokaza-3 и так далее, и
+    каждый запуск оставлял после себя ещё одно. За месяц накопилось пять
+    почти одинаковых событий, и демо перестало показывать то, что надо.
+    """
+    st, events = admin_get("/api/admin/events")
+    if st != 200 or not isinstance(events, dict):
+        return []
+    gone = []
+    for ev in events.get("events", []):
+        slug = ev.get("slug", "")
+        if slug.startswith("demo-pokaza"):
+            admin_post(f"/api/admin/events/{slug}/delete", {})
+            gone.append(slug)
+    return gone
+
+
 def main() -> None:
     if len(sys.argv) > 2 and sys.argv[1] == "--remove":
         print("удалено:", admin_post(f"/api/admin/events/{sys.argv[2]}/delete", {}))
         return
+
+    gone = drop_old_demos()
+    if gone:
+        print("убраны демо прошлых запусков:", ", ".join(gone))
 
     st, created = admin_post("/api/admin/events",
                              {"title": "Демо показа", "password": DEMO_PASSWORD})

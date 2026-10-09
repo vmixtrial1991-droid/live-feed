@@ -1,14 +1,18 @@
-"""Проверка слайдшоу и архива фотографий (4.0).
+"""Проверка галереи слайдшоу и архива фотографий (4.0).
 
-Два обещания, которые дал интерфейс ведущему:
+Три обещания, которые дал интерфейс ведущему:
 
   * галочкой у фотографии она переезжает в отдельную галерею «слайдшоу»,
     оттуда её можно запустить на экран, и обычная лента на это время встаёт;
-  * удаление фотографии из ленты **не стирает файл**: оригиналы живут в
-    архиве, который можно забрать себе одним файлом или стереть целиком.
+  * **лента и галерея не связаны**: удаление сообщения из ленты не выбрасывает
+    снимок из галереи, снятие галочки не трогает ленту;
+  * **любое удаление оставляет файл на сервере**: убрали из ленты, сняли
+    галочку, стёрли из архива — оригинал жив, его можно забрать кнопкой
+    «сохранить и скачать все фотографии». Файл исчезает только от «удалить
+    все фото» и от удаления события.
 
-Проверяем и то, что обещание держится: файла нет после удаления из ленты не
-должно быть, а после «удалить все фото» — должен быть.
+Второе обещание раньше не выполнялось: слайдшоу держался флагом in_slideshow
+у строки ленты, и удаление строки уносило снимок из обоих мест сразу.
 
 Запуск: поднять сервер, затем
     python test_slideshow.py
@@ -319,9 +323,38 @@ try:
     st, _, raw = guest.get(f"/e/{slug}/media/{kept}")
     check("файл всё ещё отдаётся по ссылке", st == 200, str(st))
 
+    # ГЛАВНОЕ: лента и галерея не связаны. Раньше слайдшоу был флагом у строки
+    # ленты, и удаление строки уносило снимок из галереи вместе с флагом.
     scr = screen_state()
-    check("удалённый из ленты снимок ушёл и из галереи",
-          scr.get("slideshow_total") == 2, str(scr.get("slideshow_total")))
+    check("удаление из ленты НЕ выбрасывает снимок из галереи",
+          scr.get("slideshow_total") == 3, str(scr.get("slideshow_total")))
+    st, state_now = mod.get_json(f"/e/{slug}/api/moderator/state")
+    names = [g["image"] for g in (state_now or {}).get("gallery", [])]
+    check("и снимок по-прежнему в галерее",
+          kept in names, str(names)[:160])
+    check("при этом из ленты он ушёл",
+          all(m.get("id") != p1["id"] for m in (state_now or {}).get("messages", [])))
+
+    # и наоборот: снятие галочки не трогает ленту
+    st, state_now = mod.get_json(f"/e/{slug}/api/moderator/state")
+    gal = (state_now or {}).get("gallery", [])
+    victim = next(g for g in gal if g["image"] != kept)
+    mod.post_json(f"/e/{slug}/api/moderator/gallery/drop", {"gallery_id": victim["id"]})
+    st, after = mod.get_json(f"/e/{slug}/api/moderator/state")
+    check("снятие из галереи уменьшает галерею",
+          screen_state().get("slideshow_total") == 2,
+          str(screen_state().get("slideshow_total")))
+    check("и не трогает ленту",
+          any(m.get("id") == victim.get("source_id") for m in (after or {}).get("messages", []))
+          or victim["image"] in {m.get("image") for m in (after or {}).get("messages", [])},
+          "сообщение с этим снимком должно остаться в ленте")
+    st, _, raw = guest.get(f"/e/{slug}/media/{victim['image']}")
+    check("файл снятого из галереи остался на сервере", st == 200, str(st))
+
+    # вернём снимок в галерею, чтобы дальше счётчики были понятны
+    for m in (p2, p3):
+        mod.post_json(f"/e/{slug}/api/moderator/slideshow",
+                      {"message_id": m["id"], "on": "1"})
 
     print("\n=== Скачивание архива ===")
     st, headers, raw = mod.get(f"/e/{slug}/api/moderator/photos.zip")
@@ -361,8 +394,14 @@ try:
     st, _, _ = guest.get(f"/e/{slug}/media/{kept}")
     check("файл больше не отдаётся", st == 404, str(st))
 
+    check("галерея тоже очищена",
+          (res or {}).get("removed_gallery", 0) >= 2,
+          str((res or {}).get("removed_gallery")))
     scr = screen_state()
-    check("слайдшоу после стирания пустое", scr.get("slideshow_total") == 0)
+    check("слайдшоу после стирания пустое", scr.get("slideshow_total") == 0,
+          str(scr.get("slideshow_total")))
+    check("и слайдшоу выключено, а не показывает битые картинки",
+          scr.get("slideshow_visible") is False)
     st, feed = guest.get_json(f"/e/{slug}/api/messages")
     check("текстовое сообщение уцелело",
           any((m.get("body") or "").startswith("просто текст")

@@ -23,6 +23,11 @@ const state = {
   order: [],      // id в порядке показа
   screen: {},
   online: {},
+  // 4.0: имена файлов, которые лежат в галерее слайдшоу. Отдельный набор,
+  // а не флаг у сообщения: удаление из ленты не должно выбрасывать снимок
+  // из галереи, и наоборот
+  galleryImages: new Set(),
+  gallery: [],    // снимки галереи в порядке показа
 };
 
 const byId = (id) => state.messages.find((m) => m.id === id);
@@ -54,11 +59,12 @@ function renderList() {
 
     // Галочка есть только у фотографий: в слайдшоу идут фотографии и
     // фотографии с текстом, а текст без картинки туда попасть не может
+    const inGallery = state.galleryImages.has(m.image || '');
     const check = m.image
-      ? `<label class="or-check" title="${m.in_slideshow
+      ? `<label class="or-check" title="${inGallery
           ? 'Убрать из слайдшоу' : 'Добавить в слайдшоу'}">
            <input type="checkbox" data-act="slideshow" data-id="${id}"
-                  ${m.in_slideshow ? 'checked' : ''} aria-label="В слайдшоу">
+                  ${inGallery ? 'checked' : ''} aria-label="В слайдшоу">
          </label>`
       : '';
 
@@ -143,6 +149,10 @@ function applyState(payload) {
       .slice()
       .sort((a, b) => a.position - b.position)
       .map((m) => m.id);
+  }
+  if (payload.gallery) {
+    state.gallery = payload.gallery;
+    state.galleryImages = new Set(payload.gallery.map((g) => g.image));
   }
   if (payload.screen) state.screen = payload.screen;
   if (payload.online) state.online = payload.online;
@@ -252,27 +262,89 @@ async function remove(id) {
   }
 }
 
-async function editText(id) {
-  const m = byId(id);
-  if (!m) return;
-  const body = prompt(
-    `Текст сообщения (исправьте опечатку, не больше ${MAX_TEXT} симв.):`,
-    m.body || ''
-  );
-  if (body === null) return;
-  if (body.trim().length > MAX_TEXT) {
+/* ---------------- Правка текста ----------------
+   Раньше стояли два системных prompt() подряд — сначала текст, потом имя
+   автора. Имя менять не нужно, и системные окна на телефоне выглядят
+   чужеродно. Теперь одно своё окно со счётчиком символов.
+
+   Поддерживаются два вида правки: сообщение ленты и снимок галереи. Разница
+   только в адресе запроса и в подсказке. */
+const editModal = document.getElementById('editModal');
+const editInput = document.getElementById('editInput');
+const editCount = document.getElementById('editCount');
+const editHint = document.getElementById('editHint');
+const editSave = document.getElementById('editSave');
+const editTitle = document.getElementById('editTitle');
+const modalCount = editCount.parentElement;
+
+let editTarget = null;   // {kind: 'message'|'gallery', id, limit}
+
+function openEdit(kind, id, current, hint) {
+  editTarget = { kind, id, limit: MAX_TEXT };
+  editTitle.textContent = kind === 'gallery'
+    ? 'Исправить текст снимка' : 'Исправить текст';
+  editHint.textContent = hint || 'Имя автора не меняется.';
+  editInput.value = current || '';
+  // предел держим один на оба поля — тот, что прислал сервер
+  editInput.maxLength = String(MAX_TEXT);
+  updateEditCount();
+  editModal.hidden = false;
+  setTimeout(() => {
+    editInput.focus();
+    editInput.setSelectionRange(editInput.value.length, editInput.value.length);
+  }, 30);
+}
+
+function closeEdit() {
+  editModal.hidden = true;
+  editTarget = null;
+}
+
+function updateEditCount() {
+  const n = editInput.value.length;
+  const limit = (editTarget && editTarget.limit) || MAX_TEXT;
+  editCount.textContent = n;
+  // подсветка только когда упёрлись: раньше лишнее обрезалось тихо
+  modalCount.classList.toggle('is-full', n >= limit);
+  editInput.classList.toggle('is-full', n >= limit);
+  editSave.disabled = n > limit;
+}
+
+async function saveEdit() {
+  if (!editTarget) return;
+  const body = editInput.value.trim();
+  if (body.length > ((editTarget.limit) || MAX_TEXT)) {
     showToast(`Текст длиннее ${MAX_TEXT} символов — на экране не поместится`, 'warn');
     return;
   }
-  const author = prompt('Имя автора:', m.author);
-  if (author === null) return;
+  const { kind, id } = editTarget;
+  const path = kind === 'gallery' ? '/api/moderator/gallery/edit' : '/api/moderator/edit';
+  const fields = kind === 'gallery' ? { gallery_id: id, body } : { message_id: id, body };
   try {
-    applyState(await postForm(ev('/api/moderator/edit'), {
-      message_id: id, body: body.trim(), author: author.trim(),
-    }));
+    applyState(await postForm(ev(path), fields));
+    closeEdit();
+    showToast('Исправлено', 'ok', 2000);
   } catch (ex) {
     showToast(ex.message, 'warn');
   }
+}
+
+editInput.addEventListener('input', updateEditCount);
+document.getElementById('editCancel').addEventListener('click', closeEdit);
+editSave.addEventListener('click', saveEdit);
+editModal.addEventListener('click', (e) => { if (e.target === editModal) closeEdit(); });
+document.addEventListener('keydown', (e) => {
+  if (editModal.hidden) return;
+  if (e.key === 'Escape') { e.preventDefault(); closeEdit(); }
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); saveEdit(); }
+});
+
+function editText(id) {
+  const m = byId(id);
+  if (!m) return;
+  openEdit('message', id, m.body,
+    m.image ? 'Текст под фотографией. Имя автора не меняется.'
+            : 'Имя автора не меняется.');
 }
 
 document.addEventListener('click', (e) => {

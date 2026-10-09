@@ -104,7 +104,7 @@ def _runtime(event: Event) -> EventRuntime:
     """
     runtime = registry.get(event.slug)
     runtime.screen.sync_items(event.store.live_ids())
-    runtime.screen.sync_slideshow(event.store.slideshow_ids())
+    runtime.screen.sync_slideshow(event.store.gallery_ids())
     return runtime
 
 
@@ -472,6 +472,7 @@ async def api_send(
         "type": "new",
         "message": message,
         "messages": event.store.live_messages(),
+        "gallery": event.store.gallery_items(),
         "screen": runtime.screen.state(),
     }
     await runtime.hub.to_display(payload)
@@ -612,6 +613,7 @@ async def _refresh(event: Event) -> dict:
     payload = {
         "type": "refresh",
         "messages": event.store.live_messages(),
+        "gallery": event.store.gallery_items(),
         "stats": event.store.stats(),
         "screen": runtime.screen.state(),
     }
@@ -800,6 +802,7 @@ async def api_moderator_state(slug: str, request: Request):
     runtime = _runtime(event)
     return {
         "messages": event.store.live_messages(),
+        "gallery": event.store.gallery_items(),
         "stats": event.store.stats(),
         "screen": runtime.screen.state(),
         "online": runtime.hub.online,
@@ -826,6 +829,7 @@ async def api_reset_shown(slug: str, request: Request):
     payload = {
         "type": "refresh",
         "messages": event.store.live_messages(),
+        "gallery": event.store.gallery_items(),
         "stats": event.store.stats(),
         "screen": _runtime(event).screen.state(),
     }
@@ -852,34 +856,74 @@ async def api_slideshow_toggle(
     message_id: int = Form(...),
     on: str = Form("0"),
 ):
-    """Поставить или снять галочку «в слайдшоу».
+    """Поставить или снять галочку «в слайдшоу» у фотографии в ленте.
+
+    Галерея хранит фотографии сама по себе и не связана со строками ленты,
+    поэтому снимок, отмеченный здесь, переживёт удаление сообщения из ленты.
+    И наоборот: снятие галочки не трогает ленту.
 
     В галерею идут только фотографии: чистые и с текстом. Текст без картинки
-    поставить нельзя — на экране слайдшоу снимок занимает почти весь кадр, и
-    строка текста там ничего не добавляет. Об этом ведущий узнаёт из ответа,
-    а не из молчаливого «ничего не вышло».
+    поставить нельзя — об этом ведущий узнаёт из ответа, а не из молчаливого
+    «ничего не вышло».
     """
     event = _event_or_404(slug)
     _require_moderator(request, event)
     wanted = str(on).lower() in ("1", "true", "on", "yes", "show")
 
-    updated = event.store.set_slideshow(message_id, wanted)
-    if updated is None:
+    message = event.store.get_message(message_id)
+    if message is None or not message.get("image"):
         raise HTTPException(
             status_code=400,
             detail="В слайдшоу идут только фотографии и фотографии с текстом.",
         )
 
+    if wanted:
+        event.store.gallery_add(
+            message["image"], message.get("body", ""), message.get("author", "")
+        )
+    else:
+        event.store.gallery_remove_image(message["image"])
+
     result = await _refresh(event)
-    return {"ok": True, "message": updated, **result}
+    return {"ok": True, **result}
+
+
+@app.post("/e/{slug}/api/moderator/gallery/drop")
+async def api_gallery_drop(slug: str, request: Request, gallery_id: int = Form(...)):
+    """Убрать снимок из галереи. Файл в архиве остаётся."""
+    event = _event_or_404(slug)
+    _require_moderator(request, event)
+    dropped = event.store.gallery_remove(gallery_id)
+    result = await _refresh(event)
+    return {"ok": dropped, **result}
+
+
+@app.post("/e/{slug}/api/moderator/gallery/edit")
+async def api_gallery_edit(
+    slug: str, request: Request, gallery_id: int = Form(...), body: str = Form("")
+):
+    """Правка текста у снимка в галерее. Имя автора не трогаем."""
+    event = _event_or_404(slug)
+    _require_moderator(request, event)
+    body = (body or "").strip()
+    if len(body) > config.MAX_TEXT_LEN:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Текст длиннее {config.MAX_TEXT_LEN} символов не поместится на экран.",
+        )
+    updated = event.store.gallery_edit(gallery_id, body)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Снимка нет в галерее")
+    result = await _refresh(event)
+    return {"ok": True, "item": updated, **result}
 
 
 @app.post("/e/{slug}/api/moderator/slideshow-clear")
 async def api_slideshow_clear(slug: str, request: Request):
-    """Опустошить галерею слайдшоу. Фотографии при этом остаются в архиве."""
+    """Опустошить галерею слайдшоу. Фотографии остаются в архиве и в ленте."""
     event = _event_or_404(slug)
     _require_moderator(request, event)
-    cleared = event.store.clear_slideshow()
+    cleared = event.store.gallery_clear()
     result = await _refresh(event)
     return {"ok": True, "cleared": cleared, **result}
 
@@ -896,7 +940,7 @@ async def api_photos_summary(slug: str, request: Request):
         "ok": True,
         "count": info["count"],
         "bytes": info["bytes"],
-        "in_slideshow": len(event.store.slideshow_ids()),
+        "in_gallery": event.store.gallery_count(),
     }
 
 
@@ -931,12 +975,20 @@ async def api_photos_delete_all(slug: str, request: Request):
     event = _event_or_404(slug)
     _require_moderator(request, event)
     removed_files = archive.wipe(event.uploads_dir)
+    # Галерею тоже: её снимки ссылаются на стёртые файлы, и слайдшоу
+    # показывал бы битые картинки
+    removed_gallery = event.store.gallery_clear()
     removed_messages = event.store.delete_photo_messages()
+    # показать слайдшоу, пока файлов нет, нельзя — возвращаем ленту
+    runtime = registry.get(event.slug)
+    runtime.screen.slideshow_visible = False
+    runtime.screen.reset_deadline()
     result = await _refresh(event)
     return {
         "ok": True,
         "removed_files": removed_files,
         "removed_messages": removed_messages,
+        "removed_gallery": removed_gallery,
         **result,
     }
 
@@ -982,6 +1034,7 @@ async def ws_display(ws: WebSocket, slug: str) -> None:
             {
                 "type": "init",
                 "messages": event.store.live_messages(),
+                "gallery": event.store.gallery_items(),
                 "stats": event.store.stats(),
                 "screen": runtime.screen.state(),
             }
@@ -1044,6 +1097,7 @@ async def ws_moderator(ws: WebSocket, slug: str) -> None:
             {
                 "type": "init",
                 "messages": event.store.live_messages(),
+                "gallery": event.store.gallery_items(),
                 "stats": event.store.stats(),
                 "screen": runtime.screen.state(),
                 "invite": event.invite_link(events.base_url_from(_FakeRequest(ws))),

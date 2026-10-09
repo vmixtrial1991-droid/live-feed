@@ -285,3 +285,44 @@
 @media (prefers-reduced-motion: reduce) {
   .onair-row { transition: none; }
 }
+
+/* ---------- Окно правки текста (4.0) ---------- */
+.modal {
+  position: fixed; inset: 0; z-index: 200;
+  display: grid; place-items: center;
+  padding: 1rem;
+  background: rgba(4, 7, 14, .72);
+  backdrop-filter: blur(3px);
+}
+.modal-card {
+  width: min(460px, 100%);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .6);
+  padding: 1.2rem clamp(1rem, 3vw, 1.5rem) 1.1rem;
+  display: flex; flex-direction: column; gap: .7rem;
+}
+.modal-card h2 { margin: 0; font-size: 1.1rem; }
+.modal-card p { margin: 0; }
+#editInput {
+  font: inherit; font-size: 1.05rem; line-height: 1.35;
+  color: var(--text);
+  background: rgba(255, 255, 255, .05);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: .7rem .8rem;
+  resize: vertical;
+  min-height: 84px;
+}
+#editInput:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, .08);
+}
+/* до предела ещё есть куда расти, после — поле подсвечивается */
+#editInput.is-full { border-color: var(--warn); }
+.modal-count { font-size: .85rem; text-align: right; }
+.modal-count b { color: var(--text); }
+.modal-count.is-full b { color: var(--warn); }
+.modal-actions { display: flex; gap: .5rem; justify-content: flex-end; }

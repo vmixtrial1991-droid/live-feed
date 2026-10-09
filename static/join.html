@@ -50,11 +50,18 @@ const sub = document.getElementById('eventSubtitle');
 
    Раньше подпись «откройте по QR-коду» ставилась сразу, а ответ с
    настройками события приходил позже и затирал её пустым значением.
-   Посетитель видел пустую карточку без единого слова. */
+   Посетитель видел пустую карточку без единого слова.
+
+   Решение принимает сервер: он знает, годен ли код, и говорит это полем
+   inviteOk. Проверять надо именно его — inviteReason при верном коде
+   приходит пустой строкой, а пустая строка ложна, и страница объявляла
+   годный код негодным. */
 function explain() {
-  const why = (window.LF && window.LF.inviteReason)
-    || (invite ? 'bad_code' : 'no_code');
-  if (why === 'no_code') {
+  const lf = window.LF || {};
+  const ok = ('inviteOk' in lf) ? !!lf.inviteOk : !!invite;
+  if (ok) return false;                 // подписью займётся конфиг события
+  sub.dataset.locked = '1';             // конфиг её больше не затрёт
+  if (!invite) {
     form.hidden = true;
     sub.textContent = 'Откройте эту страницу через QR-код приглашения.';
   } else {
@@ -63,17 +70,14 @@ function explain() {
     sub.textContent =
       'Эта ссылка-приглашение больше не работает. Попросите новый QR-код.';
   }
+  return true;
 }
 
 api(ev('/api/config')).then(cfg => {
   document.getElementById('eventTitle').textContent = cfg.event_title || 'Живая лента';
-  // настройки события имеют право записать подпись только если никто
-  // ещё ничего важного туда не написал
   if (!sub.dataset.locked) sub.textContent = cfg.event_subtitle || '';
 }).catch(() => { explain(); });
 
-// подпись занята нашим объяснением: конфиг её больше не затрёт
-sub.dataset.locked = '1';
 explain();
 
 form.addEventListener('submit', async (e) => {

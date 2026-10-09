@@ -463,9 +463,11 @@ document.getElementById('rotateInvite').addEventListener('click', async () => {
   if (!confirm('Сменить код приглашения?\n\nСтарые QR-коды перестанут работать.')) return;
   try {
     const res = await postForm(ev('/api/moderator/rotate-invite'), {});
+    // новый код и QR показывает loadInvite: он перерисовывает и ссылку,
+    // и картинку. Раньше здесь стояла строка, ищущая несуществующий
+    // элемент #qrCode, — она молча ничего не делала
     loadInvite();
-    showToast('Новый код готов', 'ok');
-    if (res.code) document.getElementById('qrCode') && (document.getElementById('qrCode').textContent = res.code);
+    showToast(res.code ? `Новый код: ${res.code}` : 'Новый код готов', 'ok', 4000);
   } catch (ex) {
     showToast(ex.message, 'warn');
   }

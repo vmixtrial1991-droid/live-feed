@@ -156,6 +156,11 @@ function renderAll() {
 
 function applyState(payload) {
   if (!payload) return;
+  // Заставка приезжает в состоянии показа. Раньше она обновлялась только
+  // после загрузки или удаления в этой же вкладке: вышел ведущий из сессии,
+  // вошёл снова — панель писала «заставка не загружена», хотя на экране
+  // висела картинка. Теперь панель показывает ровно то, что на экране.
+  if ('splash' in payload) renderSplash(payload.splash);
   if (payload.messages) {
     state.messages = payload.messages;
     // порядок показа: позиция возрастает
@@ -207,7 +212,14 @@ const splashNone = document.getElementById('splashNone');
 const splashClear = document.getElementById('splashClear');
 const splashStatus = document.getElementById('splashStatus');
 
+/** Показывает заставку события такой, какая она сейчас на сервере.
+
+    Сравниваем с тем, что уже на экране: панель опрашивает состояние каждые
+    15 секунд, и без сравнения картинка мигала бы заново при каждом опросе.
+    */
 function renderSplash(url) {
+  if (splashThumb.getAttribute('data-url') === (url || '')) return;
+  splashThumb.dataset.url = url || '';
   splashThumb.hidden = !url;
   splashNone.hidden = !!url;
   splashClear.hidden = !url;
@@ -449,8 +461,10 @@ connectWS(ev('/ws/moderator'), {
         applyState(msg);
         break;
       case 'screen':
-        state.screen = msg.screen || state.screen;
-        renderAll();
+        // заставку ведущий мог сменить или убрать, пока эта вкладка открыта.
+        // Через applyState, а не присваиванием: иначе вторая вкладка кабинета
+        // продолжала бы показывать ту заставку, которой уже нет.
+        applyState(msg);
         break;
       case 'shown': {
         const m = byId(msg.id);

@@ -315,6 +315,27 @@ check("slideshow-panel.js: пауза видна только при запущ�
       re.search(r"ssPlayBtn\.hidden\s*=\s*!on", slide_js) is not None,
       "кнопка паузы при выключенном слайдшоу ничего не значит")
 
+print("\n=== Заставка (4.0.1) ===")
+mod_js3 = (STATIC / "moderator.js").read_text(encoding="utf-8")
+# Панель ведущего обязана показывать ровно ту заставку, что сейчас на экране.
+# Раньше renderSplash звался только после загрузки или удаления в этой же
+# вкладке: вышел ведущий из сессии, вошёл — «Заставка не загружена», хотя
+# на экране висела картинка.
+check("moderator.js: заставка берётся из состояния показа",
+      re.search(r"if \('splash' in payload\) renderSplash", mod_js3) is not None,
+      "после входа панель показывала бы «не загружена» при загруженной заставке")
+check("moderator.js: повторный опрос не мигает картинкой",
+      "dataset.url" in mod_js3,
+      "состояние опрашивается каждые 15 секунд, картинка не должна мигать")
+check("screen.js: заставка приезжает по сокету",
+      "setSplashUrl(msg.splash)" in screen_js,
+      "загрузили или убрали заставку — открытый экран обязан увидеть сразу")
+check("screen.js: ушедшая заставка убирается, а не висит",
+      re.search(r"function setSplashUrl\([^)]*\)[\s\S]{0,320}?applySplashImage\(\)",
+                screen_js) is not None)
+check("moderator.html: подпись о пустой заставке на месте",
+      'id="splashNone"' in mod_html)
+
 # moderator.js и slideshow-panel.js — классические скрипты, и top-level const
 # у них попадает в один общий лексический объём. Одинаковое имя во втором
 # файле не «перекрывается», а роняет весь файл: страница молча теряет

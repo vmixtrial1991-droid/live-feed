@@ -616,6 +616,7 @@ async def _refresh(event: Event) -> dict:
         "gallery": event.store.gallery_items(),
         "stats": event.store.stats(),
         "screen": runtime.screen.state(),
+        "splash": event.splash_url(),
     }
     await runtime.hub.to_display(payload)
     await runtime.hub.to_moderator(payload)
@@ -1061,6 +1062,7 @@ async def ws_display(ws: WebSocket, slug: str) -> None:
                 "gallery": event.store.gallery_items(),
                 "stats": event.store.stats(),
                 "screen": runtime.screen.state(),
+                "splash": event.splash_url(),
             }
         )
         await _pump(ws)
@@ -1124,6 +1126,7 @@ async def ws_moderator(ws: WebSocket, slug: str) -> None:
                 "gallery": event.store.gallery_items(),
                 "stats": event.store.stats(),
                 "screen": runtime.screen.state(),
+                "splash": event.splash_url(),
                 "invite": event.invite_link(events.base_url_from(_FakeRequest(ws))),
                 "online": runtime.hub.online,
             }

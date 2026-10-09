@@ -36,6 +36,19 @@ api(ev('/api/config')).then((cfg) => {
   if (screenState.splash_visible) setSplash(true);
 });
 
+/** Принимает заставку из состояния показа.
+
+    Заставку меняют на ходу: загрузили новую, убрали старую — открытый экран
+    обязан увидеть это сразу, а не после перезагрузки страницы. Без файла
+    показываем название события.
+    */
+function setSplashUrl(url) {
+  const next = url || null;
+  if (next === splashUrl) return;
+  splashUrl = next;
+  applySplashImage();
+}
+
 /** Надевает картинку заставки. Без файла показываем название события. */
 function applySplashImage() {
   if (splashUrl) {
@@ -432,6 +445,7 @@ connectWS(ev('/ws/display'), {
         // init приходит и при переподключении — старые слайды надо забыть
         messages.clear();
         gallery.clear();
+        setSplashUrl(msg.splash);
         (msg.messages || []).forEach((m) => messages.set(m.id, m));
         (msg.gallery || []).forEach((g) => gallery.set(g.id, g));
         order = byPosition([...messages.keys()]);
@@ -445,6 +459,7 @@ connectWS(ev('/ws/display'), {
         const fresh = new Set();
         (msg.messages || []).forEach((m) => { messages.set(m.id, m); fresh.add(m.id); });
         for (const id of [...messages.keys()]) if (!fresh.has(id)) messages.delete(id);
+        setSplashUrl(msg.splash);
         // галерея приходит целиком: снимок мог уйти из ленты и остаться здесь
         gallery.clear();
         (msg.gallery || []).forEach((g) => gallery.set(g.id, g));
@@ -456,7 +471,7 @@ connectWS(ev('/ws/display'), {
 
       case 'screen':
         // заставку ведущий мог сменить или убрать, пока экран был открыт
-        if ('splash' in msg) splashUrl = msg.splash || null;
+        if ('splash' in msg) setSplashUrl(msg.splash);
         screenState = msg.screen || screenState;
         showCurrent();
         break;

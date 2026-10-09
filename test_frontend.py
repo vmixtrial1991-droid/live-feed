@@ -315,6 +315,58 @@ check("slideshow-panel.js: пауза видна только при запущ�
       re.search(r"ssPlayBtn\.hidden\s*=\s*!on", slide_js) is not None,
       "кнопка паузы при выключенном слайдшоу ничего не значит")
 
+print("\n=== Полоса «Сейчас на экране» (4.0.1) ===")
+screen_str_mod = strip_js_comments_only((STATIC / "moderator.js").read_text(encoding="utf-8"))
+mod_css4 = (STATIC / "moderator.css").read_text(encoding="utf-8")
+# Полоса обязана показывать ровно то, что видно на экране. Заставка и QR —
+# тоже: ведущий нажимал «Заставка», а полоса продолжала показывать слайд,
+# которого на экране давно нет.
+check("moderator.html: у полосы есть подпись", 'id="nowLabel"' in mod_html)
+check("moderator.html: у полосы есть режим", 'id="nowStrip"' in mod_html
+      and 'data-mode="none"' in mod_html)
+check("moderator.js: полоса знает про заставку",
+      re.search(r"if \(scr\.splash_visible\)", screen_str_mod) is not None)
+check("moderator.js: полоса знает про QR",
+      re.search(r"if \(scr\.qr_visible\)", screen_str_mod) is not None)
+# порядок как слои на экране: заставка (z-index 20) поверх QR (z-index 8)
+i_splash = screen_str_mod.find("if (scr.splash_visible)")
+i_qr = screen_str_mod.find("if (scr.qr_visible)")
+i_gal = screen_str_mod.find("const inShow = !!scr.slideshow_visible")
+check("moderator.js: заставка проверяется раньше QR",
+      i_splash != -1 and i_qr != -1 and i_splash < i_qr,
+      "на экране заставка лежит поверх QR")
+check("moderator.js: и обе раньше галереи и ленты",
+      i_qr != -1 and i_gal != -1 and i_qr < i_gal)
+check("moderator.js: QR в полосе — тот же, что на экране",
+      "api/qr.svg" in screen_str_mod and "state.inviteCode" in screen_str_mod)
+check("moderator.js: заставка в полосе — та, что на сервере",
+      "state.splash" in screen_str_mod)
+# splash_url() уже отдаёт адрес с префиксом события. Обернём его в ev() —
+# выйдет /e/slug/e/slug/splash.jpg, и картинка просто не загрузится.
+# QR, наоборот, оборачивать надо: он приходит без префикса.
+check("moderator.js: адрес заставки не оборачивается в ev()",
+      re.search(r"setThumb\(\s*ev\(\s*(?:url|state\.splash)\b", screen_str_mod) is None,
+      "splash_url() уже с префиксом события, ev() даст двойной путь")
+check("moderator.js: а QR оборачивается — он приходит без префикса",
+      re.search(r"setThumb\(\s*ev\(\s*`/api/qr\.svg", screen_str_mod) is not None)
+check("moderator.css: у полосы есть вид под каждый режим",
+      all(f'data-mode="{m}"' in mod_css4
+          for m in ("splash", "qr", "gallery")))
+check("moderator.css: заставка и QR не обрезаются",
+      re.search(r'\.now-thumb\[data-fit="contain"\]', mod_css4) is not None,
+      "обрезанный QR или заставка не узнаются")
+
+print("\n=== Кнопка «Витрина» убрана из кабинета (4.0.1) ===")
+check("moderator.html: кнопки «Витрина» в шапке нет",
+      'id="toFeed"' not in mod_html,
+      "ссылка на публичную страницу в кабинете ведущего ничего не делала")
+check("moderator.html: кнопка «Экран» осталась",
+      'id="toScreen"' in mod_html,
+      "ведущему нужно открыть экран в соседней вкладке")
+check("common.js: ссылка на витрину для страницы отправки жива",
+      "toFeed: '/'" in (STATIC / "common.js").read_text(encoding="utf-8"),
+      "страница отправки ведёт гостя на витрину, это другая надобность")
+
 print("\n=== Заставка (4.0.1) ===")
 mod_js3 = (STATIC / "moderator.js").read_text(encoding="utf-8")
 # Панель ведущего обязана показывать ровно ту заставку, что сейчас на экране.
@@ -322,7 +374,8 @@ mod_js3 = (STATIC / "moderator.js").read_text(encoding="utf-8")
 # вкладке: вышел ведущий из сессии, вошёл — «Заставка не загружена», хотя
 # на экране висела картинка.
 check("moderator.js: заставка берётся из состояния показа",
-      re.search(r"if \('splash' in payload\) renderSplash", mod_js3) is not None,
+      re.search(r"if \('splash' in payload\)[\s\S]{0,160}?renderSplash\(",
+                mod_js3) is not None,
       "после входа панель показывала бы «не загружена» при загруженной заставке")
 check("moderator.js: повторный опрос не мигает картинкой",
       "dataset.url" in mod_js3,

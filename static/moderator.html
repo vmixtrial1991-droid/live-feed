@@ -19,7 +19,9 @@
   </div>
   <div class="topbar-right">
     <span class="pill" id="connPill" data-state="connecting">соединяемся…</span>
-    <a class="btn ghost" id="toFeed" href="#" target="_blank">Витрина</a>
+    <!-- «Витрина» была ссылкой на публичную страницу события. В кабинете
+         ведущего она ничего не делала: гости туда и так уходят по своей
+         ссылке, а лишняя кнопка в шапке только занимала место. -->
     <a class="btn ghost" id="toScreen" href="#" target="_blank">Экран</a>
     <button class="btn ghost" id="logoutBtn">Выйти</button>
   </div>
@@ -71,11 +73,13 @@
     </div>
   </section>
 
-  <!-- Сейчас на экране -->
-  <section class="now-strip" id="nowStrip">
+  <!-- Сейчас на экране. Показывает ровно то, что видно: заставку, QR,
+       галерею слайдшоу или сообщение ленты — в том порядке, в каком
+       слои лежат на самом экране. -->
+  <section class="now-strip" id="nowStrip" data-mode="none">
     <div class="now-thumb" id="nowThumb" hidden></div>
     <div class="now-body">
-      <p class="now-label">Сейчас на экране</p>
+      <p class="now-label" id="nowLabel">Сейчас на экране</p>
       <p class="now-text" id="nowText">—</p>
       <p class="muted" id="nowMeta">Слайд 0 из 0</p>
     </div>

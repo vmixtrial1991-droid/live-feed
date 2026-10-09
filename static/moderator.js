@@ -3,9 +3,11 @@
 
 const onairBox = document.getElementById('onair');
 const onairEmpty = document.getElementById('onairEmpty');
+const nowStrip = document.getElementById('nowStrip');
 const nowThumb = document.getElementById('nowThumb');
 const nowText = document.getElementById('nowText');
 const nowMeta = document.getElementById('nowMeta');
+const nowLabel = document.getElementById('nowLabel');
 const playBtn = document.getElementById('playBtn');
 const playGlyph = document.getElementById('playGlyph');
 const playLabel = document.getElementById('playLabel');
@@ -28,6 +30,8 @@ const state = {
   // из галереи, и наоборот
   galleryImages: new Set(),
   gallery: [],    // снимки галереи в порядке показа
+  splash: '',     // адрес заставки или пусто, если её нет
+  inviteCode: '', // код гостя — рисуется в полосе, когда включён QR
 };
 
 const byId = (id) => state.messages.find((m) => m.id === id);
@@ -86,33 +90,77 @@ function renderList() {
     : `показано ${shownCount} из ${state.order.length}`;
 }
 
-/* ---------------- Полоса «сейчас на экране» ---------------- */
+/* ---------------- Полоса «сейчас на экране» ----------------
+   Полоса обязана показывать ровно то, что видно на экране, а не только
+   сообщения ленты. Порядок — как слои на самом экране:
+
+     заставка (z-index 20) поверх QR (z-index 8), а под ними галерея
+     слайдшоу или сообщение ленты.
+
+   Раньше заставку и QR полоса не знала: ведущий нажимал «Заставка», а
+   «сейчас на экране» продолжало показывать слайд, который давно не виден. */
+function setThumb(src, fit) {
+  if (!src) {
+    nowThumb.hidden = true;
+    nowThumb.replaceChildren();
+    return;
+  }
+  nowThumb.hidden = false;
+  nowThumb.dataset.fit = fit || 'cover';
+  nowThumb.innerHTML = `<img src="${src}" alt="">`;
+}
+
 function renderNow() {
+  const scr = state.screen;
+
+  if (scr.splash_visible) {
+    nowStrip.dataset.mode = 'splash';
+    nowLabel.textContent = 'Сейчас на экране';
+    // заставка может быть картинкой, а может быть просто названием события.
+    // Адрес приходит от сервера уже с префиксом события, поэтому ev() здесь
+    // не нужен: обернём — выйдет /e/slug/e/slug/splash.jpg
+    const url = state.splash || '';
+    setThumb(url, 'contain');
+    nowText.textContent = url ? 'Заставка' : 'Название события';
+    nowMeta.textContent = url
+      ? 'Заставка на весь экран'
+      : 'Заставка не загружена — показываем название события';
+    return;
+  }
+
+  if (scr.qr_visible) {
+    nowStrip.dataset.mode = 'qr';
+    nowLabel.textContent = 'Сейчас на экране';
+    // тот же QR, что видит гость, и то же, что рисует экран
+    setThumb(ev(`/api/qr.svg?v=${encodeURIComponent(state.inviteCode || '')}`), 'contain');
+    nowText.textContent = 'QR-код для гостей';
+    nowMeta.textContent = 'Лента стоит, гости сканируют и отправляют своё';
+    return;
+  }
+
   // Пока идёт слайдшоу, полоса показывает снимок из галереи, а не сообщение
   // ленты: «сейчас на экране» должно значить то, что на экране и есть.
-  const inShow = !!state.screen.slideshow_visible;
+  const inShow = !!scr.slideshow_visible;
   const item = inShow
-    ? (state.gallery || []).find((g) => g.id === state.screen.slideshow_current_id)
+    ? (state.gallery || []).find((g) => g.id === scr.slideshow_current_id)
     : null;
-  const m = item || byId(state.screen.current_id);
+  const m = item || byId(scr.current_id);
+
+  nowStrip.dataset.mode = m ? (inShow ? 'gallery' : 'feed') : 'none';
+  nowLabel.textContent = 'Сейчас на экране';
+
   if (!m) {
     nowText.textContent = '—';
     nowMeta.textContent = inShow
       ? 'Слайдшоу выключено, на экране лента'
       : 'Слайд 0 из 0';
-    nowThumb.hidden = true;
+    setThumb('');
     return;
   }
   nowText.textContent = m.body || '📷 фото';
-  if (m.image) {
-    nowThumb.hidden = false;
-    nowThumb.innerHTML = `<img src="${ev(`/media/${encodeURIComponent(m.image)}`)}" alt="">`;
-  } else {
-    nowThumb.hidden = true;
-    nowThumb.replaceChildren();
-  }
+  setThumb(m.image ? ev(`/media/${encodeURIComponent(m.image)}`) : '');
   if (inShow) {
-    const pos = (state.screen.slideshow_index || 0) + 1;
+    const pos = (scr.slideshow_index || 0) + 1;
     nowMeta.textContent =
       `Галерея: снимок ${pos} из ${(state.gallery || []).length} · ${m.author || 'без подписи'}`;
     return;
@@ -160,7 +208,10 @@ function applyState(payload) {
   // после загрузки или удаления в этой же вкладке: вышел ведущий из сессии,
   // вошёл снова — панель писала «заставка не загружена», хотя на экране
   // висела картинка. Теперь панель показывает ровно то, что на экране.
-  if ('splash' in payload) renderSplash(payload.splash);
+  if ('splash' in payload) {
+    state.splash = payload.splash || '';
+    renderSplash(payload.splash);
+  }
   if (payload.messages) {
     state.messages = payload.messages;
     // порядок показа: позиция возрастает
@@ -394,9 +445,12 @@ function renderInvite(link, code) {
   if (!link) return;
   document.getElementById('qrLink').textContent = link;
   document.getElementById('qrOpen').href = link;
+  if (code) state.inviteCode = code;
   const src = ev(`/api/qr.svg?v=${encodeURIComponent(code || '')}`);
   document.getElementById('qrImg').src = src;
   document.getElementById('qrDownload').href = src;
+  // код мог смениться: полоса «сейчас на экране» рисует тот же QR
+  renderNow();
 }
 
 function loadInvite() {

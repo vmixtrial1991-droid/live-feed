@@ -752,6 +752,19 @@ async def api_screen_control(slug: str, request: Request, action: str = Form(...
             )
         screen.slideshow_visible = want
         screen._deadline = time.monotonic() + screen.interval
+    elif action == "slideshow-show":
+        # показать снимок из галереи. Если слайдшоу не запущено — запускаем:
+        # иначе ведущий нажал «показать сейчас», а на экране обычная лента
+        if not screen.slideshow_visible:
+            if not screen.slideshow_items:
+                raise HTTPException(
+                    status_code=400,
+                    detail="В слайдшоу пока нет ни одной фотографии.",
+                )
+            screen.slideshow_visible = True
+        if int(value or 0) not in screen.slideshow_items:
+            raise HTTPException(status_code=400, detail="Этот снимок не в галерее.")
+        await screen.slideshow_go_to(int(value))
     else:
         raise HTTPException(status_code=400, detail="Неизвестное действие")
 

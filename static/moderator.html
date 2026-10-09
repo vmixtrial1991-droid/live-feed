@@ -27,6 +27,17 @@
 
 <main class="mod-main">
 
+  <!-- Вкладки 4.0: обычная лента и отдельная галерея слайдшоу -->
+  <div class="tabs" role="tablist">
+    <button class="tab is-active" id="tabFeed" role="tab" aria-selected="true">Лента</button>
+    <button class="tab" id="tabSlideshow" role="tab" aria-selected="false">
+      Слайдшоу <span class="tab-badge" id="tabSlideshowCount">0</span>
+    </button>
+  </div>
+
+  <!-- ================= Вкладка «Лента» ================= -->
+  <div class="tab-page is-active" id="pageFeed">
+
   <!-- Управление показом -->
   <section class="control-bar">
     <div class="control-buttons">
@@ -121,9 +132,63 @@
     </div>
   </section>
 
+  </div><!-- /pageFeed -->
+
+  <!-- ================= Вкладка «Слайдшоу» ================= -->
+  <div class="tab-page" id="pageSlideshow">
+
+    <section class="control-bar slideshow-bar">
+      <div class="control-side">
+        <button class="btn" id="slideshowRunBtn" title="Показать галерею на экране">
+          Запустить слайдшоу на экране
+        </button>
+        <button class="btn ghost" id="slideshowClearBtn" title="Убрать все снимки из галереи">
+          Опустошить галерею
+        </button>
+      </div>
+      <p class="muted slideshow-state" id="slideshowState">
+        Слайдшоу выключено, на экране обычная лента.
+      </p>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Галерея слайдшоу</h2>
+        <p class="muted slideshow-hint">
+          Снимок попадает сюда галочкой напротив фотографии во вкладке «Лента».
+          На экране показываются только фотографии и фотографии с текстом.
+        </p>
+      </div>
+      <div class="gallery" id="gallery"></div>
+      <div id="galleryEmpty" class="empty small">
+        <p>В галерее пока никого.</p>
+        <p class="muted">Откройте «Ленту» и поставьте галочку напротив фотографии.</p>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Архив фотографий</h2>
+      </div>
+      <p class="muted splash-hint">
+        Все присланные фотографии хранятся на сервере и не зависят от ленты:
+        удаление из ленты или из слайдшоу стирает только запись на экране,
+        оригинал остаётся здесь. Заберите их себе — и тогда стирайте.
+      </p>
+      <p class="archive-count" id="archiveCount">—</p>
+      <div class="row-actions">
+        <a class="btn" id="archiveDownload" href="#" download>Сохранить и скачать все фотографии</a>
+        <button class="btn bad" id="archiveWipe">Удалить все фото</button>
+      </div>
+      <p class="muted small" id="archiveStatus"></p>
+    </section>
+
+  </div><!-- /pageSlideshow -->
+
 </main>
 
 <script src="/static/common.js"></script>
 <script src="/static/moderator.js"></script>
+<script src="/static/slideshow-panel.js"></script>
 </body>
 </html>

@@ -52,7 +52,17 @@ function renderList() {
       ? '<span class="or-badge or-badge-shown">показано</span>'
       : '<span class="or-badge or-badge-new">новое</span>';
 
-    el.innerHTML = `<span class="or-pos">${i + 1}</span>${photo}${text}
+    // Галочка есть только у фотографий: в слайдшоу идут фотографии и
+    // фотографии с текстом, а текст без картинки туда попасть не может
+    const check = m.image
+      ? `<label class="or-check" title="${m.in_slideshow
+          ? 'Убрать из слайдшоу' : 'Добавить в слайдшоу'}">
+           <input type="checkbox" data-act="slideshow" data-id="${id}"
+                  ${m.in_slideshow ? 'checked' : ''} aria-label="В слайдшоу">
+         </label>`
+      : '';
+
+    el.innerHTML = `<span class="or-pos">${i + 1}</span>${check}${photo}${text}
       <span class="or-author">${escapeHTML(m.author)}</span>
       ${badge}
       <span class="or-actions">
@@ -116,6 +126,13 @@ function renderAll() {
   renderList();
   renderNow();
   renderControls();
+  // 4.0: галерея слайдшоу живёт в отдельном файле и подключается скриптом
+  // ниже. Проверяем наличие: страница может быть открыта со старой разметкой,
+  // и тогда вкладки просто не будет — падать из-за этого нельзя.
+  if (typeof renderGallery === 'function') {
+    renderGallery();
+    renderSlideshowBar();
+  }
 }
 
 function applyState(payload) {
@@ -262,6 +279,9 @@ async function editText(id) {
 document.addEventListener('click', (e) => {
   const btn = e.target.closest('[data-act]');
   if (!btn) return;
+  // input у галочки: с ним работает отдельный обработчик change, иначе
+  // щёлчок по квадратику попал бы ещё и в общий переключатель действий
+  if (btn.tagName === 'INPUT') return;
   const id = Number(btn.dataset.id);
   switch (btn.dataset.act) {
     case 'up': move(id, 'up'); break;

@@ -72,7 +72,12 @@ function setQrVisible(visible) {
 const messages = new Map();   // id -> сообщение
 let order = [];               // id в порядке показа
 let shownId = null;
-let screenState = { playing: true, interval: 12, total: 0, index: 0 };
+let screenState = {
+  playing: true, interval: 12, total: 0, index: 0,
+  // 4.0: поля слайдшоу. Значения по умолчанию — чтобы на старте
+  // код не спотыкался о состояние, ещё не пришедшее от сервера
+  slideshow_visible: false, slideshow_current_id: null, slideshow_total: 0,
+};
 let modCookie = null;         // есть ли доступ к управлению экраном с этой страницы
 
 function byPosition(ids) {
@@ -341,6 +346,23 @@ function showCurrent(state) {
   setQrVisible(!!screenState.qr_visible);
   // заставка — тоже отдельный слой поверх показа
   setSplash(!!screenState.splash_visible);
+
+  // 4.0: слайдшоу занимает кадр целиком. Если галерея пуста, честно
+  // говорим об этом, а не показываем пустой кадр: ведущий подумает, что
+  // экран сломался
+  if (screenState.slideshow_visible) {
+    const sid = screenState.slideshow_current_id;
+    if (sid == null || !messages.has(sid)) {
+      setOverlay(true, 'Слайдшоу пустое',
+        'В галерее пока нет ни одной фотографии.',
+        'Откройте кабинет ведущего, вкладка «Слайдшоу»');
+      return;
+    }
+    setOverlay(false);
+    if (sid !== shownId) render(sid);
+    return;
+  }
+
   if (!order.length) {
     setOverlay(true, 'Пока пусто', 'Сообщения и фото появятся здесь автоматически.',
       'Отправьте первое — и оно сразу будет на экране');

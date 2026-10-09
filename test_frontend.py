@@ -363,9 +363,25 @@ check("moderator.html: кнопки «Витрина» в шапке нет",
 check("moderator.html: кнопка «Экран» осталась",
       'id="toScreen"' in mod_html,
       "ведущему нужно открыть экран в соседней вкладке")
-check("common.js: ссылка на витрину для страницы отправки жива",
-      "toFeed: '/'" in (STATIC / "common.js").read_text(encoding="utf-8"),
-      "страница отправки ведёт гостя на витрину, это другая надобность")
+check("common.js: ссылки на витрину из интерфейса убраны",
+      "toFeed" not in (STATIC / "common.js").read_text(encoding="utf-8"),
+      "ссылка вела с отправки и из кабинета в сторону от дела")
+
+# 4.0.1: со страницы отправки убрана кнопка «В начало»
+send_html = (STATIC / "send.html").read_text(encoding="utf-8")
+check("send.html: кнопки «В начало» нет",
+      "В начало" not in send_html and "toSendFeed" not in send_html,
+      "зритель на странице отправки должен отправлять, а не уходить смотреть")
+check("send.html: шапка осталась", 'id="whoami"' in send_html)
+check("common.js: на странице отправки больше нечего оборачивать в ev()",
+      re.search(r"const links = \{[\s\S]*?\};",
+                strip_js_comments_only(
+                    (STATIC / "common.js").read_text(encoding="utf-8"))) is not None
+      and "toSendFeed" not in (STATIC / "common.js").read_text(encoding="utf-8"))
+check("common.js: рабочие ссылки на месте",
+      all(x in (STATIC / "common.js").read_text(encoding="utf-8")
+          for x in ("toSend: '/send'", "toSendBig: '/send'", "toScreen: '/screen'")),
+      "убирая витрину, не снеси страницу отправки и экран")
 
 print("\n=== Заставка (4.0.1) ===")
 mod_js3 = (STATIC / "moderator.js").read_text(encoding="utf-8")

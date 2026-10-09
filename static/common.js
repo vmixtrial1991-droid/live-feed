@@ -163,11 +163,12 @@ function wireEventLinks() {
   const links = {
     toSend: '/send',
     toSendBig: '/send',
-    toFeed: '/',
     toScreen: '/screen',
-    // страница отправки ведёт на витрину события
-    toSendFeed: '/',
   };
+  // Ссылки на витрину события убраны из интерфейса: в кабинете ведущего
+  // она ничего не давала, а зрителю на странице отправки уводила от
+  // отправки. Сама страница по адресу открывается — если её и оттуда
+  // закрывать надо, это отдельное решение.
   for (const [id, path] of Object.entries(links)) {
     const el = document.getElementById(id);
     if (el) el.href = ev(path);

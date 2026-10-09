@@ -347,10 +347,17 @@ async def page_join(slug: str, request: Request, t: str = ""):
 
 
 @app.get("/e/{slug}/send", response_class=HTMLResponse)
-async def page_send(slug: str, request: Request):
+async def page_send(slug: str, request: Request, t: str = ""):
     event = _prepare(_event_or_404(slug))
     if auth.current_participant(request, event) is None:
-        return RedirectResponse(f"/e/{event.slug}/join", status_code=302)
+        # Код приглашения надо передать дальше. Раньше он тут терялся, и
+        # цепочка выглядела так: /send?t=КОД → /join (без кода) → витрина.
+        # То есть страница отправки сама выкидывала гостя на витрину —
+        # ровно то, чего мы добиваемся, убрав оттуда кнопку.
+        target = f"/e/{event.slug}/join"
+        if t:
+            target += f"?t={t}"
+        return RedirectResponse(target, status_code=302)
     return _page("send.html", base=f"/e/{event.slug}")
 
 

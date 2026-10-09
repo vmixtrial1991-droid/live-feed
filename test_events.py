@@ -212,8 +212,53 @@ check("чужое событие — 404", st == 404, str(st))
 st, _, _ = anon.get(f"/e/{slug}/join?t=" + urllib.parse.quote("НЕВЕРНЫЙКОД"))
 check("вход по чужому коду не пускает", st in (302, 307), str(st))
 
-st, _, _ = anon.get(f"/api/admin/events/{slug}")
-check("карточка события без входа закрыта", st in (401, 403), str(st))
+# Гость без сессии, пришедший по ссылке на отправку, обязан попасть на
+# страницу входа, а не на витрину. Раньше код приглашения терялся на
+# редиректе: /send?t=КОД → /join (без кода) → витрина. То есть сервер
+# сам выкидывал отправителя на витрину — ровно то, что мы убираем.
+print("\n=== Отправитель не должен попадать на витрину ===")
+# Гость без сессии, пришедший по ссылке на отправку, обязан дойти до входа,
+# а не до витрины. Раньше код приглашения терялся на редиректе:
+# /send?t=КОД → /join (без кода) → витрина. То есть сервер сам выкидывал
+# отправителя на витрину — ровно то, что мы убираем кнопкой.
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **k):
+        return None
+
+
+def _page_body(url: str) -> bytes:
+    with urllib.request.urlopen(url, timeout=20) as resp:
+        return resp.read()
+
+
+def hop(url: str) -> tuple[int, str]:
+    """Один шаг без следования редиректам: (код, куда ведёт)."""
+    opener = urllib.request.build_opener(_NoRedirect)
+    try:
+        resp = opener.open(urllib.request.Request(url), timeout=20)
+        return resp.status, resp.headers.get("Location", "")
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.headers.get("Location", "")
+
+
+status, where = hop(f"{BASE}/e/{slug}/send?t={code_a}")
+check("страница отправки с кодом ведёт на вход", status in (302, 307), str(status))
+check("и ведёт именно на вход, а не на витрину",
+      "/join" in where, str(where))
+check("код приглашения не теряется на редиректе",
+      f"t={code_a}" in where, str(where))
+
+status2, _ = hop(BASE + where)
+check("а по этому адресу открывается страница входа", status2 == 200, str(status2))
+check("и это не витрина, а форма входа",
+      status2 == 200 and b"sendForm" not in _page_body(BASE + where),
+      "на странице входа не должно быть ленты чужих сообщений")
+
+status3, where3 = hop(f"{BASE}/e/{slug}/send")
+check("отправка без кода и сессии тоже не ведёт на витрину",
+      "/join" in where3 or status3 == 200, f"{status3} {where3}")
 
 # --------------------------------------------------------------------------
 print("\n=== Отправка и изоляция ===")

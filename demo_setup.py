@@ -37,11 +37,20 @@ TEXTS = [
 
 # Размеры подобраны так, чтобы были видны все случаи: крошечное фото,
 # которое надо увеличивать, вертикальное, крупное и очень вытянутое.
+# text — подпись госта к снимку: пустая строка означает «фото без текста»,
+# их в галерее тоже полезно иметь, чтобы было видно разницу.
+# slide — ставить ли снимок в галерею слайдшоу сразу при создании демо.
 PHOTOS = [
-    (140, 105, (220, 60, 90), "140x105"),
-    (480, 640, (60, 140, 90), "480x640"),
-    (900, 300, (200, 160, 40), "900x300"),
-    (3000, 1800, (90, 90, 200), "3000x1800"),
+    dict(w=140,  h=105,  colour=(220, 60, 90),  label="140x105",
+         text="", slide=True),
+    dict(w=480,  h=640,  colour=(60, 140, 90),  label="480x640",
+         text="Вот мы и на свадьбе", slide=True),
+    dict(w=900,  h=300,  colour=(200, 160, 40), label="900x300",
+         text="", slide=False),
+    dict(w=3000, h=1800, colour=(90, 90, 200),  label="3000x1800",
+         text="Тот самый закат", slide=True),
+    dict(w=1024, h=768,  colour=(30, 110, 120), label="1024x768",
+         text="", slide=False),
 ]
 
 
@@ -113,36 +122,70 @@ def main() -> None:
     slug = created["event"]["slug"]
     code = event_token(slug)
 
-    opener = urllib.request.build_opener(
-        urllib.request.HTTPCookieProcessor(CookieJar())
-    )
-    send(opener, f"{ROOT}/e/{slug}/api/moderator/login",
+    def new_browser():
+        """Отдельный набор cookie — отдельный гость.
+
+        Cookie участника одна на событие, поэтому три входа подряд в одном
+        браузере оставили бы автора последнего: в галерее у всех снимков
+        было бы одно и то же имя.
+        """
+        return urllib.request.build_opener(
+            urllib.request.HTTPCookieProcessor(CookieJar())
+        )
+
+    mod = new_browser()
+    send(mod, f"{ROOT}/e/{slug}/api/moderator/login",
          urllib.parse.urlencode({"password": DEMO_PASSWORD}).encode(),
          "application/x-www-form-urlencoded")
 
     fields, ctype = form([("image", png(1920, 1080, (26, 32, 58), "ZASTAVKA"), "z.png")])
-    print("заставка:", send(opener, f"{ROOT}/e/{slug}/api/moderator/splash", fields, ctype))
+    print("заставка:", send(mod, f"{ROOT}/e/{slug}/api/moderator/splash", fields, ctype))
 
-    send(opener, f"{ROOT}/e/{slug}/api/join",
-         urllib.parse.urlencode({"name": "Аня", "invite": code}).encode(),
-         "application/x-www-form-urlencoded")
+    # по браузеру на гостя: в галерее видно разных авторов, и заодно
+    # проверяется длинное имя — подпись переносится на две строки
+    guests = {}
+    for who in ("Аня", "Игорь", "Александра Константиновна Петрова"):
+        g = new_browser()
+        send(g, f"{ROOT}/e/{slug}/api/join",
+             urllib.parse.urlencode({"name": who, "invite": code}).encode(),
+             "application/x-www-form-urlencoded")
+        guests[who] = g
+    who_list = list(guests)
+    opener = guests[who_list[0]]
 
     # тексты без фото — на них смотреть рост кегля
-    for t in TEXTS:
+    for i, t in enumerate(TEXTS):
         assert len(t) <= LIMIT, f"текст длиннее предела: {len(t)}"
-        res = send(opener, f"{ROOT}/e/{slug}/api/messages",
+        res = send(guests[who_list[i % len(who_list)]],
+                   f"{ROOT}/e/{slug}/api/messages",
                    urllib.parse.urlencode({"body": t}).encode(),
                    "application/x-www-form-urlencoded")
-        print(f"текст {len(t):>3} симв.: {res.get('message', res)}")
+        who = (res.get("message") or {}).get("author", "?")
+        print(f"текст {len(t):>3} симв. от {who[:18]:<18}: {res.get('message', res)}")
 
-    # фото разного размера, каждое с коротким текстом
-    for i, (w, h, colour, label) in enumerate(PHOTOS):
+    # фото разного размера: часть с текстом, часть без
+    gallery = []
+    for i, ph in enumerate(PHOTOS):
+        body = ph["text"] if ph["text"] else f"Фото {ph['label']}"
         fields, ctype = form([
-            ("body", f"Фото {label}", None),
-            ("image", png(w, h, colour, label), f"foto{i}.png"),
+            ("body", body, None),
+            ("image", png(ph["w"], ph["h"], ph["colour"], ph["label"]), f"foto{i}.png"),
         ])
-        res = send(opener, f"{ROOT}/e/{slug}/api/messages", fields, ctype)
-        print(f"фото {label:>10}: {res.get('message', {}).get('image') or res}")
+        # снимки от разных гостей: в галерее сразу видно, что они разные
+        res = send(guests[who_list[i % len(who_list)]],
+                   f"{ROOT}/e/{slug}/api/messages", fields, ctype)
+        mid = (res.get("message") or {}).get("id")
+        kind = "фото с текстом" if ph["text"] else "фото без текста"
+        print(f"фото {ph['label']:>10} ({kind}): {(res.get('message') or {}).get('image') or res}")
+        if ph["slide"] and mid:
+            gallery.append(mid)
+
+    # наполняем галерею слайдшоу, чтобы вкладка открылась не пустой
+    for mid in gallery:
+        send(mod, f"{ROOT}/e/{slug}/api/moderator/slideshow",
+             urllib.parse.urlencode({"message_id": mid, "on": "1"}).encode(),
+             "application/x-www-form-urlencoded")
+    print(f"в галерею слайдшоу добавлено снимков: {len(gallery)}")
 
     print()
     print(f"код события: {slug}")
@@ -152,6 +195,15 @@ def main() -> None:
     print(f"кабинет  {ROOT}/e/{slug}/moderator")
     print(f"экран    {ROOT}/e/{slug}/screen")
     print(f"гость    {ROOT}/e/{slug}/send?t={code}")
+    print()
+    print("что смотреть в кабинете:")
+    print("  вкладка «Лента»     — галочка напротив фотографии; у текстовых")
+    print("                          строк её нет и быть не может")
+    print("  вкладка «Слайдшоу»   — галерея уже наполнена, есть «убрать из")
+    print("                          слайдшоу» и «показать сейчас»")
+    print("  «Запустить слайдшоу» — экран занимает галерея, обычная лента")
+    print("                          стоит; вернуть её — та же кнопка")
+    print("  «Архив фотографий»   — скачать все одним файлом или стереть")
     print()
     print(f"убрать:  python demo_setup.py --remove {slug}")
 

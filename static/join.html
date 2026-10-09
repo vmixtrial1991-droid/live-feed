@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Вход</title>
+<link rel="stylesheet" href="/static/base.css">
+<link rel="stylesheet" href="/static/forms.css">
+</head>
+<body class="form-page">
+
+<main class="card card-narrow">
+  <div class="brand center">
+    <span class="brand-dot"></span>
+    <div>
+      <h1 id="eventTitle">Живая лента</h1>
+      <p class="muted" id="eventSubtitle"></p>
+    </div>
+  </div>
+
+  <form id="joinForm" class="stack">
+    <label class="field">
+      <span>Как вас зовут?</span>
+      <input id="nameInput" type="text" maxlength="40" required
+             placeholder="Например, Аня" autocomplete="name" autocapitalize="words">
+    </label>
+    <button class="btn btn-lg" type="submit" id="joinBtn">Продолжить</button>
+    <p class="error" id="joinError" hidden></p>
+  </form>
+
+  <p class="fineprint">
+    Имя увидит модератор и оно появится рядом с вашим сообщением.
+    Регистрация привязана к этому браузеру — в следующий раз вход не потребуется.
+  </p>
+</main>
+
+<script src="/static/common.js"></script>
+<script>
+const params = new URLSearchParams(location.search);
+const invite = params.get('t') || '';
+
+api(ev('/api/config')).then(cfg => {
+  document.getElementById('eventTitle').textContent = cfg.event_title || 'Живая лента';
+  document.getElementById('eventSubtitle').textContent = cfg.event_subtitle || '';
+});
+
+if (!invite) {
+  document.getElementById('joinForm').hidden = true;
+  document.getElementById('eventSubtitle').textContent =
+    'Откройте эту страницу через QR-код приглашения.';
+}
+
+const form = document.getElementById('joinForm');
+const btn = document.getElementById('joinBtn');
+const err = document.getElementById('joinError');
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  err.hidden = true;
+  btn.disabled = true;
+  btn.textContent = 'Проверяем…';
+  try {
+    const data = await apiForm(ev('/api/join'), { name: nameInput.value, invite });
+    if (!data.ok) throw new Error(data.detail || 'Не получилось');
+    location.href = ev('/send');
+  } catch (ex) {
+    err.textContent = ex.message || 'Что-то пошло не так. Попробуйте ещё раз.';
+    err.hidden = false;
+    btn.disabled = false;
+    btn.textContent = 'Продолжить';
+  }
+});
+</script>
+</body>
+</html>

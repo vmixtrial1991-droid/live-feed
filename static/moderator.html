@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>В эфире</title>
+<link rel="stylesheet" href="/static/base.css">
+<link rel="stylesheet" href="/static/moderator.css">
+</head>
+<body class="mod-page">
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-dot"></span>
+    <div>
+      <h1>В эфире</h1>
+      <p class="muted" id="modSub">—</p>
+    </div>
+  </div>
+  <div class="topbar-right">
+    <span class="pill" id="connPill" data-state="connecting">соединяемся…</span>
+    <a class="btn ghost" id="toFeed" href="#" target="_blank">Витрина</a>
+    <a class="btn ghost" id="toScreen" href="#" target="_blank">Экран</a>
+    <button class="btn ghost" id="logoutBtn">Выйти</button>
+  </div>
+</header>
+
+<main class="mod-main">
+
+  <!-- Управление показом -->
+  <section class="control-bar">
+    <div class="control-buttons">
+      <button class="btn ctl" id="prevBtn" title="Предыдущее сообщение">
+        <span class="ctl-glyph">‹</span><span class="ctl-label">Назад</span>
+      </button>
+      <button class="btn ctl ctl-main" id="playBtn" title="Продолжить или остановить">
+        <span class="ctl-glyph" id="playGlyph">❚❚</span><span class="ctl-label" id="playLabel">Пауза</span>
+      </button>
+      <button class="btn ctl" id="nextBtn" title="Следующее сообщение">
+        <span class="ctl-glyph">›</span><span class="ctl-label">Вперёд</span>
+      </button>
+    </div>
+
+    <div class="control-slider">
+      <label class="slider-row" for="intervalRange">
+        <span>Показывать по <b id="intervalVal">12</b> секунд</span>
+        <input type="range" id="intervalRange" min="3" max="120" step="1" value="12">
+      </label>
+    </div>
+
+    <div class="control-side">
+      <button class="btn ghost" id="splashBtn" title="Показать или убрать заставку на весь экран">Заставка</button>
+      <button class="btn ghost" id="qrBtn">QR на экране</button>
+      <button class="btn ghost" id="resetBtn" title="Начать круг заново">Заново</button>
+    </div>
+  </section>
+
+  <!-- Сейчас на экране -->
+  <section class="now-strip" id="nowStrip">
+    <div class="now-thumb" id="nowThumb" hidden></div>
+    <div class="now-body">
+      <p class="now-label">Сейчас на экране</p>
+      <p class="now-text" id="nowText">—</p>
+      <p class="muted" id="nowMeta">Слайд 0 из 0</p>
+    </div>
+  </section>
+
+  <!-- Список пришедшего -->
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Пришло за этот круг</h2>
+      <div class="legend">
+        <span class="legend-item"><i class="dot dot-new"></i>ещё не показывали</span>
+        <span class="legend-item"><i class="dot dot-shown"></i>уже показывали</span>
+      </div>
+    </div>
+    <div class="onair" id="onair"></div>
+    <div id="onairEmpty" class="empty small">
+      <p>Пока пусто.</p>
+      <p class="muted">Новые отправки появятся здесь сразу, без ожидания проверки.</p>
+    </div>
+  </section>
+
+  <!-- Приглашение -->
+  <section class="panel">
+    <div class="panel-head"><h2>Доступ для участников</h2></div>
+    <div class="qr-row">
+      <div class="qr-box qr-small"><img id="qrImg" alt="QR-приглашение" width="170" height="170"></div>
+      <div class="qr-side">
+        <p class="qr-link" id="qrLink"></p>
+        <div class="row-actions">
+          <a class="btn small" id="qrDownload" download="qr-invite.svg">Скачать QR</a>
+          <a class="btn ghost small" id="qrOpen" target="_blank">Открыть страницу входа</a>
+          <button class="btn ghost small" id="rotateInvite">Сменить код</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Заставка на весь экран. Загружается один раз, дальше просто
+       включается кнопкой «Заставка» в панели управления. -->
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Заставка на весь экран</h2>
+    </div>
+    <p class="muted splash-hint">
+      Картинка, которая полностью закрывает экран, пока гости ещё не отправляют
+      фото. Без картинки на экране будет просто название события.
+    </p>
+    <div class="splash-row">
+      <div class="splash-prev" id="splashPrev">
+        <span class="muted small" id="splashNone">Заставка не загружена</span>
+        <img id="splashThumb" alt="Заставка события" hidden>
+      </div>
+      <div class="splash-actions">
+        <input type="file" id="splashFile" accept="image/*" hidden>
+        <button class="btn" id="splashUpload">Загрузить картинку</button>
+        <button class="btn ghost small" id="splashClear" hidden>Убрать заставку</button>
+        <p class="muted small" id="splashStatus"></p>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<script src="/static/common.js"></script>
+<script src="/static/moderator.js"></script>
+</body>
+</html>

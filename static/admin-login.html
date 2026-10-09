@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Вход в админку</title>
+<link rel="stylesheet" href="/static/base.css">
+<link rel="stylesheet" href="/static/forms.css">
+</head>
+<body class="form-page">
+
+<main class="card card-narrow">
+  <div class="brand center">
+    <span class="brand-dot"></span>
+    <div>
+      <h1>Админка</h1>
+      <p class="muted">Вход по паролю</p>
+    </div>
+  </div>
+
+  <form id="loginForm" class="stack">
+    <label class="field">
+      <span>Пароль администратора</span>
+      <input id="passInput" type="password" required autocomplete="current-password"
+             placeholder="Введите пароль">
+    </label>
+    <button class="btn btn-lg" type="submit" id="loginBtn">Войти</button>
+    <p class="error" id="loginError" hidden></p>
+  </form>
+
+  <p class="fineprint">
+    Пароль администратора задан переменной <code>ADMIN_PASSWORD</code> или
+    файлом <code>data/config.json</code>. Он нужен, чтобы заводить события.
+  </p>
+</main>
+
+<script src="/static/common.js"></script>
+<script>
+const form = document.getElementById('loginForm');
+const btn = document.getElementById('loginBtn');
+const err = document.getElementById('loginError');
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  err.hidden = true;
+  btn.disabled = true;
+  btn.textContent = 'Проверяем…';
+  try {
+    await apiForm('/api/admin/login', { password: passInput.value });
+    location.href = '/admin';
+  } catch (ex) {
+    err.textContent = ex.message || 'Не получилось войти';
+    err.hidden = false;
+    btn.disabled = false;
+    btn.textContent = 'Войти';
+  }
+});
+</script>
+</body>
+</html>

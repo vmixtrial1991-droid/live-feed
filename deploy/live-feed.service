@@ -1,0 +1,31 @@
+[Unit]
+Description=Живая лента — полноэкранный показ сообщений гостей
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=livefeed
+Group=livefeed
+WorkingDirectory=/opt/live-feed
+EnvironmentFile=/etc/live-feed.env
+ExecStart=/opt/live-feed/venv/bin/python /opt/live-feed/run.py --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=5
+
+# приложение не пишет в проект, только в data/
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/live-feed/data
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=live-feed
+
+[Install]
+WantedBy=multi-user.target
+
+# map для WebSocket нужен на уровне http{}, поэтому подключаем отдельным файлом
+# (см. deploy/nginx-websocket.conf) — сюда он не влезает по смыслу.

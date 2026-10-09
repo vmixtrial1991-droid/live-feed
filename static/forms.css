@@ -1,0 +1,60 @@
+/* Формы: вход и отправка */
+
+.form-page { min-height: 100vh; display: flex; flex-direction: column; }
+.form-page > .card-narrow { margin-top: clamp(2rem, 12vh, 8rem); margin-bottom: 2rem; }
+
+.split {
+  flex: 1;
+  display: grid; gap: 1rem;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr);
+  align-items: start;
+  padding: clamp(1rem, 3vw, 2rem);
+  max-width: 1100px; width: 100%; margin: 0 auto;
+}
+
+/* Зона загрузки фото */
+.dropzone {
+  position: relative; display: grid; place-items: center;
+  min-height: 190px; padding: 1rem;
+  border: 2px dashed var(--line); border-radius: var(--radius);
+  background: rgba(255,255,255,.02); cursor: pointer;
+  transition: border-color .15s, background .15s;
+  overflow: hidden;
+}
+.dropzone:hover, .dropzone.over { border-color: var(--accent); background: rgba(91,140,255,.07); }
+.dropzone img { max-width: 100%; max-height: 320px; object-fit: contain; border-radius: 10px; }
+.dz-hint {
+  display: flex; flex-direction: column; align-items: center; gap: .5rem;
+  color: var(--muted); font-size: .9rem; text-align: center; padding: 1rem;
+}
+.dz-icon { font-size: 1.8rem; color: var(--accent); }
+
+/* Свои отправки */
+.my-list { display: flex; flex-direction: column; gap: .6rem; }
+.my-item {
+  display: flex; gap: .8rem; align-items: center;
+  padding: .6rem; border: 1px solid var(--line); border-radius: 12px;
+  background: rgba(255,255,255,.02);
+}
+.my-item img { width: 56px; height: 56px; object-fit: cover; border-radius: 8px; flex: none; }
+.my-item .my-text {
+  flex: 1; min-width: 0; font-size: .9rem;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.my-item .my-meta { display: flex; flex-direction: column; gap: .2rem; align-items: flex-end; flex: none; }
+
+.status {
+  display: inline-flex; align-items: center; gap: .3rem;
+  padding: .18rem .55rem; border-radius: 999px; font-size: .75rem; font-weight: 600;
+  white-space: nowrap;
+}
+.status::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.status.new { background: rgba(91,140,255,.16); color: #a9c4ff; }
+.status.approved { background: rgba(51,201,138,.14); color: var(--ok); }
+
+.my-item.is-new { animation: pop .3s ease both; }
+
+@media (max-width: 860px) {
+  .split { grid-template-columns: 1fr; }
+  .form-page > .card-narrow { margin-top: 2rem; }
+}

@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Экран</title>
+<link rel="stylesheet" href="/static/base.css">
+<link rel="stylesheet" href="/static/screen.css">
+</head>
+<body class="screen-page">
+
+<div class="screen-stage" id="stage">
+  <div class="slide" id="slide">
+    <!-- фото, текст и подпись лежат рядом и центрируются вместе: так блок
+         не разваливается, когда текст короткий и места много -->
+    <div class="slide-inner" id="slideInner">
+      <div class="slide-photo" id="slidePhoto" hidden></div>
+      <div class="slide-text" id="slideText"></div>
+      <div class="slide-author" id="slideAuthor"></div>
+    </div>
+  </div>
+</div>
+
+<div class="screen-overlay" id="overlay">
+  <div class="overlay-card">
+    <div class="overlay-icon">📺</div>
+    <h1 id="overlayTitle">Экран готов</h1>
+    <p id="overlayText">Здесь появятся сообщения и фото.</p>
+    <p class="muted" id="overlayHint"></p>
+  </div>
+</div>
+
+<!-- Заставка на весь экран. Показывается поверх сообщений и снимается
+     вторым нажатием кнопки в кабинете; появление и уход плавные. -->
+<div class="splash" id="splash">
+  <img class="splash-img" id="splashImg" alt="" hidden>
+  <div class="splash-text" id="splashText">
+    <h1 id="splashTitle"></h1>
+    <p id="splashSubtitle"></p>
+  </div>
+</div>
+
+<!-- Окно с QR-кодом: показ при этом стоит на паузе -->
+<div class="qr-window" id="qrWindow" hidden>
+  <div class="qr-window-inner">
+    <h2 class="qr-window-title">Отсканируйте, чтобы отправить своё</h2>
+    <div class="qr-window-code"><img id="screenQr" alt="QR-код для отправки" width="440" height="440"></div>
+    <p class="qr-window-link" id="screenQrLink"></p>
+    <p class="qr-window-hint">Показ сообщений остановлен. QR-код уберётся, когда нажмёте «QR на экране» в кабинете.</p>
+  </div>
+</div>
+
+<script src="/static/common.js"></script>
+<script src="/static/screen.js"></script>
+</body>
+</html>

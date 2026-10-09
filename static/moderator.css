@@ -1,0 +1,201 @@
+/* Страница «В эфире»: управление показом сверху, ниже список пришедшего */
+
+.mod-page { min-height: 100vh; display: flex; flex-direction: column; }
+.mod-main {
+  flex: 1;
+  padding: clamp(1rem, 2.5vw, 1.6rem);
+  display: flex; flex-direction: column; gap: 1.1rem;
+  max-width: 1100px; width: 100%; margin: 0 auto;
+}
+
+/* ---------- Панель управления ---------- */
+.control-bar {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 1rem clamp(.8rem, 2vw, 1.4rem);
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(220px, 1.1fr) auto;
+  gap: clamp(.8rem, 2vw, 1.6rem);
+  align-items: center;
+  box-shadow: var(--shadow);
+  position: sticky; top: 64px; z-index: 20;
+}
+
+.control-buttons { display: flex; gap: .6rem; }
+
+.ctl {
+  flex: 1;
+  min-height: 64px;
+  flex-direction: column;
+  gap: .15rem;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, .06);
+  border: 1px solid var(--line);
+  color: var(--text);
+}
+.ctl:hover { background: rgba(255, 255, 255, .12); }
+.ctl-glyph { font-size: 1.5rem; line-height: 1; }
+.ctl-label { font-size: .78rem; font-weight: 600; color: var(--muted); letter-spacing: .02em; }
+
+.ctl-main {
+  flex: 1.35;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  border-color: transparent;
+}
+.ctl-main .ctl-label { color: rgba(255, 255, 255, .85); }
+.ctl-main.is-paused { background: linear-gradient(135deg, #2fae78, #33c98a); }
+
+.control-slider { display: flex; flex-direction: column; gap: .3rem; }
+.slider-row { display: flex; flex-direction: column; gap: .3rem; cursor: pointer; }
+.slider-row > span { font-size: .88rem; color: var(--muted); }
+.slider-row b { color: var(--text); font-size: 1rem; }
+.slider-row input[type="range"] { width: 100%; accent-color: var(--accent); height: 30px; }
+
+.control-side { display: flex; flex-direction: column; gap: .45rem; }
+.control-side .btn { min-height: 38px; padding: .3rem .7rem; font-size: .85rem; white-space: nowrap; }
+.control-side .btn.active {
+  background: rgba(255, 182, 72, .18);
+  border-color: rgba(255, 182, 72, .5);
+  color: var(--warn);
+}
+
+/* ---------- Сейчас на экране ---------- */
+.now-strip {
+  display: flex; gap: 1rem; align-items: center;
+  padding: .9rem 1.1rem;
+  background: linear-gradient(135deg, rgba(91, 140, 255, .12), rgba(124, 92, 255, .08));
+  border: 1px solid rgba(91, 140, 255, .3);
+  border-radius: var(--radius);
+}
+.now-thumb {
+  width: 76px; height: 76px; flex: none;
+  border-radius: 10px; overflow: hidden; background: #0e1120;
+}
+.now-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.now-body { min-width: 0; }
+.now-label {
+  font-size: .72rem; text-transform: uppercase; letter-spacing: .1em;
+  color: var(--accent); margin: 0 0 .2rem;
+}
+.now-text {
+  margin: 0 0 .2rem; font-size: 1.15rem; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* ---------- Панель списка ---------- */
+.panel {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 1rem clamp(.8rem, 2vw, 1.3rem) 1.2rem;
+}
+.panel-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 1rem; margin-bottom: .9rem; flex-wrap: wrap;
+}
+.panel-head h2 { margin: 0; }
+.legend { display: flex; gap: 1rem; font-size: .8rem; color: var(--muted); }
+.legend-item { display: inline-flex; align-items: center; gap: .35rem; }
+.dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+.dot-new { background: var(--accent); }
+.dot-shown { background: rgba(255, 255, 255, .22); }
+
+/* ---------- Список ---------- */
+.onair { display: flex; flex-direction: column; gap: .5rem; }
+
+.onair-row {
+  display: flex; align-items: center; gap: .8rem;
+  padding: .6rem .75rem;
+  border-radius: 13px;
+  border: 1px solid var(--line);
+  background: rgba(91, 140, 255, .1);
+  transition: background .2s, border-color .2s, opacity .2s;
+}
+/* уже показывали — приглушаем, чтобы взгляд цеплялся за новое */
+.onair-row.is-shown {
+  background: rgba(255, 255, 255, .035);
+  border-color: rgba(255, 255, 255, .08);
+  color: var(--muted);
+}
+.onair-row.is-shown .or-text { color: var(--muted); opacity: .8; }
+.onair-row.is-current {
+  border-color: var(--accent);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.onair-row img {
+  width: 54px; height: 54px; object-fit: cover;
+  border-radius: 9px; flex: none; background: #0e1120;
+}
+.onair-row .or-pos {
+  width: 28px; height: 28px; border-radius: 50%; flex: none;
+  display: grid; place-items: center; font-size: .8rem; font-weight: 700;
+  background: rgba(255, 255, 255, .08); color: var(--muted);
+}
+.onair-row .or-text {
+  flex: 1; min-width: 0; font-size: .95rem;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.onair-row .or-author { font-size: .82rem; color: var(--muted); flex: none; }
+
+.or-badge {
+  flex: none; font-size: .72rem; font-weight: 700;
+  padding: .18rem .5rem; border-radius: 999px; letter-spacing: .02em;
+}
+.or-badge-new { background: rgba(91, 140, 255, .2); color: #a9c4ff; }
+.or-badge-shown { background: rgba(255, 255, 255, .08); color: var(--muted); }
+
+.onair-row .or-actions { display: flex; gap: .25rem; flex: none; }
+.icon-btn {
+  appearance: none; cursor: pointer;
+  width: 34px; height: 34px;
+  display: grid; place-items: center; border-radius: 9px;
+  border: 1px solid var(--line); background: rgba(255, 255, 255, .04);
+  color: var(--text); font: inherit; font-size: .9rem;
+}
+.icon-btn:hover { background: rgba(255, 255, 255, .1); }
+.icon-btn.danger:hover { background: rgba(255, 107, 122, .2); border-color: rgba(255, 107, 122, .4); }
+
+/* ---------- Приглашение ---------- */
+.qr-row { display: flex; gap: 1.2rem; align-items: center; flex-wrap: wrap; }
+.qr-box {
+  padding: .7rem; background: #fff; border-radius: 14px;
+  flex: none; line-height: 0; box-shadow: var(--shadow);
+}
+.qr-box img { display: block; width: min(170px, 45vw); height: auto; }
+.qr-side { flex: 1; min-width: 220px; display: flex; flex-direction: column; gap: .7rem; }
+.qr-link {
+  font-family: ui-monospace, 'Cascadia Code', Consolas, monospace; font-size: .85rem;
+  background: rgba(255, 255, 255, .04); border: 1px solid var(--line);
+  padding: .55rem .7rem; border-radius: 10px; overflow-wrap: anywhere; margin: 0;
+}
+.row-actions { display: flex; gap: .4rem; flex-wrap: wrap; }
+
+/* Блок загрузки заставки: слева превью, справа кнопки */
+.splash-hint { margin: 0 0 .9rem; }
+.splash-row { display: flex; gap: 1.2rem; align-items: center; flex-wrap: wrap; }
+.splash-prev {
+  flex: none; width: min(220px, 52vw); aspect-ratio: 16 / 10;
+  border: 1px dashed var(--line); border-radius: 14px;
+  background: rgba(255, 255, 255, .03);
+  display: grid; place-items: center; overflow: hidden; line-height: 0;
+}
+.splash-prev img { width: 100%; height: 100%; object-fit: contain; }
+.splash-prev span { padding: 0 .8rem; text-align: center; }
+.splash-actions { display: flex; flex-direction: column; gap: .5rem; align-items: flex-start; }
+.splash-actions p { margin: 0; }
+
+@media (max-width: 860px) {
+  .control-bar { grid-template-columns: 1fr; gap: 1rem; }
+  .control-side { flex-direction: row; }
+  .control-side .btn { flex: 1; }
+  .onair-row { flex-wrap: wrap; }
+  .onair-row .or-text { flex: 1 1 100%; order: 3; white-space: normal; }
+  .or-author { order: 4; }
+  .or-actions { margin-left: auto; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .onair-row { transition: none; }
+}

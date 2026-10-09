@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Отправить</title>
+<link rel="stylesheet" href="/static/base.css">
+<link rel="stylesheet" href="/static/forms.css">
+</head>
+<body class="form-page">
+
+<header class="topbar compact">
+  <div class="brand">
+    <span class="brand-dot"></span>
+    <div><h1 id="eventTitle">Отправить</h1></div>
+  </div>
+  <div class="topbar-right">
+    <span class="pill" id="whoami"></span>
+    <a class="btn ghost" href="#" id="toSendFeed">В начало</a>
+  </div>
+</header>
+
+<main class="split">
+  <section class="card">
+    <form id="sendForm" class="stack">
+      <label class="field">
+        <span>Ваш текст <em class="muted">необязательно</em></span>
+        <textarea id="bodyInput" rows="3" maxlength="56"
+                  placeholder="Напишите что-нибудь для большого экрана…"></textarea>
+        <span class="counter"><b id="charCount">0</b> / <span id="charLimit">56</span></span>
+        <span class="hint" id="bodyHint">Коротко: с дальнего ряда читается только короткая фраза.</span>
+      </label>
+
+      <div class="field">
+        <span>Фото <em class="muted">необязательно</em></span>
+        <label class="dropzone" id="dropzone">
+          <input type="file" id="fileInput" accept="image/*" hidden>
+          <img id="preview" alt="" hidden>
+          <div class="dropzone-hint" id="dropHint">
+            <span class="dz-icon">＋</span>
+            <span>Перетащите фото сюда или нажмите, чтобы выбрать</span>
+          </div>
+        </label>
+        <button type="button" class="btn ghost small" id="removePhoto" hidden>Убрать фото</button>
+      </div>
+
+      <button class="btn btn-lg" type="submit" id="sendBtn">Отправить</button>
+      <p class="error" id="sendError" hidden></p>
+      <p class="ok" id="sendOk" hidden></p>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>Мои отправки</h2>
+    <div id="myList" class="my-list"><p class="muted">Пока пусто.</p></div>
+  </section>
+</main>
+
+<script src="/static/common.js"></script>
+<script src="/static/send.js"></script>
+</body>
+</html>

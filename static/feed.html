@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>В эфире</title>
+<link rel="stylesheet" href="/static/base.css">
+<link rel="stylesheet" href="/static/feed.css">
+</head>
+<body class="feed-page">
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-dot"></span>
+    <div>
+      <h1 id="eventTitle">Живая лента</h1>
+      <p id="eventSubtitle" class="muted"></p>
+    </div>
+  </div>
+  <div class="topbar-right">
+    <span class="pill" id="connPill" data-state="connecting">соединяемся…</span>
+    <span class="pill" id="countPill"><b id="countApproved">0</b> на экране</span>
+    <a class="btn ghost" id="toSend" href="#">Отправить</a>
+  </div>
+</header>
+
+<main id="grid" class="grid" aria-live="polite">
+  <div id="empty" class="empty">
+    <div class="empty-icon">✨</div>
+    <p>Пока здесь пусто.</p>
+    <p class="muted">Отправьте первое сообщение — оно сразу окажется в эфире.</p>
+    <a class="btn" id="toSendBig" href="#">Отправить своё</a>
+  </div>
+</main>
+
+<footer class="ticker" id="ticker" hidden>
+  <span class="ticker-label">последние</span>
+  <div class="ticker-track" id="tickerTrack"></div>
+</footer>
+
+<script src="/static/common.js"></script>
+<script src="/static/feed.js"></script>
+</body>
+</html>

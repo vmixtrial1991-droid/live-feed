@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Вход модератора</title>
+<link rel="stylesheet" href="/static/base.css">
+<link rel="stylesheet" href="/static/forms.css">
+</head>
+<body class="form-page">
+
+<main class="card card-narrow">
+  <div class="brand center">
+    <span class="brand-dot"></span>
+    <div>
+      <h1>Модератор</h1>
+      <p class="muted">Вход по паролю</p>
+    </div>
+  </div>
+
+  <form id="loginForm" class="stack">
+    <label class="field">
+      <span>Пароль</span>
+      <input id="passInput" type="password" required autocomplete="current-password"
+             placeholder="Введите пароль">
+    </label>
+    <button class="btn btn-lg" type="submit" id="loginBtn">Войти</button>
+    <p class="error" id="loginError" hidden></p>
+  </form>
+
+  <p class="fineprint">
+    Пароль задан в файле <code>data/config.json</code> при первом запуске.
+  </p>
+</main>
+
+<script src="/static/common.js"></script>
+<script>
+const form = document.getElementById('loginForm');
+const btn = document.getElementById('loginBtn');
+const err = document.getElementById('loginError');
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  err.hidden = true;
+  btn.disabled = true;
+  btn.textContent = 'Проверяем…';
+  try {
+    await apiForm(ev('/api/moderator/login'), { password: passInput.value });
+    location.href = ev('/moderator');
+  } catch (ex) {
+    err.textContent = ex.message || 'Не получилось войти';
+    err.hidden = false;
+    btn.disabled = false;
+    btn.textContent = 'Войти';
+  }
+});
+</script>
+</body>
+</html>

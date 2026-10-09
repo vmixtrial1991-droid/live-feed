@@ -1,0 +1,81 @@
+/* Витрина: сетка одобренных сообщений + бегущая строка */
+
+.feed-page { display: flex; flex-direction: column; min-height: 100vh; padding-bottom: 0; }
+
+.grid {
+  flex: 1;
+  display: grid; gap: 1rem;
+  grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr));
+  padding: clamp(1rem, 3vw, 2rem);
+  align-content: start;
+  align-items: start;
+}
+
+.card-item {
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+  overflow: hidden; box-shadow: var(--shadow);
+  display: flex; flex-direction: column;
+  animation: pop .35s cubic-bezier(.2, .9, .3, 1.2) both;
+}
+@keyframes pop {
+  from { opacity: 0; transform: translateY(14px) scale(.96); }
+  to { opacity: 1; transform: none; }
+}
+
+.card-item img {
+  display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover;
+  background: #0e1120;
+}
+.card-item .item-body { padding: .85rem 1rem 1rem; display: flex; flex-direction: column; gap: .45rem; }
+.card-item .item-text {
+  font-size: 1.02rem; white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.card-item .item-author {
+  display: flex; align-items: center; gap: .45rem;
+  font-size: .85rem; color: var(--muted);
+}
+.item-author .avatar {
+  width: 26px; height: 26px; border-radius: 50%; flex: none;
+  display: grid; place-items: center; font-size: .72rem; font-weight: 700; color: #fff;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+}
+.item-author .time { margin-left: auto; font-size: .78rem; opacity: .8; }
+
+.card-item.is-current { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), var(--shadow); }
+
+/* Бегущая строка последних сообщений */
+.ticker {
+  position: sticky; bottom: 0; z-index: 20;
+  display: flex; align-items: center; gap: .8rem;
+  padding: .55rem clamp(1rem, 3vw, 2rem);
+  background: rgba(11, 13, 20, .85); backdrop-filter: blur(12px);
+  border-top: 1px solid var(--line);
+  overflow: hidden;
+}
+.ticker-label {
+  font-size: .72rem; text-transform: uppercase; letter-spacing: .12em;
+  color: var(--muted); flex: none;
+  background: var(--bg); padding: .2rem .7rem .2rem 0;
+  position: relative; z-index: 2;
+}
+.ticker-track {
+  display: flex; gap: 2.2rem; white-space: nowrap;
+  animation: scroll 42s linear infinite;
+  font-size: .9rem; color: #cfd6ea;
+}
+.ticker:hover .ticker-track { animation-play-state: paused; }
+.ticker-track span { display: inline-flex; align-items: center; gap: .4rem; }
+.ticker-track .t-author { color: var(--muted); }
+@keyframes scroll {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ticker-track { animation: none; }
+  .card-item { animation: none; }
+}
+
+@media (max-width: 640px) {
+  .grid { grid-template-columns: 1fr; gap: .8rem; padding: .9rem; }
+}

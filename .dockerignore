@@ -1,0 +1,30 @@
+# Секреты и данные никогда не попадают в образ
+data/
+.env
+*.env
+!*.env.example
+*.pem
+*.key
+*.pub
+id_rsa*
+id_ed25519*
+
+# Служебное
+.git/
+.gitignore
+.gitattributes
+__pycache__/
+*.pyc
+.venv/
+venv/
+tests/
+*.zip
+*.tar.gz
+*.tgz
+.DS_Store
+Thumbs.db
+
+# Документация не нужна в образе: она в репозитории
+README.md
+LICENSE
+deploy/

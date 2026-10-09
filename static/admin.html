@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>События — Живая лента</title>
+<link rel="stylesheet" href="/static/base.css">
+<link rel="stylesheet" href="/static/forms.css">
+<link rel="stylesheet" href="/static/admin.css">
+</head>
+<body>
+
+<div class="admin-wrap">
+
+  <header class="admin-head">
+    <div>
+      <h1>События</h1>
+      <p class="muted">Заведите событие — появятся три готовые ссылки и QR-код для гостей.</p>
+    </div>
+    <div class="topbar-right">
+      <a class="pill" href="/admin" id="baseHint" title="Адрес сервера"></a>
+      <button class="btn ghost small" id="logoutBtn" type="button">Выйти</button>
+    </div>
+  </header>
+
+  <!-- создание события -->
+  <section class="card">
+    <h2 style="margin:0 0 .8rem;font-size:1.05rem">Новое событие</h2>
+    <form id="createForm" class="stack">
+      <div class="grid-2">
+        <label class="field">
+          <span>Название</span>
+          <input id="fTitle" required maxlength="80" placeholder="Свадьба Маши и Саши">
+        </label>
+        <label class="field">
+          <span>Подпись под названием <em class="muted">(необязательно)</em></span>
+          <input id="fSubtitle" maxlength="160" placeholder="Отправьте текст или фото — мы покажем на экране">
+        </label>
+      </div>
+      <div class="grid-2">
+        <label class="field">
+          <span>Пароль ведущего <em class="muted">(необязательно)</em></span>
+          <input id="fPassword" maxlength="64" placeholder="Оставьте пустым — зададите позже">
+        </label>
+        <label class="field">
+          <span>Адрес в ссылках <em class="muted">(необязательно)</em></span>
+          <input id="fSlug" maxlength="48" placeholder="свадьба-2026 — латиницей, без пробелов">
+        </label>
+      </div>
+      <div style="display:flex;gap:.6rem;align-items:center;flex-wrap:wrap">
+        <button class="btn" id="createBtn" type="submit">Создать событие</button>
+        <span class="muted" id="createHint"></span>
+      </div>
+    </form>
+  </section>
+
+  <!-- список -->
+  <section>
+    <div id="list" class="ev-list"></div>
+    <div id="empty" class="empty" hidden>
+      <div class="empty-icon">📋</div>
+      <p>Событий пока нет.</p>
+      <p class="muted">Заведите первое — форма выше.</p>
+    </div>
+  </section>
+
+</div>
+
+<!-- карточка события со ссылками -->
+<dialog id="detail" class="card" style="max-width:720px;width:calc(100% - 2rem)">
+  <h2 id="dTitle" style="margin:0 0 .2rem;font-size:1.15rem"></h2>
+  <p class="muted" id="dSlug" style="margin:0 0 1rem;font-size:.85rem"></p>
+
+  <div class="links">
+    <div class="link-row qr-row">
+      <div class="qr-box">
+        <img id="dQr" alt="QR-код для гостей">
+        <div class="qr-cap">Гости сканируют камерой</div>
+      </div>
+      <div style="flex:1;min-width:220px;display:flex;flex-direction:column;gap:.6rem">
+        <p class="muted" style="margin:0;font-size:.88rem">
+          Этот QR ведёт на страницу, где гость вводит имя и отправляет текст или фото.
+          Распечатайте или покажите на экране перед началом.
+        </p>
+        <div class="link-val" id="dJoin"></div>
+        <div style="display:flex;gap:.4rem;flex-wrap:wrap">
+          <button class="btn small" id="dCopyJoin" type="button">Скопировать ссылку</button>
+          <button class="btn ghost small" id="dPrintQr" type="button">Распечатать QR</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="link-row">
+      <span class="link-what">Ведущему</span>
+      <span class="link-val" id="dMod"></span>
+      <span class="link-btns">
+        <button class="btn small" id="dCopyMod" type="button">Копировать</button>
+        <button class="btn ghost small" id="dOpenMod" type="button">Открыть</button>
+      </span>
+    </div>
+    <p class="fineprint" style="margin:-.4rem 0 0">
+      Вход в кабинет — по паролю ведущего:
+      <span class="pass-chip" id="dPass">не задан</span>
+    </p>
+
+    <div class="link-row">
+      <span class="link-what">Экрану</span>
+      <span class="link-val" id="dScreen"></span>
+      <span class="link-btns">
+        <button class="btn small" id="dCopyScreen" type="button">Копировать</button>
+        <button class="btn ghost small" id="dOpenScreen" type="button">Открыть</button>
+      </span>
+    </div>
+
+    <div class="link-row">
+      <span class="link-what">Гостям</span>
+      <span class="link-val" id="dFeed"></span>
+      <span class="link-btns">
+        <button class="btn small" id="dCopyFeed" type="button">Копировать</button>
+        <button class="btn ghost small" id="dOpenFeed" type="button">Открыть</button>
+      </span>
+    </div>
+    <p class="fineprint" style="margin:-.4rem 0 0">
+      Ссылка гостям — это тот же адрес, что в QR-коде: с кодом события
+      внутри. Отправьте её в чат, и человек сразу попадёт на страницу
+      ввода имени.
+    </p>
+  </div>
+
+  <details style="margin-top:1.2rem">
+    <summary style="cursor:pointer;color:var(--muted)">Настройки события</summary>
+    <form id="editForm" class="stack" style="margin-top:.9rem">
+      <label class="field">
+        <span>Название</span>
+        <input id="eTitle" maxlength="80">
+      </label>
+      <label class="field">
+        <span>Подпись</span>
+        <input id="eSubtitle" maxlength="160">
+      </label>
+      <label class="field">
+        <span>Новый пароль ведущего <em class="muted">(пусто — не менять)</em></span>
+        <input id="ePassword" maxlength="64" autocomplete="new-password">
+      </label>
+      <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+        <button class="btn small" type="submit">Сохранить</button>
+        <button class="btn ghost small" id="eRotate" type="button">Новый QR-код</button>
+      </div>
+      <p class="muted" style="margin:0;font-size:.85rem">
+        «Новый QR-код» меняет адрес входа для гостей. Те, кто уже отсканировал
+        старый, смогут войти по старой ссылке только до следующей смены кода.
+      </p>
+    </form>
+  </details>
+
+  <div class="danger-note" style="margin-top:1.2rem">
+    <strong>Удаление события</strong> уносит его сообщения, фотографии и всех
+    участников. Отменить это нельзя. Экраны и кабинеты события сразу отключатся.
+  </div>
+  <div style="display:flex;gap:.6rem;margin-top:.8rem;flex-wrap:wrap">
+    <button class="btn bad small" id="dDelete" type="button">Удалить событие</button>
+    <button class="btn ghost small" id="dClose" type="button">Закрыть</button>
+  </div>
+</dialog>
+
+<!-- распечатываемый QR -->
+<dialog id="printQr" class="dialog-qr">
+  <h2 id="pTitle" style="margin:0 0 .3rem;font-size:1rem"></h2>
+  <p class="muted" id="pSub" style="margin:0 0 1rem;font-size:.85rem"></p>
+  <div class="qr-box" style="width:340px">
+    <img id="pQr" alt="QR-код">
+  </div>
+  <button class="btn small" onclick="window.print()" style="margin-top:1rem">Печать</button>
+</dialog>
+
+<script src="/static/common.js"></script>
+<script src="/static/admin.js"></script>
+</body>
+</html>

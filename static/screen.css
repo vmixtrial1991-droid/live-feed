@@ -1,0 +1,224 @@
+/* Полноэкранный показ: одно сообщение, плавная смена
+   Вёрстка рассчитана на любой экран: и проектор 4:3, и телевизор 16:9,
+   и телефон в портретной ориентации. Поэтому размеры задаются через
+   min(vw, vh): на широком, но низком экране решает высота, на узком —
+   ширина, и ни одна из сторон не уводит текст за кадр. */
+
+.screen-page {
+  margin: 0; height: 100vh; height: 100dvh; overflow: hidden;
+  background: #05070c;
+  cursor: none;
+}
+.screen-page.show-cursor { cursor: default; }
+
+/* «Безопасная зона»: проекторы и телевизоры обрезают края кадра, поэтому
+   ничего не подходит к самому краю. Отступы здесь — та самая зона.
+   Ради этого всё остальное и считается в JS. */
+.screen-stage {
+  position: absolute; inset: 0;
+  display: grid; place-items: center;
+  padding: var(--safe-y, 5vh) var(--safe-x, 4vw);
+}
+
+/* мягкое фоновое свечение под фото; держим его в безопасной зоне,
+   чтобы размытая картинка не липла к краям кадра */
+.screen-stage::before {
+  content: ''; position: absolute;
+  inset: var(--safe-y, 5vh) var(--safe-x, 4vw);
+  background-size: cover; background-position: center;
+  filter: blur(70px) saturate(1.3) brightness(.42);
+  transform: scale(1.15);
+  transition: background-image .6s ease;
+  opacity: 0;
+}
+.screen-stage.has-photo::before { opacity: 1; background-image: var(--photo-bg, none); }
+
+.slide {
+  position: relative; z-index: 2;
+  width: 100%; height: 100%;
+  /* сцена центрирует элементы по обеим осям, а нам нужно растянуть по
+     высоте: иначе .slide-inner получает высоту по содержимому, и короткий
+     текст с подписью прилипает к верху кадра вместо середины */
+  align-self: stretch;
+  display: flex; flex-direction: column; align-items: center;
+  opacity: 1; transform: none;
+  transition: opacity .55s ease, transform .55s cubic-bezier(.2, .8, .3, 1);
+}
+.slide.swap { opacity: 0; transform: scale(.97) translateY(10px); }
+
+/* Фото, текст и подпись стоят рядом и центрируются как один блок.
+   justify-content: center нужен из-за Короткого текста: когда места с запасом,
+   иначе текст прилипал к верху, а подпись уходила вниз, и блок распадался. */
+.slide-inner {
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center;
+  gap: 2.2vh; min-height: 0; width: 100%; height: 100%;
+}
+
+.slide-photo {
+  flex: 0 1 auto; min-height: 0;
+  max-width: 100%; max-height: 100%;
+  border-radius: 20px; overflow: hidden;
+  box-shadow: 0 40px 120px rgba(0, 0, 0, .6);
+  line-height: 0;
+}
+/* размер картинки считает JS: маленькое фото надо увеличить, но не больше
+   свободного места и не «раздувать» его в кашу */
+.slide-photo img {
+  display: block; width: 100%; height: 100%;
+  object-fit: contain;
+}
+/* когда фото нет, рамка не должна занимать место */
+.slide-photo[hidden] { display: none; }
+
+/* Базовый кегль — точка отсчёта, от которой JS растит короткий текст.
+   Потолок в rem здесь ставить нельзя: на 4K он срезал бы всё, что можно
+   показать, и текст занимал бы десятую часть экрана. Верхняя граница
+   оставлена на случай невероятно большого экрана. */
+.slide-text {
+  font-size: clamp(1rem, min(5vw, 9vh), 18rem);
+  /* 1.22, а не 1.18: глифы этой гарнитуры занимают 1.19 em, и при 1.18 строка
+     обрезала низ букв с выносными элементами на 1-2 px — при 192-пиксельном
+     кегле это была уже настоящая потеря. */
+  font-weight: 700; line-height: 1.22; text-align: center;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+  letter-spacing: -.02em;
+  text-shadow: 0 6px 40px rgba(0, 0, 0, .6);
+  /* 22ch — чтобы длинная фраза читалась, а не растягивалась в одну строку.
+      min(…, 100%) удерживает ширину внутри безопасной зоны, когда кегль
+      вырос: иначе строка уехала бы за край на узком экране. */
+  max-width: min(22ch, 100%);
+  flex: none;
+  /* страховка на случай, если расчёт ошибся: лучше обрезать, чем выпустить
+     текст за кадр на проектор */
+  overflow: hidden;
+}
+
+/* Подпись отправителя. Это запасной кегль на случай, пока JS ещё не
+   посчитал свою долю: он ставит размер от AUTHOR_SHARE высоты зоны, и
+   подпись всегда занимает одну и ту же часть кадра.
+
+   Ширина — по зоне, а не по содержимому: JS берёт кегль от высоты, и
+   длинное имя на узком экране переносится на вторую строку и обрезается
+   по числу строк, а не уезжает за кадр вбок. */
+.slide-author {
+  font-size: clamp(.85rem, 1.4vw, 1.3rem);
+  /* с запасом сверх глифов (1.19 em), иначе подпись теряла нижние пиксели */
+  line-height: 1.25;
+  color: rgba(238, 241, 248, .66);
+  letter-spacing: .04em; flex: none;
+  align-self: stretch; text-align: center;
+  overflow-wrap: anywhere;
+  max-width: 100%; overflow: hidden;
+}
+
+/* Заглушка, когда показывать нечего */
+.screen-overlay {
+  position: absolute; inset: 0; z-index: 5;
+  display: grid; place-items: center; text-align: center; padding: 2rem;
+  background: radial-gradient(700px 400px at 50% 40%, rgba(91,140,255,.1), transparent 70%);
+  transition: opacity .4s ease;
+}
+.screen-overlay[hidden] { display: none; }
+.overlay-card { max-width: 34rem; }
+.overlay-icon { font-size: 3.4rem; margin-bottom: .6rem; }
+.overlay-card h1 { font-size: clamp(1.5rem, 3.4vw, 2.6rem); margin-bottom: .5rem; }
+.overlay-card p { font-size: clamp(.95rem, 1.6vw, 1.25rem); color: var(--muted); }
+
+/* Окно с QR-кодом поверх сообщений */
+.qr-window {
+  position: absolute; inset: 0; z-index: 8;
+  display: grid; place-items: center;
+  padding: 4vh 4vw;
+  background: rgba(5, 7, 12, .96);
+  backdrop-filter: blur(6px);
+  animation: qrIn .25s ease both;
+}
+.qr-window[hidden] { display: none; }
+@keyframes qrIn { from { opacity: 0; } to { opacity: 1; } }
+
+.qr-window-inner { text-align: center; max-width: 62rem; }
+.qr-window-title {
+  font-size: clamp(1.3rem, 3.2vw, 2.8rem);
+  margin-bottom: 2.5vh; letter-spacing: -.02em;
+}
+.qr-window-code {
+  display: inline-block; padding: clamp(12px, 2vh, 28px);
+  background: #fff; border-radius: clamp(14px, 2vw, 28px);
+  box-shadow: 0 30px 90px rgba(0, 0, 0, .6);
+  line-height: 0;
+}
+.qr-window-code img {
+  display: block;
+  width: min(44vh, 42vw, 440px);
+  height: auto;
+}
+.qr-window-link {
+  margin: 2.2vh 0 0;
+  font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
+  font-size: clamp(.8rem, 1.5vw, 1.4rem);
+  color: var(--muted); overflow-wrap: anywhere;
+}
+.qr-window-hint {
+  margin: 1.2vh 0 0; font-size: clamp(.7rem, 1.1vw, 1rem);
+  color: rgba(238, 241, 248, .4);
+}
+
+/* Раньше здесь была нижняя панель с названием события и номером слайда.
+   На проекторе она только мешала, поэтому убрана целиком. */
+
+/* Заставка на весь экран. Видимость переключается добавлением класса,
+   а сам переход делает opacity — так она появляется и исчезает плавно. */
+.splash {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: var(--bg);
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity .7s ease, visibility 0s linear .7s;
+}
+
+.splash.on {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity .7s ease, visibility 0s linear 0s;
+}
+
+.splash-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+
+.splash-text {
+  padding: clamp(1.5rem, 5vw, 4rem);
+  text-align: center;
+  max-width: 46rem;
+}
+
+.splash-text h1 {
+  font-size: clamp(2rem, 7vw, 5.5rem);
+  line-height: 1.05;
+  margin: 0 0 .4em;
+}
+
+.splash-text p {
+  font-size: clamp(.9rem, 2.2vw, 1.6rem);
+  color: var(--muted);
+  margin: 0;
+}
+
+/* если картинка есть, текст под ней не нужен */
+.splash.has-img .splash-text { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .slide { transition: opacity .2s linear; }
+  .screen-stage::before { transition: none; }
+}

@@ -376,6 +376,106 @@ try:
     except zipfile.BadZipFile as e:
         check("архив не битый", False, str(e))
 
+    print("\n=== Правка в ленте тянет за собой текст в слайдшоу ===")
+    # Снимок один, а надпись должна быть одна. Ведущий правит опечатку под
+    # фотографией в ленте и ждёт, что на экране тоже поправится. Раньше
+    # галерея хранила копию текста и жила своей жизнью.
+    st, state0 = mod.get_json(f"/e/{slug}/api/moderator/state")
+    gal0 = {g["image"]: g for g in (state0 or {}).get("gallery", [])}
+    # берём тот снимок, чьё сообщение живо: выше p1 из ленты удалили, и
+    # такой снимок проверяется отдельно — как осиротевший
+    linked = next((g for g in gal0.values() if g.get("source_id")), None)
+    check("галерея помнит, из какой строки ленты взят снимок",
+          linked is not None, str(list(gal0.values())[:1])[:140])
+    # а у осиротевшего снимка связи быть не должно: иначе подсказка в окне
+    # правки обещала бы изменения в ленте, которой уже нет
+    check("у снимка без строки в ленте связи не остаётся",
+          all(not g.get("source_id") or g.get("source_id") in
+              {m["id"] for m in (state0 or {}).get("messages", [])}
+              for g in gal0.values()),
+          str([(g["id"], g.get("source_id")) for g in gal0.values()]))
+
+    if linked is not None:
+        st, _ = mod.post_json(f"/e/{slug}/api/moderator/edit",
+                              {"message_id": linked["source_id"],
+                               "body": "опечатка исправлена"})
+        check("правка в ленте принята", st == 200, str(st))
+        st, after = mod.get_json(f"/e/{slug}/api/moderator/state")
+        gal = {g["image"]: g for g in (after or {}).get("gallery", [])}
+        check("и текст в галерее сразу стал новым",
+              (gal.get(linked["image"]) or {}).get("body") == "опечатка исправлена",
+              str((gal.get(linked["image"]) or {}).get("body")))
+        check("в ленте тоже новый текст",
+              any(m.get("id") == linked["source_id"]
+                  and m.get("body") == "опечатка исправлена"
+                  for m in (after or {}).get("messages", [])))
+
+        # и обратно: правка из галереи правит строку ленты, а не копию
+        st, _ = mod.post_json(f"/e/{slug}/api/moderator/gallery/edit",
+                              {"gallery_id": linked["id"], "body": "из галереи"})
+        st, back = mod.get_json(f"/e/{slug}/api/moderator/state")
+        check("правка из галереи меняет и строку ленты",
+              any(m.get("id") == linked["source_id"] and m.get("body") == "из галереи"
+                  for m in (back or {}).get("messages", [])),
+              str([m.get("body") for m in (back or {}).get("messages", [])][:4]))
+        gal = {g["image"]: g for g in (back or {}).get("gallery", [])}
+        check("и сам снимок в галереи не разошёлся с лентой",
+              (gal.get(linked["image"]) or {}).get("body") == "из галереи")
+
+    # снимок, чьё сообщение удалили, правится сам по себе
+    st, orphan_state = mod.get_json(f"/e/{slug}/api/moderator/state")
+    orphan = next((g for g in (orphan_state or {}).get("gallery", [])
+                   if not g.get("source_id")), None)
+    if orphan is not None:
+        st, _ = mod.post_json(f"/e/{slug}/api/moderator/gallery/edit",
+                              {"gallery_id": orphan["id"], "body": "только тут"})
+        st, o2 = mod.get_json(f"/e/{slug}/api/moderator/state")
+        gal = {g["image"]: g for g in (o2 or {}).get("gallery", [])}
+        check("снимок без строки в ленте правится сам по себе",
+              (gal.get(orphan["image"]) or {}).get("body") == "только тут")
+
+    print("\n=== У слайдшоу своя пауза ===")
+    scr = screen_state()
+    check("галерея идёт сразу после запуска",
+          scr.get("slideshow_playing") is True, str(scr.get("slideshow_playing")))
+    st, _ = mod.post_json(f"/e/{slug}/api/moderator/screen",
+                          {"action": "slideshow-play", "value": "0"})
+    check("пауза галереи принята", st == 200, str(st))
+    check("галерея на паузе",
+          screen_state().get("slideshow_playing") is False,
+          str(screen_state().get("slideshow_playing")))
+    st, _ = mod.post_json(f"/e/{slug}/api/moderator/screen",
+                          {"action": "pause", "value": "1"})
+    check("пауза ленты галерею не трогает",
+          screen_state().get("slideshow_playing") is False,
+          str(screen_state().get("slideshow_playing")))
+    st, _ = mod.post_json(f"/e/{slug}/api/moderator/screen",
+                          {"action": "pause", "value": "0"})
+    check("и обратно: лента не трогает паузу галереи",
+          screen_state().get("slideshow_playing") is False,
+          str(screen_state().get("slideshow_playing")))
+
+    # «Запустить слайдшоу» означает «показать сейчас»: сняли с паузы и
+    # перезапустили — галерея поехала
+    st, _ = mod.post_json(f"/e/{slug}/api/moderator/screen",
+                          {"action": "slideshow", "value": "1"})
+    check("перезапуск включает активный показ",
+          screen_state().get("slideshow_playing") is True,
+          str(screen_state().get("slideshow_playing")))
+    st, _ = mod.post_json(f"/e/{slug}/api/moderator/screen",
+                          {"action": "slideshow-play", "value": "0"})
+    check("снова сняли с паузы", screen_state().get("slideshow_playing") is False)
+    st, _ = mod.post_json(f"/e/{slug}/api/moderator/screen",
+                          {"action": "slideshow", "value": "1"})
+    check("и «запустить слайдшоу» паузу снял", st == 200, str(st))
+    check("после запуска галерея крутится",
+          screen_state().get("slideshow_playing") is True,
+          str(screen_state().get("slideshow_playing")))
+
+    st, _ = guest.post_json(f"/e/{slug}/api/moderator/screen",
+                            {"action": "slideshow-play", "value": "0"})
+    check("гость не может остановить галерею", st in (401, 403), str(st))
+
     print("\n=== Удаление всех фото ===")
     st, res = mod.post_json(f"/e/{slug}/api/moderator/photos-delete-all", {})
     check("кнопка отработала", st == 200, str(res)[:140])

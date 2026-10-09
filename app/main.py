@@ -672,11 +672,15 @@ async def api_edit(
             detail=f"Текст длиннее {config.MAX_TEXT_LEN} символов не помещается "
                    f"на экран. Сократите на {len(body) - config.MAX_TEXT_LEN}.",
         )
-    event.store.edit_message(
+    updated = event.store.edit_message(
         message_id,
         body=body,
         author=(author or "").strip()[:40] or None,
     )
+    # 4.0.1: тот же снимок не должен ездить по экрану с двумя надписями.
+    # Поправили текст в ленте — поправился и он в галерее слайдшоу.
+    if updated and updated.get("image"):
+        event.store.gallery_follow(updated["image"], updated["body"], updated["author"])
     result = await _refresh(event)
     return {"ok": True, **result}
 
@@ -772,7 +776,17 @@ async def api_screen_control(slug: str, request: Request, action: str = Form(...
                 detail="В слайдшоу пока нет ни одной фотографии.",
             )
         screen.slideshow_visible = want
+        if want:
+            # «Запустить слайдшоу» означает «показать сейчас»: если перед этим
+            # галерея была на паузе, запускаем её в активный показ, а не
+            # возвращаем к застывшему кадру
+            screen.slideshow_playing = True
         screen.reset_deadline()
+    elif action == "slideshow-play":
+        # пауза галереи: своя, ленту она не трогает
+        await screen.set_slideshow_playing(
+            str(value).lower() in ("1", "true", "on", "yes", "show")
+        )
     elif action == "slideshow-show":
         # показать снимок из галереи. Если слайдшоу не запущено — запускаем:
         # иначе ведущий нажал «показать сейчас», а на экране обычная лента
@@ -879,7 +893,8 @@ async def api_slideshow_toggle(
 
     if wanted:
         event.store.gallery_add(
-            message["image"], message.get("body", ""), message.get("author", "")
+            message["image"], message.get("body", ""), message.get("author", ""),
+            source_id=message["id"],
         )
     else:
         event.store.gallery_remove_image(message["image"])
@@ -911,6 +926,15 @@ async def api_gallery_edit(
             status_code=400,
             detail=f"Текст длиннее {config.MAX_TEXT_LEN} символов не поместится на экран.",
         )
+    # Если снимок взят галочкой из строки ленты, правим именно её: у снимка
+    # один текст, и две правки в двух местах разъедутся. Снимок, чьё
+    # сообщение уже удалили из ленты, правится сам по себе.
+    source_id = event.store.gallery_source(gallery_id)
+    if source_id is not None:
+        event.store.edit_message(source_id, body=body)
+        message = event.store.get_message(source_id)
+        if message:
+            event.store.gallery_follow(message["image"], message["body"], message["author"])
     updated = event.store.gallery_edit(gallery_id, body)
     if updated is None:
         raise HTTPException(status_code=404, detail="Снимка нет в галерее")

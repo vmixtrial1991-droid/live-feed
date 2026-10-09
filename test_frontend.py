@@ -282,6 +282,54 @@ check("moderator.html: подключён скрипт слайдшоу",
       "/static/slideshow-panel.js" in mod_html,
       "без него вкладка будет пустой: карточек нет, кнопки не работают")
 
+# Переключать, что показывает экран, нужно из обеих вкладок: ведущий чаще
+# сидит в «Ленте» и не должен ходить за кнопкой на другую вкладку.
+slide_js = (STATIC / "slideshow-panel.js").read_text(encoding="utf-8")
+feed_bar = re.search(r'<section class="control-bar">(.*?)</section>', mod_html, re.S)
+feed_bar_text = feed_bar.group(1) if feed_bar else ""
+check("moderator.html: кнопка слайдшоу есть и в ленте",
+      'id="slideshowRunBtnFeed"' in feed_bar_text,
+      "переключать экран приходилось только после перехода на другую вкладку")
+check("moderator.html: в ленте она рядом с «Заставка», «QR» и «Заново»",
+      all(x in feed_bar_text for x in ('id="splashBtn"', 'id="qrBtn"',
+                                       'id="resetBtn"',
+                                       'id="slideshowRunBtnFeed"')))
+check("moderator.html: обе кнопки запуска помечены одним действием",
+      mod_html.count('data-act="slideshow-run"') == 2,
+      "иначе одна из кнопок останется мёртвой")
+check("moderator.html: у слайдшоу своя пауза",
+      'id="slideshowPlayBtn"' in mod_html
+      and 'id="slideshowPlayGlyph"' in mod_html
+      and 'id="slideshowPlayLabel"' in mod_html,
+      "общая пауза ленты останавливала бы и галерею, а ведущий этого не ждёт")
+check("slideshow-panel.js: кнопки запуска берутся списком",
+      "querySelectorAll('[data-act=\"slideshow-run\"]')" in slide_js,
+      "один getElementById находит только первую из двух")
+check("slideshow-panel.js: подсветка ставится обеим кнопкам",
+      re.search(r"runBtns\.forEach\([^)]*\)\s*=>\s*\{[^}]*classList\.toggle\('active'",
+                slide_js) is not None,
+      "иначе в «Ленте» не видно, что на экране галерея")
+check("slideshow-panel.js: пауза галереи шлёт своё действие",
+      "'slideshow-play'" in slide_js)
+check("slideshow-panel.js: пауза видна только при запущенном слайдшоу",
+      re.search(r"ssPlayBtn\.hidden\s*=\s*!on", slide_js) is not None,
+      "кнопка паузы при выключенном слайдшоу ничего не значит")
+
+# moderator.js и slideshow-panel.js — классические скрипты, и top-level const
+# у них попадает в один общий лексический объём. Одинаковое имя во втором
+# файле не «перекрывается», а роняет весь файл: страница молча теряет
+# половину разметки, а API-проверки этого не видят.
+def top_level_names(src: str) -> set[str]:
+    body = re.sub(r"/\*.*?\*/", " ", src, flags=re.S)
+    body = re.sub(r"//[^\n]*", " ", body)
+    return set(re.findall(r"^(?:const|let|var)\s+([A-Za-z_$][\w$]*)", body, re.M))
+
+
+dupes = top_level_names((STATIC / "moderator.js").read_text(encoding="utf-8")) & \
+        top_level_names((STATIC / "slideshow-panel.js").read_text(encoding="utf-8"))
+check("moderator.js и slideshow-panel.js не делят имена",
+      not dupes, "одинаковое имя во втором файле роняет его целиком: " + str(sorted(dupes)))
+
 # Галерея и управление показом
 check("moderator.html: контейнер галереи", 'id="gallery"' in mod_html)
 check("moderator.html: пустое состояние галереи", 'id="galleryEmpty"' in mod_html)
@@ -344,6 +392,11 @@ check("screen.js: галерея рисуется по данным, а не п�
 check("screen.js: что показано, помечено источником",
       "shownKey" in screen_str and "'g' +" in screen_str and "'m' +" in screen_str,
       "иначе слайд галереи «1» считался бы уже показанным сообщением «1»")
+check("screen.js: показ сверяется и по содержимому, не только по id",
+      re.search(r"function signature\(", screen_str) is not None
+      and "repaintSame" in screen_str,
+      "иначе правка текста под фотографией не появилась бы на экране, "
+      "пока ведущий не дождался бы следующего слайда")
 
 print("\n=== Окно правки текста (4.0) ===")
 mod_js2 = (STATIC / "moderator.js").read_text(encoding="utf-8")

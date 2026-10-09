@@ -9,7 +9,14 @@ const tabSlideshow = document.getElementById('tabSlideshow');
 const pageFeed = document.getElementById('pageFeed');
 const pageSlideshow = document.getElementById('pageSlideshow');
 const tabCount = document.getElementById('tabSlideshowCount');
+// Кнопка запуска нужна и в «Ленте», и в «Слайдшоу»: переключать, что
+// показывает экран, удобнее там, где ведущий сейчас работает. Подписываем
+// обе и держим список, а не одиночный элемент.
+const runBtns = [...document.querySelectorAll('[data-act="slideshow-run"]')];
 const runBtn = document.getElementById('slideshowRunBtn');
+const ssPlayBtn = document.getElementById('slideshowPlayBtn');
+const ssPlayGlyph = document.getElementById('slideshowPlayGlyph');
+const ssPlayLabel = document.getElementById('slideshowPlayLabel');
 const clearBtn = document.getElementById('slideshowClearBtn');
 const runState = document.getElementById('slideshowState');
 const archiveCount = document.getElementById('archiveCount');
@@ -119,10 +126,15 @@ document.addEventListener('click', (e) => {
   const id = Number(btn.dataset.id);
   if (btn.dataset.gal === 'drop') galleryDrop(id);
   else if (btn.dataset.gal === 'edit') {
-    // то же окно правки, что и в ленте: openEdit живёт в moderator.js
+    // то же окно правки, что и в ленте: openEdit живёт в moderator.js.
+    // У снимка, взятого из строки ленты, текст общий: правим здесь — правится
+    // и в ленте, и на экране.
     const item = (state.gallery || []).find((g) => g.id === id);
     if (item && typeof openEdit === 'function') {
-      openEdit('gallery', id, item.body, 'Текст снимка в галерее. Имя не меняется.');
+      openEdit('gallery', id, item.body,
+        item.source_id
+          ? 'Этот снимок взят из ленты — текст поправится и там, и в слайдшоу.'
+          : 'Сообщения из ленты уже нет, текст правится только здесь.');
     }
   } else if (btn.dataset.gal === 'show') {
     // сначала галерея должна быть запущена, иначе показывать нечего
@@ -134,16 +146,46 @@ document.addEventListener('click', (e) => {
   }
 });
 
-/* ---------------- Запуск и остановка ---------------- */
+/* ---------------- Запуск, остановка, пауза ---------------- */
 function renderSlideshowBar() {
   const total = inSlideshow().length;
   const on = !!state.screen.slideshow_visible;
-  runBtn.classList.toggle('active', on);
-  runBtn.textContent = on ? 'Вернуть обычную ленту' : 'Запустить слайдшоу на экране';
-  runBtn.disabled = !on && total === 0;
+  const playing = state.screen.slideshow_playing !== false;
+
+  runBtns.forEach((b) => {
+    // подсветка одинаковая на обеих кнопках: видно с любой вкладки, что
+    // сейчас на экране галерея, а не лента
+    b.classList.toggle('active', on);
+    b.disabled = !on && total === 0;
+    if (b === runBtn) {
+      b.textContent = on ? 'Вернуть обычную ленту' : 'Запустить слайдшоу на экране';
+    } else {
+      b.textContent = on ? 'Вернуть ленту' : 'Слайдшоу';
+      b.title = on
+        ? 'Вернуть на экран обычную ленту'
+        : 'Показать галерею на экране';
+    }
+  });
   clearBtn.disabled = total === 0;
+
+  // Пауза галереи — своя, у ленты своя. Пока галерея не на экране, пауза
+  // неуместна: снимки всё равно не показываются.
+  if (ssPlayBtn) {
+    ssPlayBtn.hidden = !on;
+    ssPlayBtn.disabled = total === 0;
+    ssPlayBtn.classList.toggle('active', playing);
+    ssPlayGlyph.textContent = playing ? '❚❚' : '▶';
+    ssPlayLabel.textContent = playing ? 'Пауза' : 'Продолжить';
+    ssPlayBtn.title = playing
+      ? 'Остановить показ снимков, текущий останется на экране'
+      : 'Продолжить показ снимков';
+  }
+
+  const pos = `снимок ${state.screen.slideshow_index + 1} из ${total}`;
   runState.textContent = on
-    ? `Слайдшоу идёт: снимок ${state.screen.slideshow_index + 1} из ${total}. Обычная лента ждёт.`
+    ? (playing
+        ? `Слайдшоу идёт: ${pos}, каждый снимок по ${state.screen.slideshow_interval} с. Обычная лента ждёт.`
+        : `Слайдшоу на паузе: ${pos}. Обычная лента ждёт. Нажмите «Продолжить», чтобы снимки сменились.`)
     : `Слайдшоу выключено, на экране обычная лента. В галерее ${total} ${plural(total, 'снимок', 'снимка', 'снимков')}.`;
 
   // Ползунок длительности: своя настройка у слайдшоу, у ленты она другая.
@@ -166,8 +208,11 @@ slideInterval.addEventListener('change', () => {
     control('slideshow-interval', slideInterval.value), 150);
 });
 
-runBtn.addEventListener('click', () =>
-  control('slideshow', state.screen.slideshow_visible ? '0' : '1'));
+runBtns.forEach((b) => b.addEventListener('click', () =>
+  control('slideshow', state.screen.slideshow_visible ? '0' : '1')));
+
+ssPlayBtn.addEventListener('click', () =>
+  control('slideshow-play', state.screen.slideshow_playing === false ? '1' : '0'));
 
 clearBtn.addEventListener('click', async () => {
   const total = inSlideshow().length;

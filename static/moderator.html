@@ -63,6 +63,11 @@
       <button class="btn ghost" id="splashBtn" title="Показать или убрать заставку на весь экран">Заставка</button>
       <button class="btn ghost" id="qrBtn">QR на экране</button>
       <button class="btn ghost" id="resetBtn" title="Начать круг заново">Заново</button>
+      <!-- та же кнопка, что и во вкладке «Слайдшоу»: переключать, что
+           показывает экран, удобнее оттуда, где ведущий сейчас работает.
+           Подсвечивается, когда слайдшоу на экране. -->
+      <button class="btn ghost" id="slideshowRunBtnFeed" data-act="slideshow-run"
+              title="Показать галерею на экране">Слайдшоу</button>
     </div>
   </section>
 
@@ -139,8 +144,15 @@
 
     <section class="control-bar slideshow-bar">
       <div class="control-side">
-        <button class="btn" id="slideshowRunBtn" title="Показать галерею на экране">
+        <button class="btn" id="slideshowRunBtn" data-act="slideshow-run"
+                title="Показать галерею на экране">
           Запустить слайдшоу на экране
+        </button>
+        <!-- своя пауза галереи: лента на этом экране не показывается,
+             и её пауза тут ни при чём -->
+        <button class="btn ghost" id="slideshowPlayBtn" title="Остановить или продолжить показ снимков">
+          <span class="ctl-glyph" id="slideshowPlayGlyph">❚❚</span><span
+                class="ctl-label" id="slideshowPlayLabel">Пауза</span>
         </button>
         <button class="btn ghost" id="slideshowClearBtn" title="Убрать все снимки из галереи">
           Опустошить галерею

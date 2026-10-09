@@ -53,6 +53,12 @@ CREATE TABLE IF NOT EXISTS gallery (
     image      TEXT NOT NULL,
     body       TEXT NOT NULL DEFAULT '',
     author     TEXT NOT NULL DEFAULT '',
+    -- строка ленты, из которой снимок попал в галерею. Нужна, чтобы правка
+    -- текста в ленте доезжала и в слайдшоу: тот же снимок не должен
+    -- показываться на экране с двумя разными надписями. NULL — снимок
+    -- остался в галерее, а его сообщение из ленты удалили; тогда текст
+    -- остаётся тем, что был при отметке.
+    source_id  INTEGER,
     position   REAL NOT NULL DEFAULT 0,
     created_at REAL NOT NULL
 );
@@ -97,6 +103,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
                  r["position"], r["created_at"]),
             )
         conn.execute("DROP INDEX IF EXISTS idx_messages_slideshow")
+
+    # 4.0.1: галерея помнит, из какой строки ленты взялся снимок
+    gal_cols = _columns(conn, "gallery")
+    if "source_id" not in gal_cols:
+        conn.execute("ALTER TABLE gallery ADD COLUMN source_id INTEGER")
 
     # модерация убрана, но в старых базах остались её следы
     if "reject_reason" in have:
@@ -290,10 +301,18 @@ class EventStore:
     # ведущий терял то, что сам же и отметил.
 
     def gallery_items(self) -> list[dict]:
-        """Все снимки галереи в порядке показа."""
+        """Все снимки галереи в порядке показа.
+
+        source_id отдаётся только если строка ленты на месте. Сообщение могли
+        удалить, а номер остался: ведущий увидел бы «текст поправится и в
+        ленте» про текст, который в ленте уже не показывается.
+        """
         with self.connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM gallery ORDER BY position ASC, id ASC"
+                "SELECT g.id, g.image, g.body, g.author, g.position, g.created_at, "
+                "       CASE WHEN p.image IS NOT NULL THEN g.source_id END AS source_id "
+                "FROM gallery g LEFT JOIN messages p ON p.id = g.source_id "
+                "ORDER BY g.position ASC, g.id ASC"
             ).fetchall()
         return [dict(r) for r in rows]
 
@@ -317,7 +336,9 @@ class EventStore:
                 "SELECT 1 FROM gallery WHERE image = ?", (image,)
             ).fetchone() is not None
 
-    def gallery_add(self, image: str, body: str, author: str) -> dict | None:
+    def gallery_add(
+        self, image: str, body: str, author: str, source_id: int | None = None
+    ) -> dict | None:
         """Добавить фотографию в галерею. None — если это не фотография.
 
         Один и тот же снимок дважды не добавляется: галочка должна быть
@@ -331,9 +352,10 @@ class EventStore:
                 "SELECT COALESCE(MAX(position), 0) + 1 FROM gallery"
             ).fetchone()[0]
             conn.execute(
-                "INSERT OR IGNORE INTO gallery (image, body, author, position, created_at) "
-                "VALUES (?,?,?,?,?)",
-                (image, body or "", author or "", nxt, now),
+                "INSERT OR IGNORE INTO gallery "
+                "(image, body, author, source_id, position, created_at) "
+                "VALUES (?,?,?,?,?,?)",
+                (image, body or "", author or "", source_id, nxt, now),
             )
             row = conn.execute(
                 "SELECT * FROM gallery WHERE image = ?", (image,)
@@ -350,6 +372,32 @@ class EventStore:
         with self.connect() as conn:
             cur = conn.execute("DELETE FROM gallery WHERE image = ?", (image,))
             return bool(cur.rowcount)
+
+    def gallery_source(self, gallery_id: int) -> int | None:
+        """Из какой строки ленты взят снимок, если она ещё есть."""
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT g.source_id, p.image FROM gallery g "
+                "LEFT JOIN messages p ON p.id = g.source_id WHERE g.id = ?",
+                (gallery_id,),
+            ).fetchone()
+        if row is None or row["source_id"] is None:
+            return None
+        return row["source_id"] if row["image"] else None
+
+    def gallery_follow(self, image: str, body: str, author: str) -> int:
+        """Обновить текст всех снимков галереи с этим файлом.
+
+        Вызывается после правки сообщения в ленте. Снимок один и тот же, и
+        показывать его с двумя разными надписями нельзя: ведущий правит
+        опечатку в ленте, а на экране остаётся старая.
+        """
+        with self.connect() as conn:
+            cur = conn.execute(
+                "UPDATE gallery SET body = ?, author = ? WHERE image = ?",
+                (body or "", author or "", image),
+            )
+            return cur.rowcount or 0
 
     def gallery_edit(self, gallery_id: int, body: str) -> dict | None:
         """Правка текста у снимка в галерее. Имя автора не трогаем."""

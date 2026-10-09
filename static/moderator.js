@@ -88,10 +88,18 @@ function renderList() {
 
 /* ---------------- Полоса «сейчас на экране» ---------------- */
 function renderNow() {
-  const m = byId(state.screen.current_id);
+  // Пока идёт слайдшоу, полоса показывает снимок из галереи, а не сообщение
+  // ленты: «сейчас на экране» должно значить то, что на экране и есть.
+  const inShow = !!state.screen.slideshow_visible;
+  const item = inShow
+    ? (state.gallery || []).find((g) => g.id === state.screen.slideshow_current_id)
+    : null;
+  const m = item || byId(state.screen.current_id);
   if (!m) {
     nowText.textContent = '—';
-    nowMeta.textContent = 'Слайд 0 из 0';
+    nowMeta.textContent = inShow
+      ? 'Слайдшоу выключено, на экране лента'
+      : 'Слайд 0 из 0';
     nowThumb.hidden = true;
     return;
   }
@@ -102,6 +110,12 @@ function renderNow() {
   } else {
     nowThumb.hidden = true;
     nowThumb.replaceChildren();
+  }
+  if (inShow) {
+    const pos = (state.screen.slideshow_index || 0) + 1;
+    nowMeta.textContent =
+      `Галерея: снимок ${pos} из ${(state.gallery || []).length} · ${m.author || 'без подписи'}`;
+    return;
   }
   const idx = state.order.indexOf(m.id);
   nowMeta.textContent = `Слайд ${idx + 1} из ${state.order.length} · ${m.author}`;

@@ -121,11 +121,24 @@ class ScreenController:
         # лента крутится быстро; одна настройка на оба не годилась.
         self.slideshow_interval = interval
         self._slideshow_deadline = time.monotonic() + self.slideshow_interval
+        # 4.0: у галереи своя пауза, независимая от ленты. Запуск слайдшоу
+        # всегда включает показ: кнопка «запустить» и означает «показать
+        # сейчас», а не «восстановить то, что я остановил вчера».
+        self.slideshow_playing = True
 
     # У обычной ленты и у слайдшоу свои часы: переключение режима не должно
     # начинать отсчёт заново у того, что сейчас не показывается.
     def _due_at(self) -> float:
         return self._slideshow_deadline if self.slideshow_visible else self._deadline
+
+    @property
+    def running(self) -> bool:
+        """Идёт ли показ в том режиме, который сейчас на экране.
+
+        У ленты своя пауза, у галереи своя: кнопка паузы в ленте не должна
+        останавливать снимки, и наоборот.
+        """
+        return self.slideshow_playing if self.slideshow_visible else self.playing
 
     def reset_deadline(self) -> None:
         """Отсчёт с нуля для того режима, который сейчас на экране."""
@@ -210,6 +223,12 @@ class ScreenController:
             self.interval = max(3, min(300, int(seconds)))
             self._deadline = time.monotonic() + self.interval
 
+    async def set_slideshow_playing(self, playing: bool) -> None:
+        """Пауза и продолжение показа галереи."""
+        async with self._lock:
+            self.slideshow_playing = bool(playing)
+            self._slideshow_deadline = time.monotonic() + self.slideshow_interval
+
     async def set_slideshow_interval(self, seconds: int) -> None:
         """Длительность снимка в слайдшоу — настраивается отдельно от ленты."""
         async with self._lock:
@@ -244,7 +263,7 @@ class ScreenController:
 
     def due(self) -> bool:
         """Пора ли переключать слайд. Проверка без блокировки — только чтение."""
-        if not self.playing or self.qr_visible or self.splash_visible:
+        if not self.running or self.qr_visible or self.splash_visible:
             return False
         if self._active_len <= 1:
             return False
@@ -256,7 +275,7 @@ class ScreenController:
             return False
         async with self._lock:
             # пока ждали блокировку, время могло ещё не наступить
-            if not self.playing or self.qr_visible or self.splash_visible:
+            if not self.running or self.qr_visible or self.splash_visible:
                 return False
             if self._active_len <= 1 or time.monotonic() < self._due_at():
                 return False
@@ -281,6 +300,7 @@ class ScreenController:
             "splash_visible": self.splash_visible,
             # 4.0: слайдшоу. active_id — что на самом деле видно на экране
             "slideshow_visible": self.slideshow_visible,
+            "slideshow_playing": self.slideshow_playing,
             "slideshow_interval": self.slideshow_interval,
             "slideshow_current_id": self.slideshow_current_id,
             "slideshow_total": len(self.slideshow_items),

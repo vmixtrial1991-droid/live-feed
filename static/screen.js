@@ -329,9 +329,26 @@ function paintData(m) {
 let renderToken = 0;
 let swapTimer = null;
 
+/** Подпись того, что на экране: источник, id и содержимое.
+
+    Только id не годится: правка текста не меняет номер снимка, а экран
+    должен показать новый текст сразу, не дожидаясь следующего слайда.
+    Сравнивать приходится и содержимое. */
+function signature(prefix, item) {
+  return prefix + item.id + '|' + (item.image || '') + '|'
+    + (item.body || '') + '|' + (item.author || '');
+}
+
+/** Тот же самый слайд, изменилось только содержимое — перерисовываем
+    на месте, без анимации смены кадра: кадр ведь не менялся. */
+function repaintSame(prefix, item) {
+  shownKey = signature(prefix, item);
+  paintData(item);
+}
+
 /** Снимок из галереи: рисуем сразу, без задержки переключения ленты. */
 function renderItem(item) {
-  shownKey = 'g' + item.id;
+  shownKey = signature('g', item);
   paintData(item);
 }
 
@@ -346,7 +363,7 @@ function render(id) {
 
   const token = ++renderToken;
   slide.classList.add('swap');
-  shownKey = 'm' + id;
+  shownKey = signature('m', messages.get(id));
   clearTimeout(swapTimer);
   swapTimer = setTimeout(() => {
     if (token !== renderToken) return;   // слайд успели переключить — не вмешиваемся
@@ -378,7 +395,13 @@ function showCurrent(state) {
       return;
     }
     setOverlay(false);
-    if ('g' + sid !== shownKey) renderItem(item);
+    const sig = signature('g', item);
+    if (sig === shownKey) return;
+    if (shownKey && shownKey.slice(0, shownKey.indexOf('|')) === 'g' + item.id) {
+      repaintSame('g', item);
+    } else {
+      renderItem(item);
+    }
     return;
   }
 
@@ -393,7 +416,13 @@ function showCurrent(state) {
     return;
   }
   setOverlay(false);
-  if ('m' + id !== shownKey) render(id);
+  const sig = signature('m', messages.get(id));
+  if (sig === shownKey) return;
+  if (shownKey && shownKey.slice(0, shownKey.indexOf('|')) === 'm' + id) {
+    repaintSame('m', messages.get(id));
+  } else {
+    render(id);
+  }
 }
 
 connectWS(ev('/ws/display'), {

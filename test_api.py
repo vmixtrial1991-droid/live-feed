@@ -119,10 +119,17 @@ def png_bytes(w: int = 2400, h: int = 1800) -> bytes:
 
 
 print("\n=== Страницы ===")
-for path, name in [("/", "витрина"), ("/screen", "экран"),
+# Витрины в списке нет: она закрыта для всех, кроме администратора и
+# ведущего. Постороннему она отвечает редиректом на страницу входа,
+# и это проверяется отдельно — тут просто не ждём 200.
+for path, name in [("/screen", "экран"),
                    (f"/join?t={TOKEN}", "вход"), ("/moderator/login", "вход модератора")]:
     st, body = call("GET", path)
     check(f"{name} открывается ({st})", st == 200 and b"<html" in bytes(body).lower())
+
+st, body = call("GET", "/")
+check("витрина постороннему не отдаётся",
+      st in (301, 302, 303, 307), str(st))
 
 st, _ = call("GET", "/send")
 check("/send без сессии -> редирект на /join", st in (301, 302, 303, 307))

@@ -61,11 +61,15 @@ class _KeepsSecureCookies(urllib.request.HTTPCookieProcessor):
     def __init__(self) -> None:
         super().__init__(CookieJar())
         self.cookies: dict[str, str] = {}
+        # сырые заголовки Set-Cookie целиком: по словарю имя -> значение
+        # не видно срока действия, а он и есть предмет проверки сессии
+        self.seen: list[str] = []
 
     def http_response(self, request, response):
         # переопределять extract_cookies бессмысленно: urllib вызывает его
         # у банки cookiejar, а не у обработчика
         for value in response.headers.get_all("Set-Cookie") or []:
+            self.seen.append(value)
             name, _, rest = value.partition("=")
             self.cookies[name.strip()] = rest.split(";")[0]
         return super().http_response(request, response)

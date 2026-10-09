@@ -194,8 +194,9 @@ check("у разных событий разные коды приглашени
 # --------------------------------------------------------------------------
 print("\n=== Страницы события ===")
 anon = Client()
+# витрины в списке нет: она закрыта для всех, кроме администратора
+# и ведущего, проверяется это отдельным разделом ниже
 for path, name in (
-    (f"/e/{slug}/", "витрина"),
     (f"/e/{slug}/screen", "экран"),
     (f"/e/{slug}/join?t={code_a}", "вход по QR"),
     (f"/e/{slug}/moderator", "кабинет ведущего"),
@@ -209,8 +210,10 @@ for path, name in (
 st, _, _ = anon.get("/e/" + urllib.parse.quote("нетакого") + "/")
 check("чужое событие — 404", st == 404, str(st))
 
-st, _, _ = anon.get(f"/e/{slug}/join?t=" + urllib.parse.quote("НЕВЕРНЫЙКОД"))
-check("вход по чужому коду не пускает", st in (302, 307), str(st))
+st, _, body = anon.get(f"/e/{slug}/join?t=" + urllib.parse.quote("НЕВЕРНЫЙКОД"))
+check("вход по чужому коду отдаёт страницу входа, а не витрину",
+      st == 200 and b"joinForm" in body, str(st))
+check("и витрины на ней нет", st == 200 and b"feed.js" not in body, str(st))
 
 # Гость без сессии, пришедший по ссылке на отправку, обязан попасть на
 # страницу входа, а не на витрину. Раньше код приглашения терялся на
@@ -299,11 +302,21 @@ location = headers.get("Location", "")
 check("адрес перехода — страница отправки", location.endswith(f"/e/{slug}/send"),
       location or "—")
 
-st, _, _ = anon.get(f"/e/{slug}/")
-check("постороннему витрина доступна", st == 200, str(st))
+# Витрина закрыта для всех, кроме администратора и ведущего. Раньше
+# сессия проверялась только у отправителя, и постороннему лента
+# показывалась целиком.
+st, headers, _ = anon.get(f"/e/{slug}/")
+check("постороннему витрина не отдаётся", st in (301, 302, 303, 307), str(st))
+check("и уводит на страницу входа",
+      headers.get("Location", "").endswith(f"/e/{slug}/join"),
+      headers.get("Location", ""))
 
-st, _, _ = Client().get(f"/e/{slug}/")
-check("новому посетителю витрина доступна", st == 200, str(st))
+st, headers, _ = Client().get(f"/e/{slug}/")
+check("новому посетителю витрина не отдаётся", st in (301, 302, 303, 307), str(st))
+
+st, headers, _ = anon.get(f"/e/{slug}/?t={code_a}")
+check("код с витрины доезжает до входа",
+      f"t={code_a}" in headers.get("Location", ""), headers.get("Location", ""))
 
 st, _, _ = guest_a.post("/e/" + urllib.parse.quote("нетакого") + "/api/messages", {"body": "x"})
 check("отправка в несуществующее событие — 404", st == 404, str(st))

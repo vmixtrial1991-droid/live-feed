@@ -38,21 +38,43 @@
 <script>
 const params = new URLSearchParams(location.search);
 const invite = params.get('t') || '';
-
-api(ev('/api/config')).then(cfg => {
-  document.getElementById('eventTitle').textContent = cfg.event_title || 'Живая лента';
-  document.getElementById('eventSubtitle').textContent = cfg.event_subtitle || '';
-});
-
-if (!invite) {
-  document.getElementById('joinForm').hidden = true;
-  document.getElementById('eventSubtitle').textContent =
-    'Откройте эту страницу через QR-код приглашения.';
-}
-
 const form = document.getElementById('joinForm');
 const btn = document.getElementById('joinBtn');
 const err = document.getElementById('joinError');
+const sub = document.getElementById('eventSubtitle');
+
+/* Что сказать человеку, который сюда пришёл.
+
+   4.0.1: витрина закрыта, и страница входа стала конечной точкой. Значит
+   она обязана объяснять, почему входа не получилось.
+
+   Раньше подпись «откройте по QR-коду» ставилась сразу, а ответ с
+   настройками события приходил позже и затирал её пустым значением.
+   Посетитель видел пустую карточку без единого слова. */
+function explain() {
+  const why = (window.LF && window.LF.inviteReason)
+    || (invite ? 'bad_code' : 'no_code');
+  if (why === 'no_code') {
+    form.hidden = true;
+    sub.textContent = 'Откройте эту страницу через QR-код приглашения.';
+  } else {
+    // код есть, но не подошёл. Форму прятать незачем: человек мог прийти
+    // по старой ссылке, и сказать надо прямо, а не молчанием
+    sub.textContent =
+      'Эта ссылка-приглашение больше не работает. Попросите новый QR-код.';
+  }
+}
+
+api(ev('/api/config')).then(cfg => {
+  document.getElementById('eventTitle').textContent = cfg.event_title || 'Живая лента';
+  // настройки события имеют право записать подпись только если никто
+  // ещё ничего важного туда не написал
+  if (!sub.dataset.locked) sub.textContent = cfg.event_subtitle || '';
+}).catch(() => { explain(); });
+
+// подпись занята нашим объяснением: конфиг её больше не затрёт
+sub.dataset.locked = '1';
+explain();
 
 form.addEventListener('submit', async (e) => {
   e.preventDefault();

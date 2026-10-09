@@ -383,6 +383,26 @@ check("common.js: рабочие ссылки на месте",
           for x in ("toSend: '/send'", "toSendBig: '/send'", "toScreen: '/screen'")),
       "убирая витрину, не снеси страницу отправки и экран")
 
+print("\n=== Витрина закрыта, вход объясняет (4.0.1) ===")
+join_html = (STATIC / "join.html").read_text(encoding="utf-8")
+check("join.html: различает отсутствие кода и негодный код",
+      "no_code" in join_html and "bad_code" in join_html,
+      "посетителю надо сказать, что именно не так, а не молчать")
+check("join.html: объяснение не затирается настройками события",
+      "dataset.locked" in join_html,
+      "ответ с настройками приходил позже и затирал подпись пустым значением")
+check("join.html: при негодном коде говорит прямо",
+      "больше не работает" in join_html)
+check("join.html: при отсутствии кода зовёт открыть по QR",
+      "QR-код" in join_html)
+check("join.html: форма прячется только когда кода нет",
+      re.search(r"if \(why === 'no_code'\)\s*\{\s*form\.hidden = true", join_html)
+      is not None,
+      "человек по старой ссылке должен увидеть причину, а не пустую карточку")
+check("на странице входа нет загрузки ленты",
+      "feed.js" not in join_html,
+      "витрина закрыта, лента на странице входа не нужна")
+
 print("\n=== Заставка (4.0.1) ===")
 mod_js3 = (STATIC / "moderator.js").read_text(encoding="utf-8")
 # Панель ведущего обязана показывать ровно ту заставку, что сейчас на экране.

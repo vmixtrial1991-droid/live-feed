@@ -136,7 +136,7 @@ def _static_version() -> str:
     return _STATIC_VERSION
 
 
-def _page(name: str, base: str = "") -> HTMLResponse:
+def _page(name: str, base: str = "", extra: str = "") -> HTMLResponse:
     """Отдаёт страницу и говорит ей, какой у неё адрес.
 
     Страницы событий живут по адресу /e/<адрес>/..., поэтому скриптам
@@ -150,7 +150,7 @@ def _page(name: str, base: str = "") -> HTMLResponse:
     # отметка версии в ссылках на скрипты и стили: см. _static_version
     html = _STATIC_URL_RE.sub(rf"\g<1>?v={_static_version()}", html)
     if base:
-        inject = f"<script>window.LF={{base:{json.dumps(base)}}};</script>"
+        inject = f"<script>window.LF={{base:{json.dumps(base)}{extra}}};</script>"
         html = html.replace("</head>", f"{inject}\n</head>", 1)
     return HTMLResponse(html)
 
@@ -317,19 +317,27 @@ async def api_admin_qr(slug: str, request: Request):
 # Страницы события
 # --------------------------------------------------------------------------
 @app.get("/e/{slug}/", response_class=HTMLResponse)
-async def page_feed(slug: str, request: Request):
-    """Общая витрина события.
+async def page_feed(slug: str, request: Request, t: str = ""):
+    """Витрина события. Открыта только администратору и ведущему.
 
-    Отправителю, который уже вошёл через QR, лента не показывается:
-    он уводится на свою страницу отправки. Иначе сообщения, задуманные
-    для экрана в зале, видны всем подряд и сюрприз пропадает.
-    Ведущий может открыть витрину — у него свой вход.
+    Раньше страницу видел всякий, кто знал адрес: проверялась лишь сессия
+    отправителя, а тому, у кого её не было, показывалась лента целиком.
+    Сообщения, задуманные для экрана в зале, висели в открытом доступе.
+
+    Теперь:
+      * администратор и ведущий смотрят витрину — им это нужно;
+      * вошедший отправитель уходит на свою страницу отправки;
+      * остальные — на страницу входа, и код приглашения не теряется.
     """
     event = _prepare(_event_or_404(slug))
+    if auth.is_admin(request) or auth.is_moderator(request, event):
+        return _page("feed.html", base=f"/e/{event.slug}")
     if auth.current_participant(request, event) is not None:
-        if not auth.is_moderator(request, event):
-            return RedirectResponse(f"/e/{event.slug}/send", status_code=302)
-    return _page("feed.html", base=f"/e/{event.slug}")
+        return RedirectResponse(f"/e/{event.slug}/send", status_code=302)
+    target = f"/e/{event.slug}/join"
+    if t:
+        target += f"?t={t}"
+    return RedirectResponse(target, status_code=302)
 
 
 @app.get("/e/{slug}/screen", response_class=HTMLResponse)
@@ -340,10 +348,20 @@ async def page_screen(slug: str):
 
 @app.get("/e/{slug}/join", response_class=HTMLResponse)
 async def page_join(slug: str, request: Request, t: str = ""):
+    """Страница входа. Конечная точка, а не перепутье.
+
+    Раньше человек без верного кода уходил отсюда на витрину — то есть
+    витрина была не «закрыта для всех», а просто чуть дальше по ссылке.
+    Теперь страница входа всегда последняя: сама она объясняет, что
+    открыть её надо по QR-коду приглашения.
+    """
     event = _prepare(_event_or_404(slug))
-    if not auth.invite_is_valid(event, t) and auth.current_participant(request, event) is None:
-        return RedirectResponse(f"/e/{event.slug}", status_code=302)
-    return _page("join.html", base=f"/e/{event.slug}")
+    if auth.current_participant(request, event) is not None:
+        return RedirectResponse(f"/e/{event.slug}/send", status_code=302)
+    ok = auth.invite_is_valid(event, t)
+    reason = "" if ok else ("no_code" if not t else "bad_code")
+    return _page("join.html", base=f"/e/{event.slug}",
+                 extra=f",inviteOk:{json.dumps(ok)},inviteReason:{json.dumps(reason)}")
 
 
 @app.get("/e/{slug}/send", response_class=HTMLResponse)

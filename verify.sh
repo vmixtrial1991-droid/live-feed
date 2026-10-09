@@ -29,7 +29,10 @@ docker compose exec -T app pip install -q websockets >/dev/null 2>&1
 
 # наборы, которым нужен только адрес: кладём в /tmp
 for f in deploy/check_remote.py test_splash.py test_events.py test_api.py \
-         test_limits.py check_admin_page.py testlib.py; do
+         test_limits.py check_admin_page.py testlib.py \
+         test_slideshow.py test_realtime.py test_no_moderation.py \
+         test_migration.py test_proxy_networks.py test_cert_gate.py \
+         test_session.py test_code_entry.py; do
     docker cp "$f" "$APP:/tmp/$(basename "$f")" 2>/dev/null
 done
 # проверке скриптов страниц нужен рядом каталог static — поэтому в /app
@@ -76,6 +79,14 @@ run "события"          "$INSIDE" /tmp/test_events.py
 run "сценарии HTTP"    "$INSIDE" /tmp/test_api.py
 run "админ-панель"     "$INSIDE" /tmp/check_admin_page.py
 run "пределы показа"   "$INSIDE" /tmp/test_limits.py
+run "слайдшоу"          "$INSIDE" /tmp/test_slideshow.py
+run "показ в реальном"  "$INSIDE" /tmp/test_realtime.py
+run "без модерации"     "$INSIDE" /tmp/test_no_moderation.py
+run "миграции базы"     "$INSIDE" /tmp/test_migration.py
+run "сети прокси"       "$INSIDE" /tmp/test_proxy_networks.py
+run "ворота сертификата" "$INSIDE" /tmp/test_cert_gate.py
+run "сессии"            "$INSIDE" /tmp/test_session.py
+run "ввод кода"         "$INSIDE" /tmp/test_code_entry.py
 
 printf "    %-22s " "скрипты страниц"
 out="$(docker exec -w /app "$APP" python /app/test_frontend.py 2>&1)"
@@ -85,6 +96,24 @@ TOTAL_OK=$((TOTAL_OK + ok))
 TOTAL_FAIL=$((TOTAL_FAIL + bad))
 printf "OK=%-4s FAIL=%s\n" "$ok" "$bad"
 [ "$ok" = "0" ] && printf '%s\n' "$out" | tail -6 | sed 's/^/        /'
+
+echo "==> Статика и разметка"
+# Аудит проверяет исходники: разбор Python, кодировку, концы строк, теги,
+# соответствие «скрипт ищет такой-то id — такой id в разметке». На сервере он
+# смотрит на развёрнутый комплект, а не на машину разработчика, и ловит
+# расхождение между ними.
+if [ -f audit_static.py ]; then
+    a_out="$(python3 audit_static.py 2>&1)"
+    a_ok="$(printf '%s' "$a_out" | grep -cE '^  OK')"
+    a_bad="$(printf '%s' "$a_out" | grep -cE '^  FAIL')"
+    TOTAL_OK=$((TOTAL_OK + a_ok))
+    TOTAL_FAIL=$((TOTAL_FAIL + a_bad))
+    printf "    %-22s OK=%-4s FAIL=%s\n" "аудит статики" "$a_ok" "$a_bad"
+    [ "$a_bad" != "0" ] && printf '%s\n' "$a_out" | grep -E '^  FAIL' | sed 's/^/        /'
+else
+    echo "    аудит статики: файла нет на сервере"
+    TOTAL_FAIL=$((TOTAL_FAIL + 1))
+fi
 
 echo "==> Комплект развёртывания"
 # подробный вывод check_release.sh прячем: он длинный и забивает таблицу
@@ -108,7 +137,12 @@ echo
 echo "==> Убираю за собой"
 docker exec -u root "$APP" rm -f /tmp/check_remote.py /tmp/test_splash.py \
     /tmp/test_events.py /tmp/test_api.py /tmp/test_limits.py \
-    /tmp/check_admin_page.py /tmp/testlib.py /app/test_frontend.py 2>/dev/null
+    /tmp/check_admin_page.py /tmp/testlib.py /app/test_frontend.py \
+    /tmp/test_slideshow.py /tmp/test_realtime.py /tmp/test_no_moderation.py \
+    /tmp/test_migration.py /tmp/test_proxy_networks.py /tmp/test_cert_gate.py \
+    /tmp/test_session.py /tmp/test_code_entry.py 2>/dev/null
+# и сам аудит, чтобы на сервере не лежали файлы проверок
+rm -f audit_static.py audit_js.py 2>/dev/null
 
 echo "==> Что осталось на сервере"
 docker exec "$APP" ls -1 /app/data/events/ 2>/dev/null | sed 's/^/    событие: /' \

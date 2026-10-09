@@ -100,6 +100,11 @@ done
 for t in "$SRC"/test_*.py "$SRC/testlib.py" "$SRC/check_admin_page.py"; do
     [ -f "$t" ] && cp "$t" "$APP_DIR/"
 done
+# аудит статики туда же: он смотрит на развёрнутый комплект и ловит
+# расхождение между сервером и машиной разработчика
+for t in "$SRC/audit_static.py" "$SRC/audit_js.py"; do
+    [ -f "$t" ] && cp "$t" "$APP_DIR/"
+done
 
 # концы строк: CRLF ломает bash и nginx. Скрипты верхнего уровня тоже —
 # комплект собирают на Windows, и без этого check_release.sh на сервере

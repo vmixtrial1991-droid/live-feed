@@ -242,6 +242,75 @@ paren, brace = balance_outside_strings(admin_js)
 check("admin.js: скобки сходятся", paren == 0 and brace == 0,
       f"лишних ( {paren}, {{ {brace}" if (paren or brace) else "")
 
+print("\n=== Слайдшоу и архив в кабинете (4.0) ===")
+# Вкладки: обе должны быть в разметке, и каждая со своим контейнером,
+# иначе переключатель прячет или показывает не то
+check("moderator.html: вкладка «Лента»", 'id="tabFeed"' in mod_html)
+check("moderator.html: вкладка «Слайдшоу»", 'id="tabSlideshow"' in mod_html)
+check("moderator.html: счётчик снимков на вкладке", 'id="tabSlideshowCount"' in mod_html)
+check("moderator.html: страница вкладки «Лента»", 'id="pageFeed"' in mod_html)
+check("moderator.html: страница вкладки «Слайдшоу»", 'id="pageSlideshow"' in mod_html)
+check("moderator.html: лента видна сразу, слайдшоу спрятано",
+      re.search(r'class="tab-page is-active" id="pageFeed"', mod_html) is not None
+      and re.search(r'class="tab-page" id="pageSlideshow"', mod_html) is not None)
+check("moderator.html: подключён скрипт слайдшоу",
+      "/static/slideshow-panel.js" in mod_html,
+      "без него вкладка будет пустой: карточек нет, кнопки не работают")
+
+# Галерея и управление показом
+check("moderator.html: контейнер галереи", 'id="gallery"' in mod_html)
+check("moderator.html: пустое состояние галереи", 'id="galleryEmpty"' in mod_html)
+check("moderator.html: кнопка запуска слайдшоу", 'id="slideshowRunBtn"' in mod_html)
+check("moderator.html: кнопка очистки галереи", 'id="slideshowClearBtn"' in mod_html)
+check("moderator.html: строка состояния показа", 'id="slideshowState"' in mod_html)
+
+# Архив фотографий
+check("moderator.html: счётчик архива", 'id="archiveCount"' in mod_html)
+check("moderator.html: кнопка скачивания", 'id="archiveDownload"' in mod_html)
+check("moderator.html: кнопка удаления всех фото", 'id="archiveWipe"' in mod_html)
+check("moderator.html: кнопка удаления помечена как опасная",
+      re.search(r'id="archiveWipe"[^>]*class="[^"]*bad', mod_html) is not None
+      or 'class="btn bad" id="archiveWipe"' in mod_html,
+      "стирание фотографий необратимо и не должно выглядеть как обычное действие")
+check("moderator.html: скачивание отдаём файлом",
+      re.search(r'id="archiveDownload"[^>]*download', mod_html) is not None)
+check("moderator.html: сказано, что удаление из ленты не стирает файл",
+      "не зависят от ленты" in mod_html,
+      "ведущий должен понимать, зачем нужны две кнопки рядом")
+
+slide_js = (STATIC / "slideshow-panel.js").read_text(encoding="utf-8")
+check("slideshow-panel.js: галочка шлёт запрос с галочкой",
+      "/api/moderator/slideshow" in slide_js and "message_id: id" in slide_js)
+check("slideshow-panel.js: запуск идёт через действие показа",
+      "'slideshow'" in slide_js and "control('slideshow'" in slide_js)
+check("slideshow-panel.js: скачивание архива", "/api/moderator/photos.zip" in slide_js)
+check("slideshow-panel.js: удаление всех фото",
+      "/api/moderator/photos-delete-all" in slide_js)
+check("slideshow-panel.js: перед удалением спросим",
+      re.search(r"confirm\(", slide_js) is not None,
+      "стирание необратимо — без подтверждения нельзя")
+check("slideshow-panel.js: в подтверждении сказано про отмену",
+      "Отменить это будет нельзя" in slide_js)
+check("slideshow-panel.js: галерея строится из отмеченных",
+      "m.in_slideshow" in slide_js)
+check("slideshow-panel.js: галочка не попадает в общий обработчик",
+      "if (btn.tagName === 'INPUT') return;" in (STATIC / "moderator.js").read_text(encoding="utf-8"),
+      "иначе щёлчок по квадратику выполнит ещё и чужое действие")
+paren, brace = balance_outside_strings(slide_js)
+check("slideshow-panel.js: скобки сходятся", paren == 0 and brace == 0,
+      f"лишних ( {paren}, {{ {brace}" if (paren or brace) else "")
+
+# Экран: слайдшоу занимает кадр целиком
+check("screen.js: слайдшоу отрабатывает в showCurrent",
+      "screenState.slideshow_visible" in screen_js)
+check("screen.js: в слайдшоу показывается снимок из галереи",
+      "screenState.slideshow_current_id" in screen_js)
+check("screen.js: пустая галерея объясняется, а не показывается пустым кадром",
+      re.search(r"Слайдшоу пустое", screen_js) is not None)
+check("screen.js: обычная лента не поехала после слайдшоу",
+      screen_js.count("showCurrent") >= 3,
+      "showCurrent зовётся при init, refresh и screen")
+
 print("\n=== Итог ===")
 if FAILURES:
     print(f"Провалено проверок: {len(FAILURES)}")

@@ -137,6 +137,7 @@ check("событие создано", st == 200 and bool((res or {}).get("event
 cfg_path = DATA_DIR / "events" / slug / "config.json"
 with open(cfg_path, encoding="utf-8") as f:
     invite = json.load(f)["invite_token"]
+EVENT_DIR = cfg_path.parent
 
 mod = Client()
 st, _ = mod.post_json(f"/e/{slug}/api/moderator/login", {"password": MOD_PASSWORD})
@@ -326,6 +327,11 @@ try:
     check("гость не скачивает архив", st in (401, 403), str(st))
 finally:
     admin.post(f"/api/admin/events/{slug}/delete", {})
+
+print("\n=== Удаление события уносит фотографии с собой ===")
+# обещание из требований: «при удалении события все фотографии тоже
+# стираются». Событие мы стёрли в finally — проверяем, что папки не осталось
+check("папка события удалена с диска", not EVENT_DIR.exists(), str(EVENT_DIR))
 
 print("\n=== Итог ===")
 if failures:

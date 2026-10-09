@@ -145,6 +145,22 @@ input[type="text"], input[type="password"], textarea {
 input:focus, textarea:focus { border-color: var(--accent); background: rgba(91,140,255,.07); }
 textarea { line-height: 1.5; }
 
+/* Код приглашения вводят пальцем на неудобной клавиатуре, поэтому он
+   крупный, разрядка широкая и моноширинный: 8/0 и B/8 не путаются глазом.
+
+   Селектор с типом input, а не просто класс: выше стоит
+   `input[type="text"]` со специфичностью (0,1,1), и один класс (0,1,0)
+   проиграл бы ему — стили бы просто не применились. */
+input.code-input, .code-input {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 1.5rem;
+  letter-spacing: .28em;
+  text-align: center;
+  text-transform: uppercase;
+  min-height: 60px;
+}
+.code-input::placeholder { letter-spacing: .18em; font-size: 1.1rem; }
+
 input[type="range"] { width: 100%; accent-color: var(--accent); height: 34px; }
 
 .error, .ok {

@@ -19,6 +19,18 @@
   </div>
 
   <form id="joinForm" class="stack">
+    <!-- 4.0.1: код можно ввести руками. Раньше сюда попадал только тот,
+         кто пришёл по ссылке с кодом, а витрина закрыта: не отсканировал QR —
+         и всё, выхода нет. -->
+    <label class="field" id="codeField" hidden>
+      <span>Код приглашения</span>
+      <input id="codeInput" type="text" inputmode="latin" maxlength="12"
+             autocapitalize="characters" autocomplete="off" spellcheck="false"
+             placeholder="Например, KKTB6RQW" class="code-input">
+      <span class="hint">
+        Тот же код, что напечатан под QR-кодом. Регистр не важен.
+      </span>
+    </label>
     <label class="field">
       <span>Как вас зовут?</span>
       <input id="nameInput" type="text" maxlength="40" required
@@ -42,6 +54,23 @@ const form = document.getElementById('joinForm');
 const btn = document.getElementById('joinBtn');
 const err = document.getElementById('joinError');
 const sub = document.getElementById('eventSubtitle');
+const codeField = document.getElementById('codeField');
+const codeInput = document.getElementById('codeInput');
+
+/* Алфавит кода: заглавные, без похожих символов (0/O, 1/I).
+   Приводим введённое к тому же виду, что отдаёт сервер, — иначе пробел
+   от мобильной клавиатуры или строчная буква тихо ломают вход. */
+function cleanCode(raw) {
+  return String(raw || '')
+    .toUpperCase()
+    .replace(/[^A-Z2-9]/g, '')
+    .slice(0, 12);
+}
+
+codeInput.addEventListener('input', () => {
+  const clean = cleanCode(codeInput.value);
+  if (clean !== codeInput.value) codeInput.value = clean;
+});
 
 /* Что сказать человеку, который сюда пришёл.
 
@@ -59,16 +88,19 @@ const sub = document.getElementById('eventSubtitle');
 function explain() {
   const lf = window.LF || {};
   const ok = ('inviteOk' in lf) ? !!lf.inviteOk : !!invite;
-  if (ok) return false;                 // подписью займётся конфиг события
+  if (ok) {
+    codeField.hidden = true;            // код уже в адресе, вводить нечего
+    return false;                       // подписью займётся конфиг события
+  }
   sub.dataset.locked = '1';             // конфиг её больше не затрёт
+  codeField.hidden = false;             // входим без всякого QR
   if (!invite) {
-    form.hidden = true;
-    sub.textContent = 'Откройте эту страницу через QR-код приглашения.';
+    sub.textContent = 'Введите код приглашения или откройте эту страницу по QR-коду.';
   } else {
-    // код есть, но не подошёл. Форму прятать незачем: человек мог прийти
-    // по старой ссылке, и сказать надо прямо, а не молчанием
+    // код в адресе есть, но не подошёл: человек мог прийти по старой
+    // ссылке. Сказать надо прямо, и дать ввести другой код руками
     sub.textContent =
-      'Эта ссылка-приглашение больше не работает. Попросите новый QR-код.';
+      'Эта ссылка-приглашение не работает. Введите актуальный код или попросите новый QR-код.';
   }
   return true;
 }
@@ -85,13 +117,31 @@ form.addEventListener('submit', async (e) => {
   err.hidden = true;
   btn.disabled = true;
   btn.textContent = 'Проверяем…';
+  // написанный код важнее адресного: человек мог прийти по старой
+  // ссылке и вписать новый
+  const typed = cleanCode(codeInput.value);
+  const useCode = typed || invite;
+  if (!useCode) {
+    err.textContent = 'Введите код приглашения.';
+    err.hidden = false;
+    // кнопку разблокируем прямо здесь: если этого не сделать, она останется
+    // серой иdisabled навсегда, и второй попытки не будет — человек уйдёт
+    btn.disabled = false;
+    btn.textContent = 'Продолжить';
+    codeInput.focus();
+    return;
+  }
   try {
-    const data = await apiForm(ev('/api/join'), { name: nameInput.value, invite });
+    const data = await apiForm(ev('/api/join'),
+      { name: nameInput.value, invite: useCode });
     if (!data.ok) throw new Error(data.detail || 'Не получилось');
     location.href = ev('/send');
   } catch (ex) {
     err.textContent = ex.message || 'Что-то пошло не так. Попробуйте ещё раз.';
     err.hidden = false;
+    // код не подошёл — пусть попробует вписать другой, не уходя со страницы
+    codeField.hidden = false;
+    if (!typed) codeInput.focus();
     btn.disabled = false;
     btn.textContent = 'Продолжить';
   }

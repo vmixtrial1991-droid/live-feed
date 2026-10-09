@@ -383,27 +383,69 @@ check("common.js: рабочие ссылки на месте",
           for x in ("toSend: '/send'", "toSendBig: '/send'", "toScreen: '/screen'")),
       "убирая витрину, не снеси страницу отправки и экран")
 
+print("\n=== Ввод кода руками (4.0.1) ===")
+join_html = (STATIC / "join.html").read_text(encoding="utf-8")
+base_css = (STATIC / "base.css").read_text(encoding="utf-8")
+check("join.html: есть поле кода", 'id="codeInput"' in join_html)
+check("join.html: поле называно по-человечески", "Код приглашения" in join_html)
+check("join.html: у поля есть подсказка про регистр", "Регистр не важен" in join_html)
+check("join.html: код нормализуется до отправки",
+      re.search(r"function cleanCode\(", join_html) is not None
+      and "toUpperCase()" in join_html)
+# в поле запрещены символы, которых нет в алфавите кода
+check("join.html: посторонние символы вычищаются",
+      re.search(r"replace\(/\[\^A-Z2-9\]/g", join_html) is not None,
+      "пробел от мобильной клавиатуры иначе тихо ломает код")
+check("join.html: написанный код важнее адресного",
+      "const useCode = typed || invite;" in join_html,
+      "человек мог прийти по старой ссылке и вписать новый код")
+check("join.html: без кода страница не отправляет пустую заявку",
+      "Введите код приглашения." in join_html)
+# Раньше кнопка гасилась до проверки кода и больше не включалась: человек
+# вводил код, жал «Продолжить» и уходил, потому что кнопка серая навсегда
+check("join.html: кнопка разблокируется после отказа",
+      re.search(r"if \(!useCode\) \{[\s\S]{0,300}?btn\.disabled = false;", join_html)
+      is not None,
+      "иначе после первой неудачи вторую попытку сделать нельзя")
+check("join.html: при годном коде поле скрыто",
+      re.search(r"if \(ok\)\s*\{\s*codeField\.hidden = true", join_html) is not None,
+      "код уже в адресе, вводить его второй раз незачем")
+check("join.html: при негодном коде поле снова доступно",
+      join_html.count("codeField.hidden = false") >= 2)
+check("join.html: негодный код показывают, а не прячут форму",
+      form_hidden_none := ("form.hidden = true" not in join_html),
+      "иначе посетитель упирается в пустую карточку без выхода")
+check("base.css: код набирается крупно и моноширинно",
+      re.search(r"\.code-input\s*\{[^}]*monospace", base_css, re.S) is not None
+      and "letter-spacing" in base_css)
+check("base.css: код выровнен по центру", "text-align: center" in base_css)
+
 print("\n=== Витрина закрыта, вход объясняет (4.0.1) ===")
 join_html = (STATIC / "join.html").read_text(encoding="utf-8")
 check("join.html: решение принимает сервер, а не догадка на клиенте",
       re.search(r"'inviteOk' in lf", join_html) is not None,
       "inviteReason при годном коде приходит пустой строкой, а она ложна: "
       "проверка по нему объявляла годный код негодным")
+# Подпись события не должна блокироваться у того, кто пришёл с годным
+# кодом: ему полагается видеть подпись, как и всем остальным. А тому, кому
+# есть что объяснить, блокировка нужна — иначе конфиг её затрёт.
 check("join.html: подпись блокируется только когда есть что объяснить",
-      re.search(r"if \(ok\) return false;[\s\S]{0,80}?sub\.dataset\.locked = '1'",
-                join_html) is not None,
+      join_html.count("sub.dataset.locked = '1'") == 1
+      and re.search(r"if \(ok\)\s*\{[\s\S]{0,200}?return false;[\s\S]{0,200}?"
+                    r"sub\.dataset\.locked = '1'", join_html) is not None,
       "иначе гость с годным кодом не увидит подпись события")
 check("join.html: объяснение не затирается настройками события",
       re.search(r"if \(!sub\.dataset\.locked\) sub\.textContent", join_html)
       is not None,
       "ответ с настройками приходил позже и затирал объяснение пустым значением")
 check("join.html: при негодном коде говорит прямо",
-      "больше не работает" in join_html)
+      "не работает" in join_html)
 check("join.html: при отсутствии кода зовёт открыть по QR",
       "QR-код" in join_html)
-check("join.html: форма прячется только когда кода нет",
-      re.search(r"if \(!invite\)\s*\{\s*form\.hidden = true", join_html) is not None,
-      "человек по старой ссылке должен увидеть причину, а не пустую карточку")
+check("join.html: форма не прячется ни при каком коде",
+      "form.hidden" not in join_html,
+      "прятать форму больше нельзя: в ней и код, и имя, а иначе посетитель "
+      "упирается в пустую карточку без выхода")
 check("на странице входа нет загрузки ленты",
       "feed.js" not in join_html,
       "витрина закрыта, лента на странице входа не нужна")

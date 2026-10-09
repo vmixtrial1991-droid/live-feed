@@ -234,13 +234,20 @@ def current_participant(request: Request, event: Event) -> Participant | None:
 
 
 def invite_is_valid(event: Event, token: str | None) -> bool:
+    """Годен ли код приглашения.
+
+    Регистр не важен: восемь символов на телефоне набирают не глядя, и
+    требовать переключения раскладки на каждую букву — лишний шанс
+    отказать человеку, который стоит с бокалом в другой руке.
+    """
     if not token:
         return False
-    expected = str(event.get("invite_token", ""))
+    expected = str(event.get("invite_token", "")).strip().upper()
+    given = str(token).strip().upper()
     # compare_digest падает на не-ASCII строках, а код приглашения приходит
-    # прямо из адреса: без перевода в байты запрос вида /join?t=что-то
-    # ронял бы страницу с ошибкой 500
-    return secrets.compare_digest(str(token).encode(), expected.encode())
+    # прямо из адреса или из поля ввода: без перевода в байты запрос вида
+    # /join?t=что-то ронял бы страницу с ошибкой 500
+    return secrets.compare_digest(given.encode(), expected.encode())
 
 
 def join(event: Event, name: str, token: str) -> Participant:

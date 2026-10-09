@@ -310,7 +310,8 @@ async def main() -> None:
         st, res = await asyncio.to_thread(mod.post, "/api/moderator/delete", {"message_id": mid2})
         check("удаление убирает из списка", all(m["id"] != mid2 for m in res["messages"]))
         st_media = await asyncio.to_thread(guest.get_status, "/media/" + img)
-        check("файл удалённого сообщения убран", st_media == 404, str(st_media))
+        check("файл удалённого из ленты сообщения остаётся в архиве (4.0)",
+              st_media == 200, str(st_media))
 
     print("\n=== Итог ===")
     if FAILURES:

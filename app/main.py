@@ -26,10 +26,17 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+    StreamingResponse,
+)
 from fastapi.staticfiles import StaticFiles
 
-from . import auth, config, events, images
+from . import archive, auth, config, events, images
 from .events import Event, EventError
 from .realtime import EventRuntime, keepalive, registry
 
@@ -63,10 +70,14 @@ def _prepare(event: Event) -> Event:
 
     База открывается один раз на событие за процесс: PRAGMA и executescript
     на каждый запрос — лишняя работа в горячем пути отправки сообщений.
+
+    4.0: больше **не вызываем** cleanup_orphans. Он удалял файлы, на которые
+    нет ссылок в базе, а с 4.0 фотографии живут независимо от ленты: файл
+    должен пережить удаление сообщения, иначе «удалил неудачный кадр» стирал
+    бы оригинал навсегда. Стирает ведущий — кнопкой в панели.
     """
     if event.slug not in _prepared:
         event.store.init()
-        images.cleanup_orphans(event.uploads_dir, event.store)
         _prepared.add(event.slug)
     return event
 
@@ -75,10 +86,12 @@ def _runtime(event: Event) -> EventRuntime:
     """Живые объекты события: подписчики и очередь показа.
 
     Очередь подтягиваем каждый раз: сообщения могли прийти или уйти,
-    а экран должен показывать то, что есть в базе.
+    а экран должен показывать то, что есть в базе. То же для галереи
+    слайдшоу — её набор меняется галочками ведущего.
     """
     runtime = registry.get(event.slug)
     runtime.screen.sync_items(event.store.live_ids())
+    runtime.screen.sync_slideshow(event.store.slideshow_ids())
     return runtime
 
 
@@ -614,10 +627,11 @@ async def api_delete(slug: str, request: Request, message_id: int = Form(...)):
     event = _event_or_404(slug)
     _require_moderator(request, event)
     token_before = event.store.author_token(message_id)
-    existing = event.store.get_message(message_id)
+    # 4.0: удаляем строку из ленты, но НЕ стираем файл фотографии.
+    # Раньше здесь был images.delete_upload — и ведущий, убирая неудачный
+    # кадр из очереди, затирал оригинал навсегда. Фотография остаётся
+    # в архиве, её можно забрать кнопкой «сохранить и скачать все».
     event.store.delete_message(message_id)
-    if existing and existing.get("image"):
-        images.delete_upload(existing["image"], event.uploads_dir)
     result = await _refresh(event)
     if token_before:
         runtime = registry.get(event.slug)
@@ -726,6 +740,18 @@ async def api_screen_control(slug: str, request: Request, action: str = Form(...
         # заставка на весь экран: показ тоже встаёт
         screen.splash_visible = str(value).lower() in ("1", "true", "on", "show")
         screen._deadline = time.monotonic() + screen.interval
+    elif action == "slideshow":
+        # 4.0: галерея слайдшоу занимает экран, обычная лента на это время
+        # встаёт — так же, как заставка. Пустую галерею запускать смысла нет:
+        # ведущий увидит пустой экран и решит, что всё сломалось.
+        want = str(value).lower() in ("1", "true", "on", "show")
+        if want and not screen.slideshow_items:
+            raise HTTPException(
+                status_code=400,
+                detail="В слайдшоу пока нет ни одной фотографии.",
+            )
+        screen.slideshow_visible = want
+        screen._deadline = time.monotonic() + screen.interval
     else:
         raise HTTPException(status_code=400, detail="Неизвестное действие")
 
@@ -782,6 +808,105 @@ async def api_rotate_invite(slug: str, request: Request):
     new_token = config.invite_token(8)
     event.update(invite_token=new_token)
     return {"ok": True, "code": new_token}
+
+
+# --------------------------------------------------------------------------
+# Слайдшоу (4.0): галочка у фотографии, галерея и запуск на экран
+# --------------------------------------------------------------------------
+@app.post("/e/{slug}/api/moderator/slideshow")
+async def api_slideshow_toggle(
+    slug: str,
+    request: Request,
+    message_id: int = Form(...),
+    on: str = Form("0"),
+):
+    """Поставить или снять галочку «в слайдшоу».
+
+    В галерею идут только фотографии: чистые и с текстом. Текст без картинки
+    поставить нельзя — на экране слайдшоу снимок занимает почти весь кадр, и
+    строка текста там ничего не добавляет. Об этом ведущий узнаёт из ответа,
+    а не из молчаливого «ничего не вышло».
+    """
+    event = _event_or_404(slug)
+    _require_moderator(request, event)
+    wanted = str(on).lower() in ("1", "true", "on", "yes", "show")
+
+    updated = event.store.set_slideshow(message_id, wanted)
+    if updated is None:
+        raise HTTPException(
+            status_code=400,
+            detail="В слайдшоу идут только фотографии и фотографии с текстом.",
+        )
+
+    result = await _refresh(event)
+    return {"ok": True, "message": updated, **result}
+
+
+@app.post("/e/{slug}/api/moderator/slideshow-clear")
+async def api_slideshow_clear(slug: str, request: Request):
+    """Опустошить галерею слайдшоу. Фотографии при этом остаются в архиве."""
+    event = _event_or_404(slug)
+    _require_moderator(request, event)
+    cleared = event.store.clear_slideshow()
+    result = await _refresh(event)
+    return {"ok": True, "cleared": cleared, **result}
+
+
+# --------------------------------------------------------------------------
+# Архив фотографий (4.0): он не зависит от ленты
+# --------------------------------------------------------------------------
+@app.get("/e/{slug}/api/moderator/photos")
+async def api_photos_summary(slug: str, request: Request):
+    event = _event_or_404(slug)
+    _require_moderator(request, event)
+    info = archive.summary(event.uploads_dir)
+    return {
+        "ok": True,
+        "count": info["count"],
+        "bytes": info["bytes"],
+        "in_slideshow": len(event.store.slideshow_ids()),
+    }
+
+
+@app.get("/e/{slug}/api/moderator/photos.zip")
+async def api_photos_download(slug: str, request: Request):
+    """Отдать весь архив одним файлом — ведущий сохраняет себе.
+
+    Отдаём потоком: фотографий может быть много, а сервер маленький, и
+    собирать zip целиком в памяти нельзя.
+    """
+    event = _event_or_404(slug)
+    _require_moderator(request, event)
+    folder = f"photos-{event.slug}"
+    return StreamingResponse(
+        archive.zip_stream(event.uploads_dir, prefix=f"{folder}/"),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{folder}.zip"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@app.post("/e/{slug}/api/moderator/photos-delete-all")
+async def api_photos_delete_all(slug: str, request: Request):
+    """Стереть архив фотографий целиком. Необратимо.
+
+    Файлы удаляются, и сообщения с фотографиями уходят из ленты: на экране
+    остались бы битые картинки. Текстовые сообщения и слайдшоу не страдают.
+    Если ведущему нужны фотографии — сначала «сохранить и скачать все».
+    """
+    event = _event_or_404(slug)
+    _require_moderator(request, event)
+    removed_files = archive.wipe(event.uploads_dir)
+    removed_messages = event.store.delete_photo_messages()
+    result = await _refresh(event)
+    return {
+        "ok": True,
+        "removed_files": removed_files,
+        "removed_messages": removed_messages,
+        **result,
+    }
 
 
 # --------------------------------------------------------------------------
@@ -917,7 +1042,11 @@ async def _on_advance(runtime: EventRuntime) -> None:
         with contextlib.suppress(Exception):
             event.store.reset_shown()
             await runtime.hub.broadcast_all({"type": "unshown"})
-    await _mark_shown(event, state.get("current_id"))
+    # Отметку «показано» ставим только когда на экране шла обычная лента.
+    # В слайдшоу показываются другие снимки, а current_id — это слайд ленты,
+    # которого на экране не было: отметка на нём сбила бы счётчик у ведущего.
+    if not runtime.screen.slideshow_visible:
+        await _mark_shown(event, state.get("current_id"))
 
 
 @app.on_event("startup")

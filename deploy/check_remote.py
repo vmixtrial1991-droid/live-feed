@@ -395,8 +395,8 @@ async def main() -> None:
         st, res = await asyncio.to_thread(
             lead.post, EV("/api/moderator/delete"), {"message_id": mid_ph})
         check("удаление убирает из списка", all(m["id"] != mid_ph for m in res["messages"]))
-        check("файл удалённого сообщения убран", Client().get_status(
-            EV(f"/media/{ph['message']['image']}")) == 404)
+        check("файл удалённого из ленты сообщения остаётся в архиве (4.0)",
+              Client().get_status(EV(f"/media/{ph['message']['image']}")) == 200)
 
     print("\n=== Автопрокрутка ===")
     # Свои сообменты для этой проверки: если брать оставшиеся от прошлых

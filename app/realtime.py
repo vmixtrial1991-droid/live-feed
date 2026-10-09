@@ -112,12 +112,27 @@ class ScreenController:
         self.qr_visible = False   # QR-код поверх сообщений
         self.splash_visible = False   # заставка на весь экран
         self._wrapped = False     # прошли полный круг — пора сбросить отметки «показано»
+        # 4.0: галерея слайдшоу — свой список и своя позиция
+        self.slideshow_items: list[int] = []
+        self.slideshow_index = 0
+        self.slideshow_visible = False
 
     @property
     def current_id(self) -> int | None:
         if not self.items:
             return None
         return self.items[min(self.index, len(self.items) - 1)]
+
+    @property
+    def slideshow_current_id(self) -> int | None:
+        if not self.slideshow_items:
+            return None
+        return self.slideshow_items[min(self.slideshow_index, len(self.slideshow_items) - 1)]
+
+    @property
+    def active_id(self) -> int | None:
+        """Что сейчас на экране: слайдшоу, если оно запущено, иначе лента."""
+        return self.slideshow_current_id if self.slideshow_visible else self.current_id
 
     def sync_items(self, ids: list[int]) -> bool:
         """Обновляет список слайдов, удерживая текущий. True — если изменился."""
@@ -129,6 +144,19 @@ class ScreenController:
             self.index = ids.index(current)
         else:
             self.index = 0
+            self._deadline = time.monotonic() + self.interval
+        return True
+
+    def sync_slideshow(self, ids: list[int]) -> bool:
+        """То же для галереи слайдшоу. Возвращает True, если список изменился."""
+        if ids == self.slideshow_items:
+            return False
+        current = self.slideshow_current_id
+        self.slideshow_items = ids
+        if current in ids:
+            self.slideshow_index = ids.index(current)
+        else:
+            self.slideshow_index = 0
             self._deadline = time.monotonic() + self.interval
         return True
 
@@ -146,6 +174,13 @@ class ScreenController:
                 self.index = self.items.index(message_id)
                 self._deadline = time.monotonic() + self.interval
 
+    async def slideshow_go_to(self, message_id: int) -> None:
+        """Показать снимок из галереи слайдшоу — отдельная кнопка у карточки."""
+        async with self._lock:
+            if message_id in self.slideshow_items:
+                self.slideshow_index = self.slideshow_items.index(message_id)
+                self._deadline = time.monotonic() + self.interval
+
     async def set_playing(self, playing: bool) -> None:
         async with self._lock:
             self.playing = playing
@@ -157,20 +192,35 @@ class ScreenController:
             self._deadline = time.monotonic() + self.interval
 
     def _step(self, delta: int) -> None:
-        if not self.items:
+        """Переключает слайд в том списке, который сейчас на экране."""
+        if self.slideshow_visible:
+            items, index = self.slideshow_items, self.slideshow_index
+        else:
+            items, index = self.items, self.index
+        if not items:
             return
-        new_index = self.index + delta
-        # отмечаем, что круг пройден: список «уже показанных» пора сбросить
-        if new_index >= len(self.items) or new_index < 0:
-            self._wrapped = True
-        self.index = new_index % len(self.items)
+        new_index = index + delta
+        # отмечаем, что круг пройден: список «уже показанных» пора сбросить.
+        # В слайдшоу круг ленты не трогаем — сбрасывать там нечего
+        if new_index >= len(items) or new_index < 0:
+            if not self.slideshow_visible:
+                self._wrapped = True
+        new_index %= len(items)
+        if self.slideshow_visible:
+            self.slideshow_index = new_index
+        else:
+            self.index = new_index
         self._deadline = time.monotonic() + self.interval
+
+    @property
+    def _active_len(self) -> int:
+        return len(self.slideshow_items if self.slideshow_visible else self.items)
 
     def due(self) -> bool:
         """Пора ли переключать слайд. Проверка без блокировки — только чтение."""
         if not self.playing or self.qr_visible or self.splash_visible:
             return False
-        if len(self.items) <= 1:
+        if self._active_len <= 1:
             return False
         return time.monotonic() >= self._deadline
 
@@ -182,7 +232,7 @@ class ScreenController:
             # пока ждали блокировку, время могло ещё не наступить
             if not self.playing or self.qr_visible or self.splash_visible:
                 return False
-            if len(self.items) <= 1 or time.monotonic() < self._deadline:
+            if self._active_len <= 1 or time.monotonic() < self._deadline:
                 return False
             self._step(1)
         return True
@@ -203,6 +253,15 @@ class ScreenController:
             "index": min(self.index, len(self.items) - 1) if self.items else 0,
             "qr_visible": self.qr_visible,
             "splash_visible": self.splash_visible,
+            # 4.0: слайдшоу. active_id — что на самом деле видно на экране
+            "slideshow_visible": self.slideshow_visible,
+            "slideshow_current_id": self.slideshow_current_id,
+            "slideshow_total": len(self.slideshow_items),
+            "slideshow_index": (
+                min(self.slideshow_index, len(self.slideshow_items) - 1)
+                if self.slideshow_items else 0
+            ),
+            "active_id": self.active_id,
         }
 
 

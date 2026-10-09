@@ -35,12 +35,19 @@ CREATE TABLE IF NOT EXISTS messages (
     position       REAL NOT NULL DEFAULT 0,   -- порядок показа
     shown_at       REAL,                      -- когда последний раз показывали
     created_at     REAL NOT NULL,
-    moderated_at   REAL
+    moderated_at   REAL,
+    -- 4.0: галочка «в слайдшоу». Значение осмысленно только при image:
+    -- в слайдшоу идут фотографии и фотографии с текстом
+    in_slideshow   INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_status  ON messages(status);
 CREATE INDEX IF NOT EXISTS idx_messages_participant ON messages(participant_id);
 CREATE INDEX IF NOT EXISTS idx_messages_position ON messages(status, position);
+-- Индекс по in_slideshow создаётся не здесь, а в _migrate: у базы,
+-- созданной прошлой версией, этой колонки ещё нет, и CREATE INDEX на
+-- несуществующей колонке роняет executescript до того, как миграция
+-- успеет её добавить.
 """
 
 
@@ -57,6 +64,20 @@ def _migrate(conn: sqlite3.Connection) -> None:
     have = _columns(conn, "messages")
     if "shown_at" not in have:
         conn.execute("ALTER TABLE messages ADD COLUMN shown_at REAL")
+
+    # 4.0: галочка слайдшоу. DEFAULT нужен, иначе ALTER на таблице с
+    # записями упадёт по NOT NULL, а у старых событий флаги должны быть 0.
+    if "in_slideshow" not in have:
+        conn.execute(
+            "ALTER TABLE messages ADD COLUMN in_slideshow INTEGER NOT NULL DEFAULT 0"
+        )
+    # индекс создаём после ALTER, а не в SCHEMA: см. комментарий там
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_messages_slideshow "
+        "ON messages(in_slideshow, image)"
+    )
+    # клининг по фотографии: флаг без картинки смысла не имеет
+    conn.execute("UPDATE messages SET in_slideshow = 0 WHERE image IS NULL")
 
     # модерация убрана, но в старых базах остались её следы
     if "reject_reason" in have:
@@ -75,6 +96,8 @@ def message_to_dict(row: sqlite3.Row | dict) -> dict[str, Any]:
         "position": d["position"],
         "shown_at": d.get("shown_at"),
         "created_at": d["created_at"],
+        # 4.0: есть ли фотография в галерее слайдшоу
+        "in_slideshow": bool(d.get("in_slideshow")),
     }
 
 
@@ -239,6 +262,69 @@ class EventStore:
         """Снять отметки «уже показывалось» — например, перед новым кругом."""
         with self.connect() as conn:
             conn.execute("UPDATE messages SET shown_at = NULL WHERE shown_at IS NOT NULL")
+
+    # --- слайдшоу (4.0) --------------------------------------------------
+    # В галерею слайдшоу попадают только фотографии: и чистые, и с текстом.
+    # Текст без картинки ставить нельзя — на экране слайдшоу фотография и
+    # занимает почти весь кадр, а текстовая строка сама по себе там лишняя.
+    def slideshow_messages(self, ascending: bool = True) -> list[dict]:
+        order = "ASC" if ascending else "DESC"
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM messages WHERE in_slideshow = 1 AND image IS NOT NULL "
+                f"ORDER BY position {order}, id {order}"
+            ).fetchall()
+        return [message_to_dict(r) for r in rows]
+
+    def slideshow_ids(self) -> list[int]:
+        """ID фотографий слайдшоу в порядке показа."""
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT id FROM messages WHERE in_slideshow = 1 AND image IS NOT NULL "
+                "ORDER BY position ASC, id ASC"
+            ).fetchall()
+        return [r["id"] for r in rows]
+
+    def set_slideshow(self, message_id: int, on: bool) -> dict[str, Any] | None:
+        """Поставить или снять галочку слайдшоу.
+
+        None — если сообщения нет либо это не фотография: тогда галочку
+        ставить нельзя, и ведущий должен знать об этом, а не получить
+        молчаливое «ничего не произошло».
+        """
+        row = self.get_message(message_id)
+        if row is None or not row.get("image"):
+            return None
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE messages SET in_slideshow = ? WHERE id = ?",
+                (1 if on else 0, message_id),
+            )
+        return self.get_message(message_id)
+
+    def clear_slideshow(self) -> int:
+        """Снять все галочки — например, перед «удалить все фото»."""
+        with self.connect() as conn:
+            cur = conn.execute("UPDATE messages SET in_slideshow = 0 WHERE in_slideshow = 1")
+            return cur.rowcount or 0
+
+    def photo_message_ids(self) -> list[str]:
+        """Имена файлов всех сообщений с фотографией."""
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT image FROM messages WHERE image IS NOT NULL"
+            ).fetchall()
+        return [r["image"] for r in rows]
+
+    def delete_photo_messages(self) -> int:
+        """Убрать из ленты все сообщения с фотографией. Возвращает число.
+
+        Слайдшоу при этом тоже очищается: фотографий в галерее больше нет,
+        и держать флаги на удалённых строках незачем.
+        """
+        with self.connect() as conn:
+            cur = conn.execute("DELETE FROM messages WHERE image IS NOT NULL")
+            return cur.rowcount or 0
 
     # --- участники -------------------------------------------------------
     def participant_by_token(self, token: str | None) -> dict | None:

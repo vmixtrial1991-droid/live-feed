@@ -208,7 +208,10 @@ screen_css = (STATIC / "screen.css").read_text(encoding="utf-8")
 check("фото подгоняет функция", "function layoutSlide" in screen_js)
 check("кегль текста подбирает отдельная функция", "function fitText" in screen_js)
 check("подгонка зовётся при показе слайда",
-      re.search(r"paint\([^)]*\)\s*\{[\s\S]*?layoutSlide\(\)", screen_js) is not None)
+      # 4.0: рисование вынесено в paintData — она берёт сам слайд, а не id,
+      # потому что у ленты и галереи id начинаются с единицы и пересекаются
+      re.search(r"function paint(?:Data)?\([^)]*\)\s*\{[\s\S]*?layoutSlide\(\)",
+                screen_js) is not None)
 check("подгонка зовётся при изменении размера окна",
       re.search(r"addEventListener\('resize'[\s\S]*?layoutSlide", screen_js) is not None)
 check("подгонка зовётся при полном экране",

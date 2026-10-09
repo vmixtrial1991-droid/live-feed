@@ -47,6 +47,16 @@ def strip_js_comments(text: str) -> str:
     return out
 
 
+def strip_js_comments_only(text: str) -> str:
+    """Только комментарии. Строки остаются на месте.
+
+    Нужен там, где проверяется именно литерал в коде: префикс 'g' перед id
+    галереи нельзя найти, если чистка съела все кавычки.
+    """
+    out = re.sub(r"/\*.*?\*/", " ", text, flags=re.S)
+    return re.sub(r"//[^\n]*", " ", out)
+
+
 def check(name: str, cond: bool, extra: str = "") -> None:
     print(("  OK   " if cond else "  FAIL ") + name + (f"  [{extra}]" if extra else ""))
     if not cond:
@@ -318,6 +328,22 @@ check("screen.js: в слайдшоу рисуется галерея, а не �
       "gallery.get(sid)" in screen_js)
 check("screen.js: галерея приходит по сокету",
       "msg.gallery" in screen_js)
+
+# id галереи и id ленты совпадают: обе таблицы нумеруются с единицы. Если
+# искать снимок в общей карте, слайд галереи «1» рисуется сообщением ленты
+# «1» — на экране появляется чужое фото вместо отмеченного.
+screen_code = strip_js_comments(screen_js)
+screen_str = strip_js_comments_only(screen_js)
+check("screen.js: слайды ленты и галереи не ищутся в общей карте",
+      "messages.get(id) || gallery.get(id)" not in screen_code
+      and "messages.get(id) ||" not in screen_code,
+      "id у ленты и галереи начинаются с единицы и пересекаются")
+check("screen.js: галерея рисуется по данным, а не по id",
+      re.search(r"function paintData\(\s*\w+\s*\)", screen_code) is not None
+      and "paintData(item)" in screen_code)
+check("screen.js: что показано, помечено источником",
+      "shownKey" in screen_str and "'g' +" in screen_str and "'m' +" in screen_str,
+      "иначе слайд галереи «1» считался бы уже показанным сообщением «1»")
 
 print("\n=== Окно правки текста (4.0) ===")
 mod_js2 = (STATIC / "moderator.js").read_text(encoding="utf-8")

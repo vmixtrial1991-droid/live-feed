@@ -72,7 +72,10 @@ function setQrVisible(visible) {
 const messages = new Map();   // id -> сообщение ленты
 const gallery = new Map();    // id -> снимок из галереи слайдшоу
 let order = [];               // id в порядке показа
-let shownId = null;
+// Что сейчас на экране: 'm<id>' — сообщение ленты, 'g<id>' — снимок галереи.
+// Префикс обязателен: обе таблицы нумеруются с единицы, и без него слайд
+// галереи «1» считался бы уже показанным сообщением ленты «1».
+let shownKey = null;
 let screenState = {
   playing: true, interval: 12, total: 0, index: 0,
   // 4.0: поля слайдшоу. Значения по умолчанию — чтобы на старте
@@ -294,11 +297,9 @@ function fitAuthor(budget) {
 /* Подстановка содержимого слайда. renderToken гасит гонку: если слайд
    сменили, пока предыдущий ещё прятался, старый отложенный вызов не вставит
    своё содержимое поверх нового. */
-function paint(id) {
-  // форма одна и та же: и сообщение ленты, и снимок галереи — это id, image,
-  // body, author
-  const m = messages.get(id) || gallery.get(id);
-  if (!m) return;
+/** Рисует слайд по данным. Форма одна и та же у сообщения ленты и у
+    снимка галереи: id, image, body, author. */
+function paintData(m) {
 
   if (m.image) {
     const url = ev(`/media/${encodeURIComponent(m.image)}`);
@@ -330,17 +331,22 @@ let swapTimer = null;
 
 /** Снимок из галереи: рисуем сразу, без задержки переключения ленты. */
 function renderItem(item) {
-  shownId = item.id;
-  paint(item.id);
+  shownKey = 'g' + item.id;
+  paintData(item);
+}
+
+function paint(id) {
+  const m = messages.get(id);
+  if (!m) return;
+  paintData(m);
 }
 
 function render(id) {
-  const m = messages.get(id) || gallery.get(id);
-  if (!m) return;
+  if (!messages.has(id)) return;
 
   const token = ++renderToken;
   slide.classList.add('swap');
-  shownId = id;
+  shownKey = 'm' + id;
   clearTimeout(swapTimer);
   swapTimer = setTimeout(() => {
     if (token !== renderToken) return;   // слайд успели переключить — не вмешиваемся
@@ -372,7 +378,7 @@ function showCurrent(state) {
       return;
     }
     setOverlay(false);
-    if (sid !== shownId) renderItem(item);
+    if ('g' + sid !== shownKey) renderItem(item);
     return;
   }
 
@@ -387,7 +393,7 @@ function showCurrent(state) {
     return;
   }
   setOverlay(false);
-  if (id !== shownId) render(id);
+  if ('m' + id !== shownKey) render(id);
 }
 
 connectWS(ev('/ws/display'), {
@@ -401,7 +407,7 @@ connectWS(ev('/ws/display'), {
         (msg.gallery || []).forEach((g) => gallery.set(g.id, g));
         order = byPosition([...messages.keys()]);
         screenState = msg.screen || screenState;
-        shownId = null;
+        shownKey = null;
         showCurrent();
         break;
 

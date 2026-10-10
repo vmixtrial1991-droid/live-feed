@@ -1,14 +1,20 @@
-# Как развернуть «Живая ленту» 3.5 на любом Ubuntu-сервере
+# Как развернуть «Живая ленту» 4.0 на любом Ubuntu-сервере
 
 Два файла в папке `dist/`:
 
 | Файл | Размер | Что это |
 |---|---|---|
-| `livefeed-3.7-source.tar.gz` | 130 КБ | Код приложения и скрипт установки |
-| `livefeed-3.7-images.tar.gz` | 84 МБ | Готовые образы Docker: приложение и nginx |
+| `livefeed-4.0-source.tar.gz` | 210 КБ | Код приложения, скрипты установки и проверки |
+| `livefeed-4.0-images.tar.gz` | 84 МБ | Готовые образы Docker: приложение и nginx |
+| `SHA256SUMS.txt` | 400 Б | Контрольные суммы, сверять после копирования |
 
 С ними сервер поднимается **без доступа в интернет**: код на месте, образы
 приезжают в архиве, снаружи ставить нечего, кроме Docker.
+
+Комплект лежит на машине разработчика в `dist/`, и его достаточно для любого
+сервера — Docker на этой машине не нужен. Архив образов при этом проверяется
+загрузкой: `docker load -i livefeed-4.0-images.tar.gz` обязан напечатать
+`Loaded image: livefeed:4.0` и `Loaded image: nginx:1.27-alpine`.
 
 ---
 
@@ -16,12 +22,12 @@
 
 ```bash
 # 1. На своей машине положить оба файла на сервер
-scp dist/livefeed-3.7-source.tar.gz dist/livefeed-3.7-images.tar.gz root@АДРЕС:/tmp/
+scp dist/livefeed-4.0-source.tar.gz dist/livefeed-4.0-images.tar.gz root@АДРЕС:/tmp/
 
 # 2. На сервере
 ssh root@АДРЕС
 cd /tmp
-tar -xzf livefeed-3.7-source.tar.gz -C /tmp/lf
+tar -xzf livefeed-4.0-source.tar.gz -C /tmp/lf
 ADMIN_PASSWORD=ВАШ_ПАРОЛЬ bash /tmp/lf/deploy.sh
 
 # 3. Открыть http://АДРЕС/admin и войти паролем
@@ -51,7 +57,7 @@ ADMIN_PASSWORD=ВАШ_ПАРОЛЬ bash /tmp/lf/deploy.sh
 ### Шаг 1. Положить файлы на сервер
 
 ```bash
-scp dist/livefeed-3.7-source.tar.gz dist/livefeed-3.7-images.tar.gz root@АДРЕС:/tmp/
+scp dist/livefeed-4.0-source.tar.gz dist/livefeed-4.0-images.tar.gz root@АДРЕС:/tmp/
 scp "C:\Users\9900x\.ssh\livefeed_deploy" root@АДРЕС:~/.ssh/authorized_keys   # необязательно
 ```
 
@@ -60,8 +66,8 @@ scp "C:\Users\9900x\.ssh\livefeed_deploy" root@АДРЕС:~/.ssh/authorized_keys
 ```bash
 ssh root@АДРЕС
 cd /tmp
-tar -xzf livefeed-3.7-source.tar.gz -C /tmp/lf
-cp livefeed-3.7-images.tar.gz /tmp/lf/          # чтобы образ достался без сети
+tar -xzf livefeed-4.0-source.tar.gz -C /tmp/lf
+cp livefeed-4.0-images.tar.gz /tmp/lf/          # чтобы образ достался без сети
 ADMIN_PASSWORD=ВАШ_ПАРОЛЬ bash /tmp/lf/deploy.sh
 ```
 
@@ -110,21 +116,35 @@ cd /opt/livefeed && bash verify.sh
 ==> Наборы
     сценарий снаружи       OK=47  FAIL=0
     заставка               OK=29  FAIL=0
-    события                OK=76  FAIL=0
+    события                OK=84  FAIL=0
     сценарии HTTP          OK=56  FAIL=0
     админ-панель           OK=24  FAIL=0
-    пределы показа         OK=45  FAIL=0
-    скрипты страниц        OK=71  FAIL=0
-...
-Итог: проверок пройдено 371, провалено 0.
+    пределы показа         OK=25  FAIL=0
+    слайдшоу               OK=91  FAIL=0
+    показ в реальном       OK=24  FAIL=0
+    без модерации          OK=45  FAIL=0
+    миграции базы          OK=14  FAIL=0
+    сети прокси            OK=18  FAIL=0
+    ворота сертификата     OK=18  FAIL=0
+    сессии                 OK=24  FAIL=0
+    ввод кода              OK=27  FAIL=0
+    скрипты страниц        OK=181 FAIL=0
+==> Статика и разметка
+    аудит статики          OK=31  FAIL=0
+==> Комплект развёртывания
+    комплект развёртывания OK=35  FAIL=0
+
+Итог: проверок пройдено 773, провалено 0.
 ```
 
-Если какой-то набор отчитался `OK=0` — это не поломка приложения, а сбой
-самой проверки: скорее всего, не передался адрес. Скрипт печатает тогда
-хвост вывода, по нему видно причину.
-
-Если какой-то набор отчитался `OK=0` — это не поломка приложения, а сбой
-самой проверки. Скрипт печатает тогда хвост вывода, по нему видно причину.
+**Набор, отчитавшийся `OK=0`, — это провал, а не успех.** Раньше он выглядел
+как «проверять было нечего», и сервер рапортовал «провалов нет» при двух
+наборах, не выполнивших ни одной проверки: оба лежат в `/tmp` и делают
+`from app import config`, а python кладёт в `sys.path` каталог **скрипта**,
+а не рабочий, так что `-w /app` не помогает — нужен `PYTHONPATH=/app`.
+Теперь `verify.sh` считает нулевой набор провалом, печатает хвост его вывода
+и перечисляет такие наборы в конце. Если они в списке — причина в выводе
+выше.
 
 Живой сценарий (`check_remote.py`) идёт снаружи, через nginx. Из контейнера
 такой адрес виден не всегда: нестандартный опубликованный порт или сервер за
@@ -171,7 +191,7 @@ docker exec -w /app live-feed-app python /app/test_frontend.py
 и остался мусор — удалить можно вручную: папкой в томе `livefeed_app-data` или
 через админку, кнопка удаления.
 
-Полный прогон — 303 проверки за один заход, это заметная нагрузка на машину с
+Полный прогон — 773 проверки за один заход, это заметная нагрузка на машину с
 1 ГБ памяти. Если сервер слабый, запускайте наборы по одному (команда выше).
 
 ---
@@ -192,12 +212,12 @@ docker compose up -d             # поднять обратно
 ### Обновить на новую версию
 
 ```bash
-scp НОВЫЙ/livefeed-3.7-source.tar.gz root@АДРЕС:/tmp/
-scp НОВЫЙ/livefeed-3.7-images.tar.gz root@АДРЕС:/tmp/
+scp НОВЫЙ/livefeed-4.0-source.tar.gz root@АДРЕС:/tmp/
+scp НОВЫЙ/livefeed-4.0-images.tar.gz root@АДРЕС:/tmp/
 
 ssh root@АДРЕС
-rm -rf /tmp/lf && tar -xzf /tmp/livefeed-3.7-source.tar.gz -C /tmp/lf
-cp /tmp/livefeed-3.7-images.tar.gz /tmp/lf/
+rm -rf /tmp/lf && tar -xzf /tmp/livefeed-4.0-source.tar.gz -C /tmp/lf
+cp /tmp/livefeed-4.0-images.tar.gz /tmp/lf/
 ADMIN_PASSWORD=СТАРЫЙ_ПАРОЛЬ bash /tmp/lf/deploy.sh
 ```
 
@@ -207,12 +227,44 @@ ADMIN_PASSWORD=СТАРЫЙ_ПАРОЛЬ bash /tmp/lf/deploy.sh
 
 ```bash
 cd /opt/livefeed
-sed -i 's|image: livefeed:3.7|image: livefeed:3.6|' docker-compose.yml
+sed -i 's|image: livefeed:4.0|image: livefeed:3.7|' docker-compose.yml
 docker compose up -d
 ```
 
 Образы прошлых версий можно оставить заранее:
-`docker tag livefeed:3.7 livefeed:3.6`.
+`docker tag livefeed:4.0 livefeed:3.7` — **до** развёртывания новой, иначе
+метка переедет на новый образ и откатываться будет нечем. Комплект 3.7
+остался на машине разработчика в `live-feed-v36/dist/`.
+
+### Развернуть с машины, где нет Docker
+
+Так комплект и задуман: архив образов не требует Docker **на той машине,
+откуда его копируют**. Нужен только `scp`.
+
+```powershell
+# на своей машине — архивы уже собраны в dist/
+python verify_kit.py        # проверить, что комплект целый
+scp dist/livefeed-4.0-images.tar.gz dist/livefeed-4.0-source.tar.gz root@АДРЕС:/tmp/
+```
+
+На сервере разворачивается как обычно, тремя строками из раздела «Коротко».
+
+`verify_kit.py` проверяет то, что можно проверить без Docker: целостность
+gzip, состав архива, что в манифесте лежат именно `livefeed:4.0` и
+`nginx:1.27-alpine` (и **нет** старой версии — иначе на другой машине
+развернётся не то), что в образе задан пользователь `livefeed` и прописано
+хранилище `/app/data`, и что в исходниках нет CRLF.
+
+Контрольную сумму после копирования можно сверить на любой машине с Python —
+ожидаемые значения лежат в `SHA256SUMS.txt`:
+
+```bash
+python -c "import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" livefeed-4.0-images.tar.gz
+```
+
+Если файл переписывали через сеть, сходиться будет именно с `SHA256SUMS.txt`,
+а не с тем, что напечатано в этом файле: сам `DEPLOY.md` входит в архив
+исходников, поэтому упоминающая его сумма была бы саморазрушающейся.
 
 ### Перенести на другой сервер
 

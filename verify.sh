@@ -41,19 +41,41 @@ docker cp test_frontend.py "$APP:/app/test_frontend.py" 2>/dev/null
 TOTAL_OK=0
 TOTAL_FAIL=0
 
-# run НАБОР адрес скрипт — печатает строку таблицы, возвращает счётчик OK через
-# переменную LAST_OK
+# run НАБОР адрес скрипт [рабочий_каталог]
+#
+# Печатает строку таблицы и оставляет счётчик в LAST_OK.
+#
+# Набор, который не выполнился, обязан быть виден как провал. Раньше набор,
+# падавший с ImportError, печатал «OK=0 FAIL=0» и молчал: его файлы лежат
+# в /tmp, а они импортируют app из рабочего каталога, поэтому
+# ModuleNotFoundError проглатывался, а в итоге сервер рапортовал «провалов
+# нет» при двух наборах, которые не выполнили ни одной проверки.
+# Поэтому нулевое число проверок — это провал, а не успех.
 LAST_OK=0
+EMPTY_SUITES=""
 run() {
-    local name="$1" url="$2" script="$3"
+    local name="$1" url="$2" script="$3" workdir="${4:-}"
     local out bad
-    out="$(docker exec -e ADMIN_PASSWORD="$PW" -e LF_TEST_ROOT="$url" \
-           -e LF_DATA_DIR=/app/data "$APP" python "$script" "$url" 2>&1)"
+    if [ -n "$workdir" ]; then
+        # python кладёт в sys.path каталог СКРИПТА, а не рабочий, поэтому
+        # `from app import config` из /tmp не видит /app. Лечится PYTHONPATH.
+        out="$(docker exec -w "$workdir" -e ADMIN_PASSWORD="$PW" \
+               -e LF_TEST_ROOT="$url" -e LF_DATA_DIR=/app/data \
+               -e PYTHONPATH=/app \
+               "$APP" python "$script" "$url" 2>&1)"
+    else
+        out="$(docker exec -e ADMIN_PASSWORD="$PW" -e LF_TEST_ROOT="$url" \
+               -e LF_DATA_DIR=/app/data "$APP" python "$script" "$url" 2>&1)"
+    fi
     LAST_OK="$(printf '%s' "$out" | grep -cE '^  OK')"
     bad="$(printf '%s' "$out" | grep -cE '^  FAIL')"
     TOTAL_OK=$((TOTAL_OK + LAST_OK))
     TOTAL_FAIL=$((TOTAL_FAIL + bad))
     printf "    %-22s OK=%-4s FAIL=%s\n" "$name" "$LAST_OK" "$bad"
+    if [ "$LAST_OK" = "0" ]; then
+        EMPTY_SUITES="$EMPTY_SUITES $name"
+        printf '        ВНИМАНИЕ: набор не выполнил ни одной проверки\n'
+    fi
     if [ "$LAST_OK" = "0" ] || [ "$bad" != "0" ]; then
         printf '%s\n' "$out" | tail -6 | sed 's/^/        /'
     fi
@@ -83,8 +105,8 @@ run "слайдшоу"          "$INSIDE" /tmp/test_slideshow.py
 run "показ в реальном"  "$INSIDE" /tmp/test_realtime.py
 run "без модерации"     "$INSIDE" /tmp/test_no_moderation.py
 run "миграции базы"     "$INSIDE" /tmp/test_migration.py
-run "сети прокси"       "$INSIDE" /tmp/test_proxy_networks.py
-run "ворота сертификата" "$INSIDE" /tmp/test_cert_gate.py
+run "сети прокси"       "$INSIDE" /tmp/test_proxy_networks.py /app
+run "ворота сертификата" "$INSIDE" /tmp/test_cert_gate.py /app
 run "сессии"            "$INSIDE" /tmp/test_session.py
 run "ввод кода"         "$INSIDE" /tmp/test_code_entry.py
 
@@ -141,8 +163,9 @@ docker exec -u root "$APP" rm -f /tmp/check_remote.py /tmp/test_splash.py \
     /tmp/test_slideshow.py /tmp/test_realtime.py /tmp/test_no_moderation.py \
     /tmp/test_migration.py /tmp/test_proxy_networks.py /tmp/test_cert_gate.py \
     /tmp/test_session.py /tmp/test_code_entry.py 2>/dev/null
-# и сам аудит, чтобы на сервере не лежали файлы проверок
-rm -f audit_static.py audit_js.py 2>/dev/null
+# из контейнера убираем, а сам аудит с /opt/livefeed не трогаем: он часть
+# комплекта, check_release.sh требует его рядом, и следующий прогон
+# verify.sh без него не проверит статику вовсе
 
 echo "==> Что осталось на сервере"
 docker exec "$APP" ls -1 /app/data/events/ 2>/dev/null | sed 's/^/    событие: /' \
@@ -151,6 +174,11 @@ curl -fsS "http://$IP/api/health" | sed 's/^/    /'
 docker compose ps --format '  {{.Name}}  {{.Status}}'
 
 echo
+if [ -n "$EMPTY_SUITES" ]; then
+    echo "Наборы, не выполнившие ни одной проверки:$EMPTY_SUITES"
+    echo "Это не «всё хорошо»: набор молча упал, а счётчики показали нули."
+    TOTAL_FAIL=$((TOTAL_FAIL + 1))
+fi
 if [ "$TOTAL_FAIL" -eq 0 ]; then
     echo "Итог: проверок пройдено $TOTAL_OK, провалено 0."
 else

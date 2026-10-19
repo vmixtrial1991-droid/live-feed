@@ -44,6 +44,7 @@ app = FastAPI(
     title="Живая лента — несколько событий",
     docs_url=None,
     redoc_url=None,
+    openapi_url=None,
     # за обратным прокси нужно доверять заголовкам от самого прокси
     forwarded_allow_ips=(
         ",".join(sorted(config.TRUSTED_PROXY_HOSTS | {str(n) for n in config.TRUSTED_PROXY_NETS}))
@@ -183,6 +184,17 @@ async def page_admin_login(request: Request):
 def _require_admin(request: Request) -> None:
     if not auth.is_admin(request):
         raise HTTPException(status_code=403, detail="Нужен вход в админку")
+
+
+def _require_participant(request: Request, event: Event) -> None:
+    """Билет на просмотр: без cookie участника — 403.
+
+    4.1: адрес события публичен, а право видеть ленту и фото даёт код
+    приглашения. Cookie ставится только после его проверки (на /join), так
+    что её отсутствие означает: код не вводили — значит, и смотреть нечего.
+    """
+    if auth.current_participant(request, event) is None:
+        raise HTTPException(status_code=403, detail="Нужен код приглашения")
 
 
 @app.post("/api/admin/login")
@@ -341,9 +353,22 @@ async def page_feed(slug: str, request: Request, t: str = ""):
 
 
 @app.get("/e/{slug}/screen", response_class=HTMLResponse)
-async def page_screen(slug: str):
+async def page_screen(slug: str, request: Request):
     event = _prepare(_event_or_404(slug))
-    return _page("screen.html", base=f"/e/{event.slug}")
+    response = _page("screen.html", base=f"/e/{event.slug}")
+    # Экран проектора получает свой билет: без него он не сможет тянуть
+    # фото и конфиг, а адрес экрана публичен. Билет живёт всё мероприятие.
+    auth.set_screen_cookie(response, event)
+    response.headers["Cache-Control"] = "no-store"
+    # 4.1: экран нельзя спрятать в чужой iframe, а картинка из галереи не
+    # должна уметь выполнить там код. Заголовки именно на странице экрана:
+    # остальные страницы живут под общим CSP из nginx.
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
+        "script-src 'self'; connect-src 'self' ws: wss:; frame-ancestors 'none'"
+    )
+    return response
 
 
 @app.get("/e/{slug}/join", response_class=HTMLResponse)
@@ -354,6 +379,11 @@ async def page_join(slug: str, request: Request, t: str = ""):
     витрина была не «закрыта для всех», а просто чуть дальше по ссылке.
     Теперь страница входа всегда последняя: сама она объясняет, что
     открыть её надо по QR-коду приглашения.
+
+    4.1: адрес события публичен, а право смотреть ленту и фото — билетом.
+    Если код приглашения из ?t= годится, выдаём билет прямо здесь: создаём
+    запись участника (имя он впишет дальше) и ставим cookie. Без кода
+    cookie не будет, и дальше страница отправки не откроется.
     """
     event = _prepare(_event_or_404(slug))
     if auth.current_participant(request, event) is not None:
@@ -402,13 +432,23 @@ async def page_moderator_login(slug: str, request: Request):
 # --------------------------------------------------------------------------
 @app.get("/api/health")
 async def api_health() -> dict:
-    """Проверка живости для Docker HEALTHCHECK и балансировщика."""
-    return {"ok": True, "events": len(events.list_events())}
+    """Проверка живости для Docker HEALTHCHECK и балансировщика.
+
+    4.1: список событий убран — он раскрывал, сколько и какие мероприятия
+    идут на сервере. Здоровье сервера не зависит от числа событий.
+    """
+    return {"ok": True}
 
 
 @app.get("/e/{slug}/api/config")
-async def api_config(slug: str):
-    event = _event_or_404(slug)
+async def api_config(slug: str, request: Request):
+    event = _prepare(_event_or_404(slug))
+    # Конфиг нужен и экрану (название, заставка), и участнику. Экран получает
+    # свой билет при открытии /screen, участник — при проверке кода на /join.
+    if not (auth.is_admin(request) or auth.is_moderator(request, event)
+            or auth.current_participant(request, event) is not None
+            or auth.is_screen(request, event)):
+        raise HTTPException(status_code=403, detail="Нужен код приглашения")
     return {
         "slug": event.slug,
         "event_title": event.get("title", "Живая лента"),
@@ -462,7 +502,7 @@ async def api_send(
     event = _prepare(_event_or_404(slug))
     person = auth.current_participant(request, event)
     if person is None:
-        raise HTTPException(status_code=401, detail="Сначала отсканируйте QR и введите имя")
+        raise HTTPException(status_code=403, detail="Нужен код приглашения")
 
     body = (body or "").strip()
     # Длинный текст обрезать молча нельзя: гость будет думать, что на экране
@@ -507,24 +547,43 @@ async def api_send(
 
 
 @app.get("/e/{slug}/api/messages")
-async def api_messages(slug: str, limit: int = 300):
+async def api_messages(slug: str, request: Request, limit: int = 300):
     event = _prepare(_event_or_404(slug))
+    # Лента и имена файлов — только по билету. Экран читает через WebSocket,
+    # поэтому здесь билет участника (или ведущего/админа) обязателен.
+    if not (auth.is_admin(request) or auth.is_moderator(request, event)
+            or auth.current_participant(request, event) is not None):
+        raise HTTPException(status_code=403, detail="Нужен код приглашения")
+    msgs = event.store.live_messages(limit=min(limit, 500))
+    # 4.1: рядом с именем файла кладём короткую подписанную ссылку, чтобы
+    # фото можно было показать без вечного имени. Ссылка живёт 10 минут.
+    now = int(time.time())
+    exp = now + config.MEDIA_SIG_TTL
+    for m in msgs:
+        if m.get("image"):
+            m["image_url"] = (
+                f"/e/{event.slug}/media/{m['image']}?sig="
+                f"{auth.media_sig(event, m['image'], exp)}&exp={exp}"
+            )
     return {
-        "messages": event.store.live_messages(limit=min(limit, 500)),
+        "messages": msgs,
         "stats": event.store.stats(),
         "screen": _runtime(event).screen.state(),
     }
 
 
 @app.get("/e/{slug}/api/stats")
-async def api_stats(slug: str) -> dict:
+async def api_stats(slug: str, request: Request) -> dict:
     event = _prepare(_event_or_404(slug))
+    if not (auth.is_admin(request) or auth.is_moderator(request, event)
+            or auth.current_participant(request, event) is not None):
+        raise HTTPException(status_code=403, detail="Нужен код приглашения")
     return event.store.stats()
 
 
 @app.get("/e/{slug}/media/{name}")
-async def media(slug: str, name: str):
-    event = _event_or_404(slug)
+async def media(slug: str, name: str, request: Request):
+    event = _prepare(_event_or_404(slug))
     safe = Path(name).name
     uploads = event.uploads_dir.resolve()
     path = (uploads / safe).resolve()
@@ -534,7 +593,25 @@ async def media(slug: str, name: str):
         raise HTTPException(status_code=404, detail="Не найдено")
     if not path.exists():
         raise HTTPException(status_code=404, detail="Не найдено")
-    return FileResponse(path, headers={"Cache-Control": "public, max-age=31536000, immutable"})
+
+    # 4.1: фото — не вечная ссылка по имени файла. Доступ либо по билету
+    # участника/ведущего/админа, либо по короткой подписанной ссылке
+    # (5-10 минут), либо экрану проектора (свой билет).
+    allowed = (
+        auth.is_admin(request)
+        or auth.is_moderator(request, event)
+        or auth.current_participant(request, event) is not None
+        or auth.is_screen(request, event)
+        or auth.media_sig_valid(event, safe, request.query_params.get("sig"),
+                                request.query_params.get("exp"))
+    )
+    if not allowed:
+        raise HTTPException(status_code=403, detail="Нужен код приглашения")
+
+    # Подписанные ссылки короткоживущие — не кешируем надолго.
+    sig = request.query_params.get("sig")
+    cache = "private, max-age=60" if sig else "private, max-age=3600"
+    return FileResponse(path, headers={"Cache-Control": cache})
 
 
 @app.get("/e/{slug}/splash.jpg")

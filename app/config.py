@@ -56,12 +56,20 @@ SAFE_ZONE_Y = 5.0   # процентов высоты экрана
 ADMIN_COOKIE = "lf_admin"
 PARTICIPANT_COOKIE_PREFIX = "lf_pid_"
 MODERATOR_COOKIE_PREFIX = "lf_mod_"
+SCREEN_COOKIE_PREFIX = "lf_screen_"
 
-# Сессия отправителя живёт весь праздник — 90 дней.
-# У кабинета ведущего и админа своя: это короткие сессии на одном мероприятии.
-PARTICIPANT_COOKIE_MAX_AGE = 90 * 24 * 3600
+# Сессия отправителя теперь — билет на один вечер: адрес события публичен,
+# а право смотреть ленту и фото даёт код приглашения. Держим cookie до конца
+# вечера (8 часов), а не 90 дней: ссылка с фотками не должна жить в чатах
+# вечно, и после события её можно отозвать rotate-invite.
+PARTICIPANT_COOKIE_MAX_AGE = 8 * 3600
 MODERATOR_COOKIE_MAX_AGE = 12 * 3600
 ADMIN_COOKIE_MAX_AGE = 12 * 3600
+# Экран проектора живёт весь праздник — он в зале, не в кармане гостя.
+SCREEN_COOKIE_MAX_AGE = 24 * 3600
+# Короткая подписанная ссылка на фото: 10 минут, чтобы утёкшее имя файла
+# не стало вечной ссылкой на чужое лицо.
+MEDIA_SIG_TTL = 10 * 60
 
 
 def env_bool(name: str, default: bool = False) -> bool:

@@ -208,6 +208,11 @@ def set_participant_cookie(response, event: Event, token: str) -> None:
     Имя с адресом события нужно, чтобы в одном браузере можно было
     участвовать в двух ивентах сразу: иначе второй вход затирал бы
     регистрацию первого.
+
+    4.1: cookie — это билет на просмотр. Адрес события публичен, а право
+    видеть ленту и фото даёт код приглашения; cookie ставится только после
+    его проверки. Поэтому она привязана к адресу события (Path=/e/<slug>/),
+    а не к корню: так она не утекает на другие события и не мешает им.
     """
     response.set_cookie(
         event.participant_cookie_name(),
@@ -216,12 +221,12 @@ def set_participant_cookie(response, event: Event, token: str) -> None:
         httponly=True,
         samesite="lax",
         secure=_secure_cookie(),
-        path="/",
+        path=f"/e/{event.slug}/",
     )
 
 
 def clear_participant_cookie(response, event: Event) -> None:
-    response.delete_cookie(event.participant_cookie_name(), path="/")
+    response.delete_cookie(event.participant_cookie_name(), path=f"/e/{event.slug}/")
 
 
 def current_participant(request: Request, event: Event) -> Participant | None:
@@ -260,6 +265,69 @@ def join(event: Event, name: str, token: str) -> Participant:
     new_token = secrets.token_urlsafe(24)
     row = event.store.create_participant(new_token, name)
     return Participant(row["id"], row["token"], row["name"])
+
+
+# --------------------------------------------------------------------------
+# Экран проектора: отдельный билет, чтобы страница экрана могла тянуть фото
+# и конфиг, не имея кода приглашения. Билет выдаётся при открытии /screen,
+# живёт долго (экран в зале на весь праздник) и привязан к адресу события.
+# --------------------------------------------------------------------------
+def screen_cookie_name(event: "Event") -> str:
+    return f"{config.SCREEN_COOKIE_PREFIX}{event.slug}"
+
+
+def set_screen_cookie(response, event: "Event") -> None:
+    response.set_cookie(
+        screen_cookie_name(event),
+        config.sign(event.secret, f"screen:{event.slug}"),
+        max_age=config.SCREEN_COOKIE_MAX_AGE,
+        httponly=True,
+        samesite="lax",
+        secure=_secure_cookie(),
+        path=f"/e/{event.slug}/",
+    )
+
+
+def is_screen(request: "Request", event: "Event") -> bool:
+    return config.signature_matches(
+        event.secret,
+        f"screen:{event.slug}",
+        request.cookies.get(screen_cookie_name(event)),
+    )
+
+
+# --------------------------------------------------------------------------
+# Короткая подписанная ссылка на фото.
+#
+# Утёкшее имя файла не должно быть вечной ссылкой на чужое лицо: подпись
+# действует 5-10 минут, и без секрета сервера её не подделать. Формат
+# ссылки: /e/<slug>/media/<name>?sig=<hex>&exp=<unix>.
+# --------------------------------------------------------------------------
+def media_sig(event: "Event", name: str, exp: int) -> str:
+    import hmac as _hmac
+    import hashlib as _hashlib
+    return _hmac.new(
+        event.secret.encode("utf-8"),
+        f"media:{name}:{exp}".encode("utf-8"),
+        _hashlib.sha256,
+    ).hexdigest()[:16]
+
+
+def media_sig_valid(event: "Event", name: str, sig: str | None, exp: str | None) -> bool:
+    if not sig or not exp:
+        return False
+    try:
+        exp_i = int(exp)
+    except (TypeError, ValueError):
+        return False
+    if exp_i < int(time.time()):
+        return False
+    if exp_i - int(time.time()) > config.MEDIA_SIG_TTL + 60:
+        # не принимаем ссылки с чрезмерным сроком: иначе «короткая»
+        # ссылка превращается в вечную
+        return False
+    expected = media_sig(event, name, exp_i)
+    return secrets.compare_digest(expected, str(sig))
 
 
 # --------------------------------------------------------------------------

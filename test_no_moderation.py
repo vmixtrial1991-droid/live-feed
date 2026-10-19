@@ -195,7 +195,9 @@ async def main() -> None:
     mid2 = sent2["message"]["id"]
     check("фото принято и сразу одобрено", sent2["message"]["status"] == "approved")
     check("файл сохранён", bool(sent2["message"]["image"]))
-    with urllib.request.urlopen(f"{BASE}/media/{sent2['message']['image']}", timeout=20) as r:
+    req = urllib.request.Request(f"{BASE}/media/{sent2['message']['image']}")
+    req.add_header("Cookie", guest.cookie_header())
+    with urllib.request.urlopen(req, timeout=20) as r:
         blob = r.read()
     check("фото сжато на сервере в JPEG",
           r.status == 200 and blob[:2] == b"\xff\xd8" and len(blob) < 600_000,

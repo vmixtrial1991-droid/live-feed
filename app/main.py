@@ -460,6 +460,7 @@ async def api_config(slug: str, request: Request):
         "event_subtitle": event.get("subtitle", ""),
         # заставку видит и экран, поэтому она не под паролем
         "splash": event.splash_url(),
+        "screen_key": event.screen_key,
         # лимит текста отдаём клиенту, чтобы страница отправки не держала
         # своё число: сервер — единственный источник правды
         "max_text_len": config.MAX_TEXT_LEN,
@@ -972,6 +973,8 @@ async def api_moderator_state(slug: str, request: Request):
         "screen": runtime.screen.state(),
         "online": runtime.hub.online,
         "splash": event.splash_url(),
+        "screen_key": event.screen_key,
+        "screen_url": f"{events.base_url_from(request)}/e/{event.slug}/screen?d={event.screen_key}",
     }
 
 
@@ -1009,17 +1012,6 @@ async def api_rotate_invite(slug: str, request: Request):
     new_token = config.invite_token(8)
     event.update(invite_token=new_token)
     return {"ok": True, "code": new_token}
-
-
-@app.post("/e/{slug}/api/moderator/rotate-screen-key")
-async def api_rotate_screen_key(slug: str, request: Request):
-    """Перевыпустить ключ экрана (между событиями или при утечке)."""
-    event = _event_or_404(slug)
-    _require_moderator(request, event)
-    new_key = event.rotate_screen_key()
-    root = events.base_url_from(request)
-    return {"ok": True, "screen_key": new_key,
-            "screen_url": f"{root}/e/{event.slug}/screen?d={new_key}"}
 
 
 # --------------------------------------------------------------------------

@@ -176,10 +176,6 @@ class Event:
             self.update(screen_key=value)
         return value
 
-    def rotate_screen_key(self) -> str:
-        value = "".join(secrets.choice(config.INVITE_ALPHABET) for _ in range(9))
-        self.update(screen_key=value)
-        return value
 
     def moderator_cookie_name(self) -> str:
         return f"{config.MODERATOR_COOKIE_PREFIX}{self.slug}"

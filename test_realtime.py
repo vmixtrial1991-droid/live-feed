@@ -17,13 +17,15 @@ import websockets
 # --- 3.0: у каждой проверки своё событие ---------------------------------
 # Адреса теперь живут под адресом события, поэтому проверка заводит
 # своё событие и работает уже по нему.
-from testlib import prepare, remove  # noqa: E402
+from testlib import prepare, remove, DATA_DIR  # noqa: E402
 
 CTX = prepare("Проверка реального времени")
 SLUG = CTX.slug
 BASE = CTX.base
 TOKEN = CTX.code
 PASS = CTX.mod_password
+import json as _j, os as _os
+SCREEN_KEY = _j.load(open(_os.path.join(DATA_DIR, "events", SLUG, "config.json"), encoding="utf-8")).get("screen_key", "")
 WS = BASE.replace("http://", "ws://").replace("https://", "wss://")
 FAILURES: list[str] = []
 
@@ -102,7 +104,7 @@ async def main() -> None:
         check("гость не попадает в /ws/participant", True)
 
     try:
-        async with websockets.connect(f"{WS}/ws/display") as ws:
+        async with websockets.connect(f"{WS}/ws/display?d={SCREEN_KEY}") as ws:
             init = json.loads(await ws.recv())
             check("витрина открыта для всех и сразу отдаёт ленту",
                   init.get("type") == "init" and "messages" in init)
@@ -118,8 +120,8 @@ async def main() -> None:
 
     async with (
         websockets.connect(f"{WS}/ws/moderator", additional_headers={"Cookie": cookies_for(mod)}) as modws,
-        websockets.connect(f"{WS}/ws/display") as displayws,
-        websockets.connect(f"{WS}/ws/display") as guestws,
+        websockets.connect(f"{WS}/ws/display?d={SCREEN_KEY}") as displayws,
+        websockets.connect(f"{WS}/ws/display?d={SCREEN_KEY}") as guestws,
         websockets.connect(f"{WS}/ws/participant", additional_headers={"Cookie": cookies_for(guest)}) as pws,
     ):
         await collect(modws, "init")
@@ -133,15 +135,15 @@ async def main() -> None:
         check("отправка сразу в эфире", sent.get("message", {}).get("status") == "approved")
 
         ev = await collect(modws, "new",
-                           where=lambda m: m["message"]["id"] == mid)
+                           where=lambda m: any(x.get("id") == mid for x in (m.get("added") or [])))
         check("модератор получает отправку без перезагрузки", ev is not None, f"id={mid}")
 
         scr = await collect(guestws, "new",
-                            where=lambda m: any(x["id"] == mid for x in m["messages"]))
+                            where=lambda m: any(x.get("id") == mid for x in (m.get("added") or [])))
         check("витрина гостя обновилась в реальном времени", scr is not None)
 
         scr2 = await collect(displayws, "new",
-                             where=lambda m: any(x["id"] == mid for x in m["messages"]))
+                             where=lambda m: any(x.get("id") == mid for x in (m.get("added") or [])))
         check("второй экран тоже обновился", scr2 is not None)
 
         # автору подтверждаем приём, модерация ему не нужна
@@ -151,7 +153,7 @@ async def main() -> None:
         print("\n=== Порядок показа ===")
         extra = guest.post("/api/messages", {"body": "Второе для порядка"})
         extra_mid = extra["message"]["id"]
-        await collect(modws, "new", where=lambda m: m["message"]["id"] == extra_mid)
+        await collect(modws, "new", where=lambda m: any(x.get("id") == extra_mid for x in (m.get("added") or [])))
 
         state = json.loads(mod.opener.open(BASE + "/api/moderator/state").read())
         order_now = sorted(state.get("messages", []), key=lambda m: m["position"])
@@ -201,7 +203,7 @@ async def main() -> None:
         check("экран узнал про QR", ev is not None)
         st = mod.post("/api/moderator/screen", {"action": "qr", "value": "0"})
         check("QR скрыт", st["screen"]["qr_visible"] is False)
-        link = json.loads(anon.opener.open(BASE + "/api/invite-link").read())
+        link = json.loads(anon.opener.open(BASE + "/api/invite-link?d=" + SCREEN_KEY).read())
         check("ссылка для QR открыта для всех", bool(link.get("link")))
 
         print("\n=== Автопрокрутка по кругу ===")

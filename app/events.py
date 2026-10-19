@@ -166,6 +166,21 @@ class Event:
     def secret(self) -> str:
         return str(self.get("secret", ""))
 
+    @property
+    def screen_key(self) -> str:
+        # Если ключа нет (событие создано до 4.1) — генерируем на месте и
+        # сохраняем, чтобы не плодить новые ключи при каждом чтении.
+        value = str(self.get("screen_key", "")).strip()
+        if not value:
+            value = "".join(secrets.choice(config.INVITE_ALPHABET) for _ in range(9))
+            self.update(screen_key=value)
+        return value
+
+    def rotate_screen_key(self) -> str:
+        value = "".join(secrets.choice(config.INVITE_ALPHABET) for _ in range(9))
+        self.update(screen_key=value)
+        return value
+
     def moderator_cookie_name(self) -> str:
         return f"{config.MODERATOR_COOKIE_PREFIX}{self.slug}"
 
@@ -195,7 +210,7 @@ class Event:
         base = (base_url or "").rstrip("/")
         return {
             "join": self.invite_link(base),
-            "screen": f"{base}/e/{self.slug}/screen",
+            "screen": f"{base}/e/{self.slug}/screen?d={self.screen_key}",
             "moderator": f"{base}/e/{self.slug}/moderator",
             "feed": self.invite_link(base),
         }
@@ -297,6 +312,11 @@ def create_event(
             "mod_hash": config.hash_password(password, salt) if password else "",
             "mod_password": password,
             "secret": secrets.token_hex(32),
+            # 4.1: ключ экрана. Адрес проектора публичен, поэтому доступ к
+            # экрану и к фото защищаем случайным ключом из 9 символов.
+            "screen_key": "".join(
+                secrets.choice(config.INVITE_ALPHABET) for _ in range(9)
+            ),
             "interval": 12,
             # 4.0: у слайдшоу своя длительность показа, по умолчанию
             # подлиннее: снимки гости держат дольше, чем идёт лента

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import sys
 import urllib.error
 import urllib.request
@@ -18,6 +19,9 @@ SLUG = CTX.slug
 BASE = CTX.base
 TOKEN = CTX.code
 PASS = CTX.mod_password
+import json as _j
+_cfg = _j.load(open(os.path.join("data", "events", SLUG, "config.json"), encoding="utf-8"))
+SCREEN_KEY = _cfg.get("screen_key", "")
 COOKIES: dict[str, str] = {}
 
 
@@ -125,7 +129,7 @@ print("\n=== Страницы ===")
 st, _ = call("GET", "/send")
 check("/send без сессии -> редирект на /join", st in (301, 302, 303, 307))
 
-for path, name in [("/screen", "экран"),
+for path, name in [(f"/screen?d={SCREEN_KEY}", "экран"),
                    (f"/join?t={TOKEN}", "вход"), ("/moderator/login", "вход модератора")]:
     st, body = call("GET", path)
     check(f"{name} открывается ({st})", st == 200 and b"<html" in bytes(body).lower())
@@ -174,13 +178,6 @@ check("фото принято", bool(res["message"]["image"]), res["message"]["
 size = len(call("GET", f"/media/{res['message']['image']}")[1]) if res["message"]["image"] else 0
 check("большое фото сжато на сервере", 0 < size < 900_000, f"{size} байт из ~5 МБ PNG")
 
-_, feed = call("GET", "/api/messages")
-ids_in_feed = [m["id"] for m in feed["messages"]]
-check("без модерации обе отправки в общей ленте", ids_in_feed == [mid2, mid1], str(ids_in_feed))
-
-st, _ = call("POST", "/api/moderator/moderate", {"message_id": mid1, "action": "approve"}, expect=404)
-check("эндпоинт модерации больше не существует", True)
-
 print("\n=== Кабинет по паролю ===")
 st, _ = call("POST", "/api/moderator/login", {"password": "неверный"}, expect=401)
 check("неверный пароль отклонён", True)
@@ -195,6 +192,13 @@ _, mod = call("GET", "/api/moderator/state")
 check("в кабинете весь список", len(mod["messages"]) == 2, str(len(mod["messages"])))
 check("сводки нет: только всего и участников",
       set(mod["stats"].keys()) == {"total", "participants"}, str(mod["stats"]))
+
+_, feed = call("GET", "/api/messages")
+ids_in_feed = [m["id"] for m in feed["messages"]]
+check("без модерации обе отправки в общей ленте", ids_in_feed == [mid2, mid1], str(ids_in_feed))
+
+st, _ = call("POST", "/api/moderator/moderate", {"message_id": mid1, "action": "approve"}, expect=404)
+check("эндпоинт модерации больше не существует", True)
 
 _, me = call("GET", "/api/me")
 mine = {m["id"]: m for m in me["messages"]}

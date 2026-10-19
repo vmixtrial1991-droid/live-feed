@@ -52,7 +52,7 @@ function renderList() {
     el.dataset.id = id;
 
     const photo = m.image
-      ? `<img src="${ev(`/media/${encodeURIComponent(m.image)}`)}" alt="" loading="lazy">`
+      ? `<img src="${ev(`/media/${encodeURIComponent(m.image)}?w=320`)}" alt="" loading="lazy">`
       : '';
     const text = m.body
       ? `<span class="or-text" title="${escapeHTML(m.body)}">${escapeHTML(m.body)}</span>`

@@ -17,10 +17,11 @@ from http.cookiejar import CookieJar
 # --- 3.0: у каждой проверки своё событие ---------------------------------
 # Адреса теперь живут под адресом события, поэтому проверка заводит
 # своё событие и работает уже по нему.
-from testlib import prepare, remove  # noqa: E402
+from testlib import prepare, remove, screen_key  # noqa: E402
 
 CTX = prepare("Проверка без модерации")
 SLUG = CTX.slug
+SCREEN_KEY = screen_key(SLUG)
 BASE = CTX.base
 TOKEN = CTX.code
 PASS = CTX.mod_password
@@ -161,7 +162,7 @@ async def main() -> None:
     invite, password = TOKEN, PASS
 
     print("\n=== Страницы ===")
-    for path, name in [("/", "витрина"), ("/screen", "экан"),
+    for path, name in [("/", "витрина"), (f"/screen?d={SCREEN_KEY}", "экан"),
                        ("/moderator/login", "вход")]:
         check(f"{name} открывается", Client().get_status(path) == 200)
 
@@ -177,7 +178,10 @@ async def main() -> None:
     check("отправка сразу одобрена", sent["message"]["status"] == "approved")
     check("отметки «показано» ещё нет", sent["message"]["shown_at"] is None)
 
-    feed = await asyncio.to_thread(guest.get_json, "/api/messages")
+    # модератор читает архив; гость видит только текущий слайд
+    mod_tmp = Client()
+    await asyncio.to_thread(mod_tmp.post, "/api/moderator/login", {"password": password})
+    feed = await asyncio.to_thread(mod_tmp.get_json, "/api/messages")
     check("сообщение сразу в общей ленте",
           any(m["id"] == mid1 for m in feed["messages"]), str(len(feed["messages"])))
 
@@ -227,8 +231,8 @@ async def main() -> None:
     async with (
         websockets.connect(WS + "/ws/moderator",
                            additional_headers={"Cookie": mod.cookie_header()}) as modws,
-        websockets.connect(WS + "/ws/display") as screenws,
-        websockets.connect(WS + "/ws/display") as feedws,
+        websockets.connect(WS + "/ws/display?d=" + SCREEN_KEY) as screenws,
+        websockets.connect(WS + "/ws/display?d=" + SCREEN_KEY) as feedws,
     ):
         for name, ws in (("модератор", modws), ("экран", screenws), ("витрина", feedws)):
             init = json.loads(await asyncio.wait_for(ws.recv(), 8))
@@ -239,14 +243,16 @@ async def main() -> None:
 
         ev = json.loads(await asyncio.wait_for(modws.recv(), 8))
         check("модератору пришло событие «новое» без одобрения",
-              ev["type"] == "new" and ev["message"]["id"] == mid3, ev["type"])
-        check("в событии уже полный список", any(m["id"] == mid3 for m in ev["messages"]))
+              ev["type"] == "new" and any(x.get("id") == mid3 for x in (ev.get("added") or [])), ev["type"])
+        check("в событии уже полный список",
+              any(m["id"] == mid3 for m in (mod.get_json("/api/messages") or {}).get("messages", [])))
 
         evs = json.loads(await asyncio.wait_for(screenws.recv(), 8))
         check("экран получил сразу, без модерации",
-              evs["type"] == "new" and any(m["id"] == mid3 for m in evs["messages"]))
+              evs["type"] == "new" and any(x.get("id") == mid3 for x in (evs.get("added") or [])))
         evf = json.loads(await asyncio.wait_for(feedws.recv(), 8))
-        check("витрина получила сразу", any(m["id"] == mid3 for m in evf["messages"]))
+        check("витрина получила сразу", evf["type"] == "new"
+              and any(x.get("id") == mid3 for x in (evf.get("added") or [])))
 
         print("\n=== Управление показом ===")
         st, res = await asyncio.to_thread(mod.post, "/api/moderator/screen", {"action": "interval", "value": "7"})
@@ -291,7 +297,7 @@ async def main() -> None:
         st, res = await asyncio.to_thread(mod.post, "/api/moderator/screen", {"action": "qr", "value": "0"})
         check("QR скрыт", res["screen"]["qr_visible"] is False)
 
-        link = await asyncio.to_thread(anon.get_json, "/api/invite-link")
+        link = await asyncio.to_thread(anon.get_json, f"/api/invite-link?d={SCREEN_KEY}")
         check("ссылка для QR доступна без пароля",
               bool(link.get("link")) and bool(link.get("code")), str(link.get("code")))
 

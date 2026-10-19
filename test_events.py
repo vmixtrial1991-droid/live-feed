@@ -165,6 +165,8 @@ check("ссылка гостям сразу содержит код событи
 detail = admin.get_json(f"/api/admin/events/{slug}") or {}
 code_a = detail.get("code", "")
 check("код приглашения выдан", len(code_a) == 8, code_a)
+import json as _j
+screen_key_a = _j.load(open(os.path.join(DATA_DIR, "events", slug, "config.json"), encoding="utf-8")).get("screen_key", "")
 check("пароль ведущего показан в карточке", detail.get("password") == "parol-vedushchego")
 
 res = admin.post_json("/api/admin/events", {"title": "Дубль", "slug": base_slug})
@@ -188,6 +190,7 @@ check("третье событие создано", slug3 == f"korpor-{RUN}", st
 
 detail3 = admin.get_json(f"/api/admin/events/{slug3}") or {}
 code_c = detail3.get("code", "")
+screen_key_c = _j.load(open(os.path.join(DATA_DIR, "events", slug3, "config.json"), encoding="utf-8")).get("screen_key", "")
 check("у разных событий разные коды приглашения", code_a and code_c and code_a != code_c,
       f"{code_a} и {code_c}")
 
@@ -197,7 +200,7 @@ anon = Client()
 # витрины в списке нет: она закрыта для всех, кроме администратора
 # и ведущего, проверяется это отдельным разделом ниже
 for path, name in (
-    (f"/e/{slug}/screen", "экран"),
+    (f"/e/{slug}/screen?d={screen_key_a}", "экран"),
     (f"/e/{slug}/join?t={code_a}", "вход по QR"),
     (f"/e/{slug}/moderator", "кабинет ведущего"),
 ):
@@ -284,8 +287,12 @@ check("сообщение принято", st == 200, str(st))
 st, _, body = guest_b.post(f"/e/{slug3}/api/messages", {"body": "Сообщение второго"})
 check("сообщение принято во втором", st == 200, str(st))
 
-feed_a = guest_a.get_json(f"/e/{slug}/api/messages") or {}
-feed_b = guest_b.get_json(f"/e/{slug3}/api/messages") or {}
+mod_a = Client()
+mod_a.post(f"/e/{slug}/api/moderator/login", {"password": "parol-vedushchego"})
+mod_b = Client()
+mod_b.post(f"/e/{slug3}/api/moderator/login", {"password": "parol-vedushchego"})
+feed_a = mod_a.get_json(f"/e/{slug}/api/messages") or {}
+feed_b = mod_b.get_json(f"/e/{slug3}/api/messages") or {}
 bodies_a = [m["body"] for m in feed_a.get("messages", [])]
 bodies_b = [m["body"] for m in feed_b.get("messages", [])]
 check("в первом событии виден только его текст", bodies_a == ["Сообщение первого"], str(bodies_a))
@@ -382,7 +389,7 @@ check("папка события исчезла", not path_c.exists(), str(path_
 
 st, _, _ = anon.get(f"/e/{slug3}/")
 check("страницы удалённого события — 404", st == 404, str(st))
-st, _, _ = anon.get(f"/e/{slug3}/screen")
+st, _, _ = anon.get(f"/e/{slug3}/screen?d={screen_key_c}")
 check("экран удалённого события — 404", st == 404, str(st))
 st, _, _ = anon.get(f"/e/{slug3}/api/messages")
 check("API удалённого события — 404", st == 404, str(st))
@@ -398,7 +405,7 @@ remaining = [e["slug"] for e in listing.get("events", [])]
 check("удалённого события нет в списке", slug3 not in remaining, str(remaining))
 check("первое событие осталось целым", slug in remaining, str(remaining))
 
-feed_a = guest_a.get_json(f"/e/{slug}/api/messages") or {}
+feed_a = mod_a.get_json(f"/e/{slug}/api/messages") or {}
 check("сообщения первого события уцелели",
       [m["body"] for m in feed_a.get("messages", [])] == ["Сообщение первого"],
       str([m["body"] for m in feed_a.get("messages", [])]))

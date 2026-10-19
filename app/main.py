@@ -353,16 +353,20 @@ async def page_feed(slug: str, request: Request, t: str = ""):
 
 
 @app.get("/e/{slug}/screen", response_class=HTMLResponse)
-async def page_screen(slug: str, request: Request):
+async def page_screen(slug: str, request: Request, d: str = ""):
     event = _prepare(_event_or_404(slug))
-    response = _page("screen.html", base=f"/e/{event.slug}")
-    # Экран проектора получает свой билет: без него он не сможет тянуть
-    # фото и конфиг, а адрес экрана публичен. Билет живёт всё мероприятие.
+    # 4.1: ключ экрана. Без него экран не открывается — адрес проектора
+    # публичен, и без ключа любой мог бы смотреть фото и конфиг события.
+    if not auth.screen_key_valid(event, d):
+        raise HTTPException(status_code=403, detail="Нужен ключ экрана")
+    # ключ прячем из адресной строки после загрузки (см. screen.js), но
+    # страницу отдаем с ним в window.LF, чтобы скрипты могли тянуть фото.
+    response = _page("screen.html", base=f"/e/{event.slug}",
+                     extra=f",screenKey:{json.dumps(d)}")
     auth.set_screen_cookie(response, event)
     response.headers["Cache-Control"] = "no-store"
-    # 4.1: экран нельзя спрятать в чужой iframe, а картинка из галереи не
-    # должна уметь выполнить там код. Заголовки именно на странице экрана:
-    # остальные страницы живут под общим CSP из nginx.
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    response.headers["Referrer-Policy"] = "no-referrer"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
@@ -447,7 +451,8 @@ async def api_config(slug: str, request: Request):
     # свой билет при открытии /screen, участник — при проверке кода на /join.
     if not (auth.is_admin(request) or auth.is_moderator(request, event)
             or auth.current_participant(request, event) is not None
-            or auth.is_screen(request, event)):
+            or auth.is_screen(request, event)
+            or auth.screen_key_valid(event, request.query_params.get("d"))):
         raise HTTPException(status_code=403, detail="Нужен код приглашения")
     return {
         "slug": event.slug,
@@ -533,12 +538,16 @@ async def api_send(
     runtime.screen.sync_items(event.store.live_ids())
     if runtime.screen.current_id is None:
         runtime.screen.index = 0
+    # 4.1: дельта вместо полного снимка. За вечер уходило по JSON со всеми
+    # фото вечера на каждое сообщение — на слабой сети экран отваливался.
+    # Полный снимок остаётся только на подключении (init) и при ручном
+    # обновлении (refresh).
     payload = {
         "type": "new",
-        "message": message,
-        "messages": event.store.live_messages(),
-        "gallery": event.store.gallery_items(),
+        "added": [message],
         "screen": runtime.screen.state(),
+        "stats": event.store.stats(),
+        "splash": event.splash_url(),
     }
     await runtime.hub.to_display(payload)
     await runtime.hub.to_moderator(payload)
@@ -552,22 +561,33 @@ async def api_messages(slug: str, request: Request, limit: int = 300):
     # Лента и имена файлов — только по билету. Экран читает через WebSocket,
     # поэтому здесь билет участника (или ведущего/админа) обязателен.
     if not (auth.is_admin(request) or auth.is_moderator(request, event)
-            or auth.current_participant(request, event) is not None):
+            or auth.current_participant(request, event) is not None
+            or auth.is_screen(request, event)
+            or auth.screen_key_valid(event, request.query_params.get("d"))):
         raise HTTPException(status_code=403, detail="Нужен код приглашения")
-    msgs = event.store.live_messages(limit=min(limit, 500))
-    # 4.1: рядом с именем файла кладём короткую подписанную ссылку, чтобы
-    # фото можно было показать без вечного имени. Ссылка живёт 10 минут.
-    now = int(time.time())
-    exp = now + config.MEDIA_SIG_TTL
-    for m in msgs:
-        if m.get("image"):
-            m["image_url"] = (
-                f"/e/{event.slug}/media/{m['image']}?sig="
-                f"{auth.media_sig(event, m['image'], exp)}&exp={exp}"
-            )
+
+    # 4.1: архив (полный список сообщений и фото) — только модератору/админу.
+    # Гостю с кодом — только то, что сейчас на показе, плюс отправка.
+    is_mod = auth.is_admin(request) or auth.is_moderator(request, event)
+    if is_mod:
+        msgs = event.store.live_messages(limit=min(limit, 500))
+        now = int(time.time())
+        exp = now + config.MEDIA_SIG_TTL
+        for m in msgs:
+            if m.get("image"):
+                m["image_url"] = (
+                    f"/e/{event.slug}/media/{m['image']}?sig="
+                    f"{auth.media_sig(event, m['image'], exp)}&exp={exp}"
+                )
+        return {
+            "messages": msgs,
+            "stats": event.store.stats(),
+            "screen": _runtime(event).screen.state(),
+        }
+    # гость/экран: только текущий слайд
     return {
-        "messages": msgs,
-        "stats": event.store.stats(),
+        "messages": [],
+        "stats": {},
         "screen": _runtime(event).screen.state(),
     }
 
@@ -582,7 +602,7 @@ async def api_stats(slug: str, request: Request) -> dict:
 
 
 @app.get("/e/{slug}/media/{name}")
-async def media(slug: str, name: str, request: Request):
+async def media(slug: str, name: str, request: Request, w: int = 0):
     event = _prepare(_event_or_404(slug))
     safe = Path(name).name
     uploads = event.uploads_dir.resolve()
@@ -602,11 +622,31 @@ async def media(slug: str, name: str, request: Request):
         or auth.is_moderator(request, event)
         or auth.current_participant(request, event) is not None
         or auth.is_screen(request, event)
+        or auth.screen_key_valid(event, request.query_params.get("d"))
         or auth.media_sig_valid(event, safe, request.query_params.get("sig"),
                                 request.query_params.get("exp"))
     )
     if not allowed:
         raise HTTPException(status_code=403, detail="Нужен код приглашения")
+
+    # 4.1: миниатюры для сетки в кабинете ведущего. Полноразмерные файлы
+    # в сетке — единственное место, где реально ложится устройство.
+    if w and w > 0 and w <= 1024:
+        import io as _io
+        from PIL import Image as _Image
+        thumb_name = f".thumb_{w}_{safe}"
+        thumb_path = uploads / thumb_name
+        if not thumb_path.exists():
+            try:
+                with _Image.open(path) as im:
+                    im = im.convert("RGB")
+                    im.thumbnail((w, w), _Image.LANCZOS)
+                    im.save(thumb_path, "JPEG", quality=70, optimize=True)
+            except Exception:
+                thumb_path = path  # не смогли — отдаём оригинал
+        if thumb_path != path and thumb_path.exists():
+            return FileResponse(thumb_path, media_type="image/jpeg",
+                               headers={"Cache-Control": "private, max-age=86400"})
 
     # Подписанные ссылки короткоживущие — не кешируем надолго.
     sig = request.query_params.get("sig")
@@ -638,13 +678,17 @@ def _qr_svg(link: str) -> Response:
 
 
 @app.get("/e/{slug}/api/invite-link")
-async def api_invite_link(slug: str, request: Request) -> dict:
+async def api_invite_link(slug: str, request: Request, d: str = "") -> dict:
     """Ссылка-приглашение для показа на экране.
 
-    Открытая по назначению: QR висит на проекторе перед залом,
-    гости должны получить адрес, не входя в кабинет.
+    4.1: ключ экрана обязателен — адрес проектора публичен, и без ключа
+    любой мог бы получить код приглашения и смотреть фото.
     """
-    event = _event_or_404(slug)
+    event = _prepare(_event_or_404(slug))
+    if not (auth.is_admin(request) or auth.is_moderator(request, event)
+            or auth.screen_key_valid(event, d)
+            or auth.screen_key_valid(event, request.query_params.get("d"))):
+        raise HTTPException(status_code=403, detail="Нужен ключ экрана")
     return {
         "link": event.invite_link(events.base_url_from(request)),
         "code": event.get("invite_token", ""),
@@ -652,8 +696,12 @@ async def api_invite_link(slug: str, request: Request) -> dict:
 
 
 @app.get("/e/{slug}/api/qr.svg")
-async def qr_svg(slug: str, request: Request):
-    event = _event_or_404(slug)
+async def qr_svg(slug: str, request: Request, d: str = ""):
+    event = _prepare(_event_or_404(slug))
+    if not (auth.is_admin(request) or auth.is_moderator(request, event)
+            or auth.screen_key_valid(event, d)
+            or auth.screen_key_valid(event, request.query_params.get("d"))):
+        raise HTTPException(status_code=403, detail="Нужен ключ экрана")
     return _qr_svg(event.invite_link(events.base_url_from(request)))
 
 
@@ -963,6 +1011,17 @@ async def api_rotate_invite(slug: str, request: Request):
     return {"ok": True, "code": new_token}
 
 
+@app.post("/e/{slug}/api/moderator/rotate-screen-key")
+async def api_rotate_screen_key(slug: str, request: Request):
+    """Перевыпустить ключ экрана (между событиями или при утечке)."""
+    event = _event_or_404(slug)
+    _require_moderator(request, event)
+    new_key = event.rotate_screen_key()
+    root = events.base_url_from(request)
+    return {"ok": True, "screen_key": new_key,
+            "screen_url": f"{root}/e/{event.slug}/screen?d={new_key}"}
+
+
 # --------------------------------------------------------------------------
 # Слайдшоу (4.0): галочка у фотографии, галерея и запуск на экран
 # --------------------------------------------------------------------------
@@ -1146,12 +1205,17 @@ async def _pump(ws: WebSocket) -> None:
 
 
 @app.websocket("/e/{slug}/ws/display")
-async def ws_display(ws: WebSocket, slug: str) -> None:
+async def ws_display(ws: WebSocket, slug: str, d: str = "") -> None:
     event = events.get_event(slug)
     if event is None:
         await ws.close(code=4404)
         return
     _prepare(event)
+    # 4.1: ключ экрана проверяется при подключении. Без него канал не
+    # открывается — иначе любой, кто знает адрес, смотрел бы весь эфир.
+    if not auth.screen_key_valid(event, d):
+        await ws.close(code=4403)
+        return
     runtime = registry.get(event.slug)
 
     await ws.accept()

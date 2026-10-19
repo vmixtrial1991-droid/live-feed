@@ -18,7 +18,7 @@ import urllib.parse
 import urllib.request
 from http.cookiejar import CookieJar
 
-from testlib import prepare  # noqa: E402
+from testlib import prepare, DATA_DIR  # noqa: E402
 
 CTX = prepare("Проверка заставки")
 SLUG = CTX.slug
@@ -28,6 +28,8 @@ BASE = CTX.base
 SERVER = BASE[: BASE.index("/e/")]
 TOKEN = CTX.code
 PASS = CTX.mod_password
+import json as _j, os as _os
+SCREEN_KEY = _j.load(open(_os.path.join(DATA_DIR, "events", SLUG, "config.json"), encoding="utf-8")).get("screen_key", "")
 WS = BASE.replace("http://", "ws://")
 FAILURES: list[str] = []
 
@@ -192,7 +194,7 @@ async def main() -> None:
     check("мусор вместо картинки отклонён", st == 400, str(st))
 
     print("\n=== Переключение на экране ===")
-    async with websockets.connect(f"{WS}/ws/display") as ws:
+    async with websockets.connect(f"{WS}/ws/display?d={SCREEN_KEY}") as ws:
         await wait_for(ws, "init")
 
         st, res = await asyncio.to_thread(
@@ -217,7 +219,7 @@ async def main() -> None:
         check("экран узнал об уходе заставки", msg is not None)
 
     print("\n=== Заставка останавливает показ ===")
-    async with websockets.connect(f"{WS}/ws/display") as ws:
+    async with websockets.connect(f"{WS}/ws/display?d={SCREEN_KEY}") as ws:
         await wait_for(ws, "init")
         await asyncio.to_thread(
             mod.post, "/api/moderator/screen", {"action": "interval", "value": "2"}
@@ -252,7 +254,7 @@ async def main() -> None:
               str(len(back["messages"])))
 
     print("\n=== Замена и удаление на живом экране ===")
-    async with websockets.connect(f"{WS}/ws/display") as ws:
+    async with websockets.connect(f"{WS}/ws/display?d={SCREEN_KEY}") as ws:
         await wait_for(ws, "init")
 
         st, res = await asyncio.to_thread(
@@ -283,7 +285,7 @@ async def main() -> None:
 
     print("\n=== Уборка ===")
     total = sum(m["body"] == "сообщение номер 0"
-                for m in (await asyncio.to_thread(guest.get_json, "/api/messages"))["messages"])
+                for m in (await asyncio.to_thread(mod.get_json, "/api/messages"))["messages"])
     check("наши сообщения на месте до уборки", total == 1, str(total))
 
     print("\n=== Итог ===")

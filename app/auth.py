@@ -296,6 +296,16 @@ def is_screen(request: "Request", event: "Event") -> bool:
     )
 
 
+def screen_key_valid(event: "Event", key: str | None) -> bool:
+    """Ключ экрана из ?d= сверяется с тем, что лежит в настройках события."""
+    if not key:
+        return False
+    expected = str(event.screen_key).strip()
+    if not expected:
+        return False
+    return secrets.compare_digest(str(key).strip(), expected)
+
+
 # --------------------------------------------------------------------------
 # Короткая подписанная ссылка на фото.
 #

@@ -22,7 +22,20 @@ let splashUrl = null;   // загруженная картинка; null — п�
 
 /* Названия события и номера слайдов на экране нет: проектор показывает
    только сами сообщения, без служебной подписи внизу. */
-api(ev('/api/config')).then((cfg) => {
+/* 4.1: ключ экрана. Сервер отдал его в window.LF.screenKey (он же был в
+   ?d= адресной строки). Прячем его из адресной строки сразу, чтобы он не
+   утёк через Referer/историю, и дальше тянем все запросы с ним в query. */
+const screenKey = (window.LF && window.LF.screenKey) || '';
+if (screenKey && location.search.includes('d=')) {
+  try { history.replaceState(null, '', location.pathname); } catch (_) {}
+}
+function withKey(url) {
+  if (!screenKey) return url;
+  const sep = url.includes('?') ? '&' : '?';
+  return url + sep + 'd=' + encodeURIComponent(screenKey);
+}
+
+api(withKey(ev('/api/config'))).then((cfg) => {
   overlayTitle.textContent = cfg.event_title || 'Экран готов';
   overlayText.textContent = cfg.event_subtitle || 'Здесь появятся сообщения и фото.';
   // если заставку не загружали, показываем название события
@@ -69,8 +82,8 @@ function setSplash(visible) {
 }
 
 /* QR-код виден всем, поэтому ссылку на вход берём из открытого конфига */
-api(ev('/api/invite-link')).then((d) => {
-  screenQr.src = ev(`/api/qr.svg?v=${encodeURIComponent(d.code)}`);
+api(withKey(ev('/api/invite-link'))).then((d) => {
+  screenQr.src = withKey(ev(`/api/qr.svg?v=${encodeURIComponent(d.code)}`));
   screenQrLink.textContent = d.link;
 }).catch(() => { screenQrLink.textContent = ''; });
 
@@ -315,7 +328,7 @@ function fitAuthor(budget) {
 function paintData(m) {
 
   if (m.image) {
-    const url = ev(`/media/${encodeURIComponent(m.image)}`);
+    const url = withKey(ev(`/media/${encodeURIComponent(m.image)}`));
     const img = document.createElement('img');
     img.alt = '';
     // размер считаем после загрузки: до неё naturalWidth равен нулю
@@ -385,6 +398,30 @@ function render(id) {
   }, 300);
 }
 
+/** Предзагрузка следующей пары слайдов, чтобы переключение было мгновенным. */
+function preloadNext() {
+  if (screenState.slideshow_visible) return;
+  if (!order.length) return;
+  const idx = order.indexOf(screenState.current_id ?? order[0]);
+  const nextIds = [order[(idx + 1) % order.length], order[(idx + 2) % order.length]];
+  for (const id of nextIds) {
+    const m = messages.get(id);
+    if (m && m.image) {
+      const img = new Image();
+      img.src = withKey(ev(`/media/${encodeURIComponent(m.image)}`));
+    }
+  }
+}
+
+/** 4.1: при обрыве канала не чистим кадр — крутим последний снимок из
+    localStorage, пока связь не восстановится. */
+function saveSnapshot() {
+  try {
+    const id = screenState.current_id ?? (order.length ? order[0] : null);
+    if (id != null) localStorage.setItem('lf_last_slide', JSON.stringify({ id, at: Date.now() }));
+  } catch (_) {}
+}
+
 function showCurrent(state) {
   if (state) screenState = { ...screenState, ...state };
   // QR поверх всего: слайд под ним не трогаем, но и не перелистываем
@@ -438,7 +475,7 @@ function showCurrent(state) {
   }
 }
 
-connectWS(ev('/ws/display'), {
+connectWS(withKey(ev('/ws/display')), {
   onMessage(msg) {
     switch (msg.type) {
       case 'init':
@@ -451,10 +488,19 @@ connectWS(ev('/ws/display'), {
         order = byPosition([...messages.keys()]);
         screenState = msg.screen || screenState;
         shownKey = null;
-        showCurrent();
+        showCurrent(); preloadNext(); saveSnapshot();
         break;
 
-      case 'new':
+      case 'new': {
+        // дельта: пришли только новые сообщения, старые не трогаем
+        (msg.added || []).forEach((m) => messages.set(m.id, m));
+        if (msg.splash !== undefined) setSplashUrl(msg.splash);
+        order = byPosition([...messages.keys()]);
+        screenState = msg.screen || screenState;
+        showCurrent(); preloadNext(); saveSnapshot();
+        break;
+      }
+
       case 'refresh': {
         const fresh = new Set();
         (msg.messages || []).forEach((m) => { messages.set(m.id, m); fresh.add(m.id); });
@@ -465,7 +511,7 @@ connectWS(ev('/ws/display'), {
         (msg.gallery || []).forEach((g) => gallery.set(g.id, g));
         order = byPosition([...messages.keys()]);
         screenState = msg.screen || screenState;
-        showCurrent();
+        showCurrent(); preloadNext(); saveSnapshot();
         break;
       }
 
@@ -473,7 +519,7 @@ connectWS(ev('/ws/display'), {
         // заставку ведущий мог сменить или убрать, пока экран был открыт
         if ('splash' in msg) setSplashUrl(msg.splash);
         screenState = msg.screen || screenState;
-        showCurrent();
+        showCurrent(); preloadNext(); saveSnapshot();
         break;
     }
   },

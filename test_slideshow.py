@@ -502,7 +502,7 @@ try:
           str(scr.get("slideshow_total")))
     check("и слайдшоу выключено, а не показывает битые картинки",
           scr.get("slideshow_visible") is False)
-    st, feed = guest.get_json(f"/e/{slug}/api/messages")
+    st, feed = mod.get_json(f"/e/{slug}/api/messages")
     check("текстовое сообщение уцелело",
           any((m.get("body") or "").startswith("просто текст")
               for m in ((feed or {}).get("messages") or [])))

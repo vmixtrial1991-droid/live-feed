@@ -23,6 +23,16 @@ import uuid
 from http.cookiejar import CookieJar
 
 ROOT = os.environ.get("LF_TEST_ROOT", "http://127.0.0.1:8123").rstrip("/")
+
+def screen_key(slug: str) -> str:
+    """Ключ экрана события, чтобы тесты могли открывать /screen и тянуть фото."""
+    import json as _j
+    cfg = os.path.join(DATA_DIR, "events", slug, "config.json")
+    try:
+        with open(cfg, encoding="utf-8") as f:
+            return str(_j.load(f).get("screen_key", ""))
+    except (OSError, ValueError, KeyError):
+        return ""
 DATA_DIR = os.environ.get("LF_DATA_DIR", "data")
 # В режиме проверки за прокси сервер жёстко проверяет Host, поэтому и
 # служебные запросы (вход, создание события) должны идти с тем же Host

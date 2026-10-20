@@ -53,19 +53,29 @@ const PHASE_LABEL = {
 };
 
 /* Один шаг на каждую стадию: подпись кнопки и есть подсказка, что будет
-   дальше. На таблице шага нет — там игра либо кончена, либо ведущий
-   смотрит промежуточных лидеров. */
+   дальше. Промежуточная таблица — пауза, поэтому с неё шаг ведёт обратно
+   к вопросу, туда же, где игра стояла. Финальная таблица возврата не имеет:
+   последний вопрос прожит, и остатка игры за ним нет. */
 const STEP = {
   idle:   { action: 'open',   glyph: '▶', label: 'Открыть вопрос' },
   open:   { action: 'close',  glyph: '⏹', label: 'Закрыть приём' },
   closed: { action: 'reveal', glyph: '★', label: 'Показать ответ' },
   reveal: { action: 'next',   glyph: '›', label: 'Дальше' },
-  board:  { action: '',       glyph: '·', label: 'Таблица лидеров' },
+  board:  { action: '',       glyph: '·', label: 'Финальная таблица' },
+  board_back: { action: 'back', glyph: '↩', label: 'Вернуться к вопросу' },
 };
 
 // отсчёт на проекторе живёт на сервере, но панель тикает сама между
 // сигналами: иначе цифра стоит на месте, пока гость кто-нибудь не ответит
 let quizDeadline = null;
+
+/* Куда ведёт текущий шаг. На промежуточной таблице это возврат к вопросу,
+   и решает сервер: он знает стадию, из которой ведущий ушёл на лидеров. */
+function currentStep() {
+  const st = quizState;
+  if (st.phase === 'board' && st.back_phase) return STEP.board_back;
+  return STEP[st.phase] || STEP.idle;
+}
 
 function renderQuizControls() {
   const st = quizState;
@@ -75,7 +85,7 @@ function renderQuizControls() {
 
   quizDeadline = (st.time_left != null) ? Date.now() + st.time_left * 1000 : null;
 
-  const step = STEP[st.phase] || STEP.idle;
+  const step = currentStep();
   const stepOn = !!step.action && (st.phase !== 'idle' || total > 0);
   quizStepBtn.disabled = !stepOn;
   quizStepGlyph.textContent = step.glyph;
@@ -99,6 +109,11 @@ function renderQuizControls() {
   }
   if (st.phase !== 'idle') {
     line += st.visible ? ' · на экране: квиз' : ' · на экране: лента (зал отвечает)';
+  }
+  // ведущий мог уйти на лидеров посреди вопроса: подсказка говорит, что
+  // шаг не тупик, а возврат туда, где игра стояла
+  if (st.phase === 'board' && st.back_phase) {
+    line += ' · шаг вернёт к вопросу';
   }
   quizPhaseText.textContent = line;
 
@@ -206,7 +221,7 @@ async function quizControl(action, fields = {}) {
 /* Главный шаг игры: его делает и кнопка, и пробел на вкладке «Квиз».
    Куда идти дальше, решает стадия, а не ведущий — перепутать нельзя. */
 function quizStep() {
-  const step = STEP[quizState.phase] || STEP.idle;
+  const step = currentStep();
   if (!step.action || quizStepBtn.disabled) return;
   quizControl(step.action);
 }

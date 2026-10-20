@@ -110,6 +110,10 @@ def _prepare(event: Event) -> Event:
                 screen.quiz_opened_at = float(opened) if opened else None
             except (TypeError, ValueError):
                 screen.quiz_opened_at = None
+            # стадия, из которой вышли на промежуточную таблицу: без неё
+            # перезапуск посреди таблицы отнимал бы у ведущего возврат
+            prev = data.get("quiz_prev_phase")
+            screen.quiz_prev_phase = prev if prev in quizmod.BACK_PHASES else None
         except (EventError, OSError, ValueError):
             pass
         _prepared.add(event.slug)
@@ -151,7 +155,7 @@ def _quiz_persist(event: Event, screen) -> None:
     """
     if screen.quiz_phase == "idle":
         event.update(quiz_phase=None, quiz_question=None, quiz_visible=None,
-                     quiz_final=None, quiz_opened_at=None)
+                     quiz_final=None, quiz_opened_at=None, quiz_prev_phase=None)
     else:
         event.update(
             quiz_phase=screen.quiz_phase,
@@ -159,6 +163,7 @@ def _quiz_persist(event: Event, screen) -> None:
             quiz_visible=screen.quiz_visible,
             quiz_final=screen.quiz_final,
             quiz_opened_at=screen.quiz_opened_at,
+            quiz_prev_phase=screen.quiz_prev_phase,
         )
 
 
@@ -1386,6 +1391,7 @@ async def api_mod_quiz_control(
     reveal — добавляем правильный ответ;
     next   — следующий по порядку, а после последнего вопроса — финал;
     board  — промежуточная таблица лидеров (листает всех);
+    back   — вернуться с промежуточной таблицы к вопросу, где игра стояла;
     feed   — убрать квиз с экрана, оставив зал отвечать (фаза не трогается);
     show   — вернуть экран к текущей стадии;
     stop   — закончить квиз, экран снова показывает ленту;
@@ -1408,6 +1414,7 @@ async def api_mod_quiz_control(
             raise HTTPException(status_code=400, detail="Вопрос не найден")
         screen.quiz_phase, screen.quiz_question, screen.quiz_visible = "open", qid, True
         screen.quiz_final = False
+        screen.quiz_prev_phase = None
         screen.quiz_opened_at = time.time()
     elif action == "close":
         if screen.quiz_phase != "open":
@@ -1433,14 +1440,36 @@ async def api_mod_quiz_control(
             # таблицу, ведущему не нужно ничего искать кнопками
             screen.quiz_phase, screen.quiz_question = "board", None
             screen.quiz_visible, screen.quiz_final = True, True
-            screen.quiz_opened_at = None
+            screen.quiz_opened_at, screen.quiz_prev_phase = None, None
         else:
             screen.quiz_phase, screen.quiz_question, screen.quiz_visible = "open", order[i + 1], True
             screen.quiz_final = False
+            screen.quiz_prev_phase = None
             screen.quiz_opened_at = time.time()
     elif action == "board":
+        if screen.quiz_phase == "idle":
+            raise HTTPException(status_code=400, detail="Квиз сейчас не идёт")
+        # на таблицу уходят посмотреть лидеров и вернуться, поэтому помним,
+        # откуда именно: шаг «назад» ведёт туда же, а не в начало вопроса
+        if screen.quiz_phase != "board":
+            screen.quiz_prev_phase = screen.quiz_phase
         screen.quiz_phase, screen.quiz_visible = "board", True
         screen.quiz_final = False
+    elif action == "back":
+        # возврат с промежуточной таблицы. Финал не откатываем: последний
+        # вопрос прожит, и остатка игры за ним нет
+        if screen.quiz_phase != "board":
+            raise HTTPException(status_code=400, detail="Сейчас и так не таблица лидеров")
+        if screen.quiz_final:
+            raise HTTPException(
+                status_code=400,
+                detail="Финальную таблицу вернуть некуда — завершите квиз",
+            )
+        target = quizmod.back_phase(screen)
+        if target is None or store.quiz_get_question(screen.quiz_question) is None:
+            raise HTTPException(status_code=400, detail="Возвращаться некуда: вопрос уже прожит")
+        screen.quiz_phase, screen.quiz_visible = target, True
+        screen.quiz_prev_phase = None
     elif action == "feed":
         screen.quiz_visible = False
     elif action == "show":
@@ -1450,6 +1479,7 @@ async def api_mod_quiz_control(
     elif action == "stop":
         screen.quiz_phase, screen.quiz_question, screen.quiz_visible = "idle", None, False
         screen.quiz_final, screen.quiz_opened_at = False, None
+        screen.quiz_prev_phase = None
     elif action == "reset":
         removed = store.quiz_clear_answers()
     else:

@@ -11,7 +11,8 @@
 
 Ведущий ведёт игру одной цепочкой: «Открыть → Закрыть приём → Показать
 ответ → Дальше»; «Дальше» после последнего вопроса уводит экран сразу на
-финальную таблицу.
+финальную таблицу. С промежуточной таблицы («Лидеры на экран») можно
+вернуться туда, где игра стояла: стадию помним в ScreenController.
 
 Здесь только чтение и сборка: записи делает EventStore, рассылкой занимается
 main.py. Правильный номер ответа зрителям не отдаётся до стадии reveal —
@@ -27,6 +28,23 @@ from .events import Event
 from .realtime import ScreenController
 
 PHASES = ("idle", "open", "closed", "reveal", "board")
+
+# стадии, к которым возвращается шаг «назад» с промежуточной таблицы
+BACK_PHASES = ("open", "closed", "reveal")
+
+
+def back_phase(screen: ScreenController) -> str | None:
+    """Куда ведёт возврат с таблицы лидеров, или None — если возврата нет.
+
+    Промежуточная таблица — это пауза в игре: зал попросили посмотреть
+    лидеров, а потом хотят снова открыть приём или показать ответ. Поэтому
+    стадию, из которой ведущий ушёл на таблицу, помнят (и в конфиге тоже).
+    Финальная таблица возврата не имеет: там вопроса уже нет.
+    """
+    if screen.quiz_phase != "board" or screen.quiz_final or not screen.quiz_question:
+        return None
+    prev = screen.quiz_prev_phase
+    return prev if prev in BACK_PHASES else None
 
 
 def question_public(q: dict) -> dict:
@@ -175,6 +193,9 @@ def host_state(store: EventStore, screen: ScreenController) -> dict:
         "visible": screen.quiz_visible,
         "current": screen.quiz_question,
         "final": bool(screen.quiz_final),
+        # «вернуться к вопросу»: панель подписывает шаговую кнопку по этой
+        # стадии; у финальной таблицы поля нет — возвращаться некуда
+        "back_phase": back_phase(screen),
         "questions": questions,
         "board": _board_public(store),
         "participants": store.stats()["participants"],

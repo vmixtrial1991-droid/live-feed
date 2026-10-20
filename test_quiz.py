@@ -368,10 +368,10 @@ check("неизвестное действие управляющего откл
 
 st, _ = call("POST", "/api/moderator/quiz/control", {"action": "close"}, expect=400)
 check("закрывать нечего — честно отказано", True)
-st, h = call("POST", "/api/moderator/quiz/control", {"action": "board"})
-if st == 200:  # board при idle сервер допускает — экран просто показывает пустую
-    check("board при idle не ломает игру", h.get("phase") == "board")
-    call("POST", "/api/moderator/quiz/control", {"action": "stop"})
+st, _ = call("POST", "/api/moderator/quiz/control", {"action": "board"}, expect=400)
+check("без идущей игры таблицу на экран не вывести", True)
+st, _ = call("POST", "/api/moderator/quiz/control", {"action": "back"}, expect=400)
+check("с не-таблицы назад не шагнуть", True)
 
 print("\n=== Цепочка шагов, таймер, копия и места ===")
 call("POST", "/api/moderator/quiz/control", {"action": "stop"})
@@ -431,6 +431,23 @@ check("телефону отсчёт не приезжает — зал не г�
       "seconds_left" not in quiz and "seconds" not in (quiz.get("question") or {}),
       str(quiz)[:160])
 
+# лидеры посреди вопроса — это пауза: зал показали и вернули обратно,
+# причём именно в ту стадию, где игра стояла, с тем же остатком отсчёта
+st, h = call("POST", "/api/moderator/quiz/control", {"action": "board"})
+_, hb = call("GET", "/api/moderator/quiz")
+check("с промежуточной таблицы обещают возврат к открытому вопросу",
+      hb.get("back_phase") == "open", str(hb.get("back_phase")))
+check("на таблице зал отвечает по-прежнему, а вопрос остаётся открытым",
+      hb.get("phase") == "board" and hb.get("current") == t1, str(hb)[:120])
+st, h = call("POST", "/api/moderator/quiz/control", {"action": "back"})
+check("шаг назад возвращает открытый вопрос на экран",
+      h.get("phase") == "open" and h.get("current") == t1, str(h)[:120])
+check("отсчёт после возврата продолжается, а не начинается заново",
+      isinstance(h.get("time_left"), int) and 0 < h["time_left"] <= 30,
+      str(h.get("time_left")))
+st, _ = call("POST", "/api/moderator/quiz/control", {"action": "back"}, expect=400)
+check("второй раз назад с той же таблицы не шагнуть", True)
+
 call("POST", "/api/quiz/answer", {"question_id": t1, "option": 1})
 call("POST", "/api/quiz/answer", {"question_id": t1, "option": 0}, jar=GUEST2)
 _, h = call("GET", "/api/moderator/quiz")
@@ -456,11 +473,12 @@ check("на reveal зал видит верный вариант", quiz.get("cor
 
 st, h = call("POST", "/api/moderator/quiz/control", {"action": "board"})
 check("обычный вывод лидеров — не финал", h.get("final") is False, str(h.get("final")))
-st, h = call("POST", "/api/moderator/quiz/control", {"action": "open", "question_id": t1})
-check("возврат к вопросу снимает таблицу с экрана", h.get("phase") == "open")
+check("с таблицы после ответа возврат ведёт к показанному ответу",
+      h.get("back_phase") == "reveal", str(h.get("back_phase")))
+st, h = call("POST", "/api/moderator/quiz/control", {"action": "back"})
+check("возврат снимает таблицу с экрана, стадия остаётся", h.get("phase") == "reveal")
 
 st, _ = call("POST", "/api/join", {"name": "Вика", "invite": TOKEN}, jar=GUEST3)
-st, h = call("POST", "/api/moderator/quiz/control", {"action": "close"})
 st, h = call("POST", "/api/moderator/quiz/control", {"action": "next"})
 check("дальше ведёт к копии сразу за оригиналом",
       h.get("phase") == "open" and h.get("current") == t1c, str(h)[:120])
@@ -517,6 +535,11 @@ check("равный счёт даёт равное первое место",
       len(tops) == 2 and all(r[2] == 1 for r in tops), str(ranks))
 check("после равных лидеров место сразу третье",
       any(r[1] == 0 and r[2] == 3 for r in ranks), str(ranks))
+_, h = call("GET", "/api/moderator/quiz")
+check("у финальной таблицы возврата нет — вопрос уже прожит",
+      h.get("back_phase") is None, str(h.get("back_phase")))
+st, _ = call("POST", "/api/moderator/quiz/control", {"action": "back"}, expect=400)
+check("финальную таблицу назад не откатить", True)
 
 if websockets is not None:
     async def final_checks() -> None:

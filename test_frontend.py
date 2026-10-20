@@ -679,6 +679,9 @@ check("quiz-panel.js: отсчёт вопроса уезжает в форму �
       "qSeconds" in quiz_panel_js and "quiz-chip-time" in quiz_panel_js)
 check("quiz-panel.js: место в таблице берётся с сервера, а не из порядка строк",
       "r.rank" in quiz_panel_js)
+check("quiz-panel.js: с промежуточной таблицы лидер шаг возвращает к вопросу",
+      "board_back" in quiz_panel_js and "back_phase" in quiz_panel_js
+      and "action: 'back'" in quiz_panel_js)
 check("moderator.js: на вкладке «Квиз» пробел ведёт игру, L выводит лидеров",
       "quizPanel.step()" in mod_js2 and "quizPanel.board()" in mod_js2)
 check("quiz.js: reveal отделён от closed — «мимо» раньше времени не пишется",

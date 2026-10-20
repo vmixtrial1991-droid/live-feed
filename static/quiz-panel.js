@@ -139,7 +139,7 @@ async function reload() {
 }
 
 /* ---------------- Управление игрой ---------------- */
-async function control(action, fields = {}) {
+async function quizControl(action, fields = {}) {
   try {
     quizState = await postForm(ev('/api/moderator/quiz/control'), { action, ...fields });
     renderQuizControls();
@@ -150,20 +150,20 @@ async function control(action, fields = {}) {
   }
 }
 
-quizOpenBtn.addEventListener('click', () => control('open'));
-quizCloseBtn.addEventListener('click', () => control('close'));
-quizNextBtn.addEventListener('click', () => control('next'));
-quizBoardBtn.addEventListener('click', () => control('board'));
-quizShowBtn.addEventListener('click', () => control('show'));
-quizFeedBtn.addEventListener('click', () => control('feed'));
+quizOpenBtn.addEventListener('click', () => quizControl('open'));
+quizCloseBtn.addEventListener('click', () => quizControl('close'));
+quizNextBtn.addEventListener('click', () => quizControl('next'));
+quizBoardBtn.addEventListener('click', () => quizControl('board'));
+quizShowBtn.addEventListener('click', () => quizControl('show'));
+quizFeedBtn.addEventListener('click', () => quizControl('feed'));
 quizStopBtn.addEventListener('click', async () => {
   if (!confirm('Завершить квиз?\n\nЭкран снова начнёт показывать ленту.')) return;
-  await control('stop');
+  await quizControl('stop');
 });
 quizResetBtn.addEventListener('click', async () => {
   if (!confirm('Стереть все ответы гостей?\n\nВопросы останутся, игра начнётся с чистого листа.')) return;
   const before = quizState.answers_total || 0;
-  await control('reset');
+  await quizControl('reset');
   if (quizState.answers_total === 0) showToast(`Стерто ответов: ${before}`, 'ok', 2500);
 });
 

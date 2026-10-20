@@ -82,7 +82,7 @@ import re
 def top_level_names(src: str) -> set[str]:
     body = re.sub(r"/\*.*?\*/", " ", src, flags=re.S)
     body = re.sub(r"//[^\n]*", " ", body)
-    return set(re.findall(r"^(?:const|let|var|function|class)\s+([A-Za-z_$][\w$]*)",
+    return set(re.findall(r"^(?:const|let|var|(?:async\s+)?function|class)\s+([A-Za-z_$][\w$]*)",
                           body, re.M))
 
 

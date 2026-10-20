@@ -506,16 +506,23 @@ check("moderator.html: подпись о пустой заставке на ме
 # у них попадает в один общий лексический объём. Одинаковое имя во втором
 # файле не «перекрывается», а роняет весь файл: страница молча теряет
 # половину разметки, а API-проверки этого не видят.
+# С function иначе, но не лучше: повторное объявление разрешено, и второй
+# скрипт тихо перекрывает первый. Так в 5.0 control() из quiz-panel.js
+# подменил собой control() из moderator.js — и все кнопки показа ушли
+# в квиз-эндпоинт с ответом «Неизвестное действие». Проверяем и то, и другое.
 def top_level_names(src: str) -> set[str]:
     body = re.sub(r"/\*.*?\*/", " ", src, flags=re.S)
     body = re.sub(r"//[^\n]*", " ", body)
-    return set(re.findall(r"^(?:const|let|var)\s+([A-Za-z_$][\w$]*)", body, re.M))
+    return set(re.findall(
+        r"^(?:const|let|var|(?:async\s+)?function|class)\s+([A-Za-z_$][\w$]*)",
+        body, re.M))
 
 
-dupes = top_level_names((STATIC / "moderator.js").read_text(encoding="utf-8")) & \
-        top_level_names((STATIC / "slideshow-panel.js").read_text(encoding="utf-8"))
-check("moderator.js и slideshow-panel.js не делят имена",
-      not dupes, "одинаковое имя во втором файле роняет его целиком: " + str(sorted(dupes)))
+mod_names = top_level_names((STATIC / "moderator.js").read_text(encoding="utf-8"))
+for other in ("slideshow-panel.js", "quiz-panel.js"):
+    dupes = mod_names & top_level_names((STATIC / other).read_text(encoding="utf-8"))
+    check(f"moderator.js и {other} не делят имена",
+          not dupes, "одинаковое имя во втором файле роняет его целиком: " + str(sorted(dupes)))
 
 # Галерея и управление показом
 check("moderator.html: контейнер галереи", 'id="gallery"' in mod_html)

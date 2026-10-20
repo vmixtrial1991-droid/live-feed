@@ -220,14 +220,68 @@
 
 /* Квиз (5.0): слой игры поверх всего — выше заставки и QR-окна. Если
    ведущий открыл вопрос, его должно быть видно с дальних рядов, поэтому
-   размеры заданы clamp-ом от размера окна, а не фиксированными пикселями. */
+   размеры заданы clamp-ом от размера окна, а не фиксированными пикселями.
+
+   Слой не прячется через hidden: браузерное display:none перебивает
+   переход, и вместо плавного наложения получалось мигание. Вместо этого
+   слой лежит внизу всегда, а opacity и visibility решают, видна ли игра;
+   градиент тот же, что на всех страницах приложения, — зал видит игру на
+   привычном тёмном фоне, а не на чёрной заплатке поверх ленты. */
 .quiz-screen {
   position: absolute; inset: 0; z-index: 25;
   display: flex; align-items: center; justify-content: center;
-  background: rgba(11, 13, 20, .93);
-  animation: quizIn .25s ease-out;
+  background:
+    radial-gradient(1100px 620px at 12% -10%, rgba(91, 140, 255, .20), transparent 60%),
+    radial-gradient(1000px 600px at 92% 2%, rgba(124, 92, 255, .18), transparent 62%),
+    linear-gradient(135deg, rgba(11, 13, 20, .97), rgba(20, 24, 38, .95) 55%, rgba(11, 13, 20, .97));
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity .6s ease, visibility 0s linear .6s;
 }
-@keyframes quizIn { from { opacity: 0; } to { opacity: 1; } }
+.quiz-screen.is-on {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity .6s ease;
+}
+
+/* что именно занимает слой — холл, вопрос или таблица; при смене блок
+   въезжает сверху, а градиент под ним остаётся на месте */
+.quiz-block {
+  width: min(92vw, 1100px);
+  padding: clamp(1rem, 3vh, 2.5rem) clamp(1.5rem, 4vw, 3rem);
+  text-align: center;
+  color: var(--text);
+}
+.quiz-block.is-swap { animation: quizSwap .45s ease-out; }
+@keyframes quizSwap {
+  from { opacity: 0; transform: translateY(1.4rem) scale(.99); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* Холл игры: крупное название и QR, который видно с задних рядов. Карточка
+   белая — так код считывается любым телефоном при любом свете в зале. */
+.quiz-lobby-title {
+  font-size: clamp(2rem, 6vw, 4.6rem);
+  line-height: 1.1;
+  margin: 0 0 .25em;
+}
+.quiz-lobby-sub {
+  color: var(--muted);
+  font-size: clamp(1rem, 2.4vw, 1.6rem);
+  margin: 0 0 1.1em;
+}
+.quiz-lobby-qr {
+  display: inline-block;
+  padding: clamp(.6rem, 1.6vw, 1.2rem);
+  background: #fff;
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+}
+.quiz-lobby-qr img {
+  display: block;
+  width: clamp(180px, 34vh, 420px);
+  height: auto;
+}
 
 .quiz-screen-inner {
   width: min(92vw, 1100px);
@@ -327,4 +381,7 @@
 @media (prefers-reduced-motion: reduce) {
   .slide { transition: opacity .2s linear; }
   .screen-stage::before { transition: none; }
+  .quiz-screen { transition: opacity .2s linear, visibility 0s linear .2s; }
+  .quiz-screen.is-on { transition: opacity .2s linear; }
+  .quiz-block.is-swap { animation: none; }
 }

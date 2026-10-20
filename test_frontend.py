@@ -644,6 +644,7 @@ check("screen.js: обычная лента не поехала после сл�
 # ---------------- Квиз (5.0) ----------------
 quiz_html = (STATIC / "quiz.html").read_text(encoding="utf-8")
 quiz_js = (STATIC / "quiz.js").read_text(encoding="utf-8")
+quiz_css = (STATIC / "quiz.css").read_text(encoding="utf-8")
 quiz_panel_js = (STATIC / "quiz-panel.js").read_text(encoding="utf-8")
 check("quiz.html: игра спрятана до входа", 'id="gameBox" hidden' in quiz_html)
 check("quiz.html: вход по тому же коду приглашения", 'id="codeInput"' in quiz_html)
@@ -656,11 +657,14 @@ check("quiz.js: чужих ответов не показывает — толь
       "data.my_answer" in quiz_js and "counts" in quiz_js)
 check("quiz-panel.js: ведущий управляет всеми стадиями",
       all(a in quiz_panel_js for a in
-          ("'open'", "'close'", "'reveal'", "'next'", "'board'",
-           "'feed'", "'show'", "'stop'")))
+          ("'start'", "'open'", "'close'", "'reveal'", "'next'",
+           "'board'", "'back'", "'stop'")))
 check("quiz-panel.js: QR квиза запрашивается с kind=quiz", "kind=quiz" in quiz_panel_js)
 check("quiz-panel.js: панель перезаряжается по сигналу из общего канала",
       "window.quizPanel" in quiz_panel_js)
+check("quiz-panel.js: до запуска игры шаговой кнопки нет — есть запуск",
+      "quizStartBtn" in quiz_panel_js and "quizStepBtn.hidden" in quiz_panel_js
+      and "lobby" in quiz_panel_js)
 check("moderator.html: вкладка «Квиз» есть", 'id="tabQuiz"' in mod_html)
 check("moderator.html: страница вкладки «Квиз» есть", 'id="pageQuiz"' in mod_html)
 check("moderator.html: скрипт квиза подключён", 'src="/static/quiz-panel.js"' in mod_html)
@@ -668,6 +672,11 @@ check("moderator.js: панель получает сигнал quiz_update", "c
 check("moderator.html: шаговая кнопка одна, трёх кнопок стадии больше нет",
       'id="quizStepBtn"' in mod_html
       and not any(i in mod_html for i in ("quizOpenBtn", "quizCloseBtn", "quizNextBtn")))
+check("moderator.html: квиз запускается одной кнопкой",
+      'id="quizStartBtn"' in mod_html)
+check("moderator.html: справа остались лидеры, сброс и завершение",
+      all(i in mod_html for i in ("quizBoardBtn", "quizResetBtn", "quizStopBtn"))
+      and not any(i in mod_html for i in ("quizShowBtn", "quizFeedBtn")))
 check("moderator.html: поле времени ответа в редакторе вопроса", 'id="qSeconds"' in mod_html)
 check("quiz-panel.js: цепочку шагов задаёт стадия, а не ведущий",
       all(a in quiz_panel_js for a in ("STEP", "quizStepBtn", "quizStep()")))
@@ -687,11 +696,25 @@ check("moderator.js: на вкладке «Квиз» пробел ведёт и
 check("quiz.js: reveal отделён от closed — «мимо» раньше времени не пишется",
       "'reveal'" in quiz_js and "revealed" in quiz_js)
 check("quiz.js: и на телефоне места считаются по рангу сервера", "row.rank" in quiz_js)
+check("quiz.js: в холле телефон тоже ждёт, но подписывает ожидание иначе",
+      "'lobby'" in quiz_js and "waitTitle" in quiz_js)
+check("quiz.css: страница гостя не перекрывает общий градиент своим фоном",
+      re.search(r"\.quiz-page\s*\{[^}]*background:", quiz_css, re.S) is None)
 check("screen.html: отсчёт живёт на проекторе", 'id="quizTimer"' in screen_html)
+check("screen.html: холл игры — название и QR, чтобы зал подключился",
+      'id="quizLobby"' in screen_html and 'id="lobbyTitle"' in screen_html
+      and 'id="lobbyQr"' in screen_html)
 check("screen.js: экран ведёт отсчёт сам, а «время вышло» ничего не блокирует",
       "quizDeadline" in screen_js and "Время вышло" in screen_js)
+check("screen.js: экран показывает холл, а когда вопроса нет — ленту",
+      "renderLobby" in screen_js and "'lobby'" in screen_js)
+check("screen.js: слой игры ложится на ленту плавно, а не щелчком",
+      "setQuizLayer" in screen_js and "is-on" in screen_js and "is-swap" in screen_js)
 check("screen.js: промежуточная таблица листается, финальная стоит на месте",
       "BOARD_STEP_MS" in screen_js and "FINAL_TOP" in screen_js and "is-hero" in screen_js)
+check("screen.css: игра стоит на общем тёмном градиенте и появляется переходом",
+      re.search(r"\.quiz-screen\s*\{[^}]*radial-gradient", screen_css, re.S) is not None
+      and re.search(r"\.quiz-screen\s*\{[^}]*transition", screen_css, re.S) is not None)
 check("screen.css: финальное первое место крупнее остальных",
       re.search(r"\.quiz-s-row\.is-hero", screen_css) is not None)
 check("moderator.css: полоса зала рисуется шириной по доле ответов",

@@ -64,10 +64,11 @@
       <button class="btn ghost small" id="renameCancel" type="button">Отмена</button>
     </form>
 
-    <!-- idle: квиз ещё не открыт -->
+    <!-- idle: квиз ещё не запущен. lobby: запущен, а первого вопроса ещё
+         нет — зал подключается по QR на экране. Текст подписывает скрипт. -->
     <div class="quiz-wait" id="waitBox">
-      <p class="big">Квиз ещё не начался</p>
-      <p class="muted">Ведущий откроет вопрос — и он появится здесь сам, ничего обновлять не нужно.</p>
+      <p class="big" id="waitTitle">Квиз ещё не начался</p>
+      <p class="muted" id="waitHint">Ведущий откроет вопрос — и он появится здесь сам, ничего обновлять не нужно.</p>
     </div>
 
     <!-- open / closed: вопрос -->

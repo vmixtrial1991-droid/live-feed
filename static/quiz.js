@@ -25,6 +25,8 @@ const renameRow = document.getElementById('renameRow');
 const renameInput = document.getElementById('renameInput');
 
 const waitBox = document.getElementById('waitBox');
+const waitTitle = document.getElementById('waitTitle');
+const waitHint = document.getElementById('waitHint');
 const questionBox = document.getElementById('questionBox');
 const qnLabel = document.getElementById('qnLabel');
 const questionText = document.getElementById('questionText');
@@ -81,11 +83,18 @@ function renderQuiz(data) {
   myScore.hidden = scored <= 0;
   myScore.textContent = `очков: ${scored}`;
 
-  show(waitBox, data.phase === 'idle');
+  // холл игры (lobby) — это тоже ожидание: ведущий запустил квиз, но первого
+  // вопроса ещё нет, и телефон просто ждёт, подписав себя по-другому
+  const waiting = data.phase === 'idle' || data.phase === 'lobby';
+  show(waitBox, waiting);
   show(questionBox, data.phase === 'open' || data.phase === 'closed' || data.phase === 'reveal');
   show(boardBox, data.phase === 'board');
 
-  if (data.phase === 'idle') {
+  if (waiting) {
+    waitTitle.textContent = data.phase === 'lobby' ? 'Квиз начался' : 'Квиз ещё не начался';
+    waitHint.textContent = data.phase === 'lobby'
+      ? 'Ведущий задаёт первый вопрос — он появится здесь сам, ничего обновлять не нужно.'
+      : 'Ведущий откроет вопрос — и он появится здесь сам, ничего обновлять не нужно.';
     lastPhase = null;
     answerHint.textContent = '';
     return;

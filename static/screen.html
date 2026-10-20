@@ -52,9 +52,20 @@
 
 <!-- Квиз (5.0): тот же экран, только режим игры. Лента на это время
      встаёт. Слой лежит выше заставки и QR: если ведущий открыл вопрос,
-     его должно быть видно при любом фоне. -->
-<div class="quiz-screen" id="quizScreen" hidden>
-  <div class="quiz-screen-inner">
+     его должно быть видно при любом фоне. Сам слой не прячется через
+     hidden — он накладывается на ленту градиентом и гаснет плавно. -->
+<div class="quiz-screen" id="quizScreen">
+  <!-- Холл игры: зал только подключается. Название события и QR, чтобы
+     зрители попали в игру со своих телефонов, а вопроса ещё нет -->
+  <div class="quiz-block quiz-lobby" id="quizLobby" hidden>
+    <p class="quiz-tag">Квиз</p>
+    <h1 class="quiz-lobby-title" id="lobbyTitle"></h1>
+    <p class="quiz-lobby-sub" id="lobbySub" hidden></p>
+    <div class="quiz-lobby-qr"><img id="lobbyQr" alt="QR-код квиза" width="420" height="420"></div>
+    <p class="quiz-count" id="lobbyHint"></p>
+  </div>
+
+  <div class="quiz-block quiz-screen-inner" id="quizPlay" hidden>
     <p class="quiz-tag" id="quizTag"></p>
     <!-- Отсчёт живёт только здесь, на проекторе: телефоны не должны
          превращать игру в гонку. По истечении — надпись, но ответы всё

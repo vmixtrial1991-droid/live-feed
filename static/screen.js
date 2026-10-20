@@ -20,10 +20,16 @@ const splashTitle = document.getElementById('splashTitle');
 const splashSubtitle = document.getElementById('splashSubtitle');
 let splashUrl = null;   // загруженная картинка; null — покажем название события
 
-// 5.0: слой квиза. Сервер присылает готовую картинку стадии (вопрос,
-// распределение, лидеры) — у экрана собственного мнения нет, и правильный
+// 5.0: слой квиза. Сервер присылает готовую картинку стадии (холл с QR,
+// вопрос, распределение, лидеры) — у экрана собственного мнения нет, и правильный
 // ответ он узнаёт только когда ведущий покажет ответ
 const quizScreen = document.getElementById('quizScreen');
+const quizPlay = document.getElementById('quizPlay');
+const quizLobby = document.getElementById('quizLobby');
+const lobbyTitle = document.getElementById('lobbyTitle');
+const lobbySub = document.getElementById('lobbySub');
+const lobbyQr = document.getElementById('lobbyQr');
+const lobbyHint = document.getElementById('lobbyHint');
 const quizTag = document.getElementById('quizTag');
 const quizTimer = document.getElementById('quizTimer');
 const quizQText = document.getElementById('quizQText');
@@ -151,6 +157,9 @@ function tickQuizTimer() {
   const left = Math.max(0, Math.ceil((quizDeadline - Date.now()) / 1000));
   quizTimer.hidden = false;
   if (left > 0) {
+    // новый вопрос при работающем тикере наследует старое «Время вышло!»,
+    // поэтому снимаем напоминание здесь — иначе цифра и вид разошлись бы
+    quizTimer.classList.remove('is-over');
     quizTimer.textContent = String(left);
     return;
   }
@@ -196,9 +205,60 @@ function paintBoard() {
   }
 }
 
+/* Слой игры ложится на ленту градиентом, а не включается щелчком: hidden
+   здесь не подходит — браузерное display:none перебивает css-переход,
+   и вместо плавного наложения вышло бы мигание */
+let shownBlock = null;   // что занимает слой: 'lobby' | 'q<id>' | 'board'
+
+function setQuizLayer(on) {
+  quizScreen.classList.toggle('is-on', !!on);
+  if (!on) {
+    stopQuizTicker();
+    stopBoardScroll();
+    shownBlock = null;
+  }
+}
+
+/* Содержимое слоя меняется (холл → вопрос → таблица), и новый блок въезжает
+   сверху; градиент под ним при этом остаётся на месте, поэтому зал видит
+   плавное наложение, а не мигающий фон. Возвращает true, если блок новый. */
+function showQuizBlock(block, key) {
+  const swap = shownBlock !== key;
+  quizLobby.hidden = block !== quizLobby;
+  quizPlay.hidden = block !== quizPlay;
+  shownBlock = key;
+  if (swap) {
+    block.classList.remove('is-swap');
+    void block.offsetWidth;   // без этого анимация не началась бы заново
+    block.classList.add('is-swap');
+  }
+  return swap;
+}
+
+/* Холл игры: ведущий запустил квиз, а вопроса ещё нет. Зал читает название
+   и сканирует QR, а ведущий в это время спокойно дописывает вопросы. */
+function renderLobby(f) {
+  stopQuizTicker();
+  stopBoardScroll();
+  setQuizLayer(true);
+  const fresh = showQuizBlock(quizLobby, 'lobby');
+  lobbyTitle.textContent = f.title || 'Квиз';
+  lobbySub.textContent = f.subtitle || '';
+  lobbySub.hidden = !f.subtitle;
+  if (fresh) {
+    // адрес QR отдаёт сервер, ключ экрана подставляет экран: картинка
+    // генерируется на лету и не лежит в кэше
+    lobbyQr.src = withKey(ev(f.qr || '/api/qr.svg?kind=quiz'));
+  }
+  lobbyHint.textContent = f.participants
+    ? `Отсканируйте код — уже с нами: ${f.participants}`
+    : 'Отсканируйте код — первый вопрос вот-вот начнётся';
+}
+
 function renderBoard(f) {
   stopQuizTicker();
-  quizScreen.hidden = false;
+  setQuizLayer(true);
+  showQuizBlock(quizPlay, 'board');
   quizTag.textContent = 'Квиз';
   quizFree.hidden = true;
 
@@ -237,23 +297,21 @@ function renderBoard(f) {
 function renderQuiz() {
   const f = quizFrame;
   if (!f) {
-    quizScreen.hidden = true;
-    stopQuizTicker();
-    stopBoardScroll();
+    setQuizLayer(false);
     return;
   }
 
+  if (f.phase === 'lobby') { renderLobby(f); return; }
   if (f.phase === 'board') { renderBoard(f); return; }
 
   const q = f.question;
   if (!q) {
-    quizScreen.hidden = true;   // фаза есть, вопроса нет — ждём
-    stopQuizTicker();
-    stopBoardScroll();
+    setQuizLayer(false);   // фаза есть, вопроса нет — ждём
     return;
   }
-  quizScreen.hidden = false;
+  setQuizLayer(true);
   stopBoardScroll();
+  showQuizBlock(quizPlay, `q${q.id}`);
   quizTag.textContent = f.questions_total
     ? `Вопрос ${f.question_no} из ${f.questions_total}` : `Вопрос ${f.question_no}`;
   quizQText.textContent = q.text;

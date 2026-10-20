@@ -1,11 +1,14 @@
 /* Квиз (5.0) — вкладка ведущего: вопросы, стадии игры, ссылка с QR.
 
-   Игру ведёт одна шаговая кнопка: она подписана по текущей стадии
-   («Открыть вопрос → Закрыть приём → Показать ответ → Дальше»), и после
-   последнего вопроса экран сам уходит на финальную таблицу. Экран один —
-   на время игры лента встаёт, ведущий видит это здесь же. Живые полосы
-   вариантов видит только ведущий: зал узнаёт распределение не раньше
-   закрытия приёма. */
+   Игра начинается с одной кнопки «Запустить квиз»: экран плавно уходит на
+   холл с названием игры и QR, зал подключается, а вопросы к этому моменту
+   готовы не всегда — дописать их можно прямо в холле. Дальше игру ведёт
+   одна шаговая кнопка: она подписана по текущей стадии («Открыть первый
+   вопрос → Закрыть приём → Показать ответ → Дальше»), и после последнего
+   вопроса экран сам уходит на финальную таблицу. Экран один — на время
+   игры лента встаёт, ведущий видит это здесь же. Живые полосы вариантов
+   видит только ведущий: зал узнаёт распределение не раньше закрытия
+   приёма. */
 
 const quizList = document.getElementById('quizList');
 const quizEmpty = document.getElementById('quizEmpty');
@@ -13,12 +16,11 @@ const quizPhaseText = document.getElementById('quizPhaseText');
 const quizBoardHost = document.getElementById('quizBoardHost');
 const tabQuizBadge = document.getElementById('tabQuizBadge');
 
+const quizStartBtn = document.getElementById('quizStartBtn');
 const quizStepBtn = document.getElementById('quizStepBtn');
 const quizStepGlyph = document.getElementById('quizStepGlyph');
 const quizStepLabel = document.getElementById('quizStepLabel');
 const quizBoardBtn = document.getElementById('quizBoardBtn');
-const quizShowBtn = document.getElementById('quizShowBtn');
-const quizFeedBtn = document.getElementById('quizFeedBtn');
 const quizResetBtn = document.getElementById('quizResetBtn');
 const quizStopBtn = document.getElementById('quizStopBtn');
 
@@ -45,6 +47,7 @@ let editingId = null;          // вопрос, который правят; nul
 /* ---------------- Стадия и кнопки ---------------- */
 const PHASE_LABEL = {
   idle: 'Квиз не идёт',
+  lobby: 'Квиз запущен: на экране название игры и QR, зал подключается',
   open: 'Вопрос открыт, зал отвечает',
   closed: 'Приём закрыт, зал видит распределение',
   reveal: 'Ответ показан, зал видит правильный',
@@ -53,11 +56,13 @@ const PHASE_LABEL = {
 };
 
 /* Один шаг на каждую стадию: подпись кнопки и есть подсказка, что будет
-   дальше. Промежуточная таблица — пауза, поэтому с неё шаг ведёт обратно
-   к вопросу, туда же, где игра стояла. Финальная таблица возврата не имеет:
-   последний вопрос прожит, и остатка игры за ним нет. */
+   дальше. Пока квиз не запущен, шаговой кнопки нет — есть «Запустить квиз».
+   Промежуточная таблица — пауза, поэтому с неё шаг ведёт обратно к вопросу,
+   туда же, где игра стояла. Финальная таблица возврата не имеет: последний
+   вопрос прожит, и остатка игры за ним нет. */
 const STEP = {
-  idle:   { action: 'open',   glyph: '▶', label: 'Открыть вопрос' },
+  idle:   { action: '',       glyph: '·', label: 'Квиз не запущен' },
+  lobby:  { action: 'open',   glyph: '▶', label: 'Открыть первый вопрос' },
   open:   { action: 'close',  glyph: '⏹', label: 'Закрыть приём' },
   closed: { action: 'reveal', glyph: '★', label: 'Показать ответ' },
   reveal: { action: 'next',   glyph: '›', label: 'Дальше' },
@@ -86,14 +91,19 @@ function renderQuizControls() {
   quizDeadline = (st.time_left != null) ? Date.now() + st.time_left * 1000 : null;
 
   const step = currentStep();
-  const stepOn = !!step.action && (st.phase !== 'idle' || total > 0);
+  const stepOn = !!step.action && total > 0;
+  // пока игра не запущена, шаговой кнопки не видно: на её месте «Запустить
+  // квиз». Запущенная игра, наоборот, прячет запуск — двух главных кнопок
+  // у ведущего не бывает
+  quizStartBtn.hidden = st.phase !== 'idle';
+  quizStepBtn.hidden = st.phase === 'idle';
   quizStepBtn.disabled = !stepOn;
   quizStepGlyph.textContent = step.glyph;
   quizStepLabel.textContent = stepOn ? step.label : 'Сначала добавьте вопросы';
 
-  quizBoardBtn.disabled = st.phase === 'idle';
-  quizShowBtn.disabled = st.phase === 'idle' || st.visible;
-  quizFeedBtn.disabled = !(st.phase !== 'idle' && st.visible);
+  // «Лидеры на экран» включается когда есть что показывать: в холле ответов
+  // ещё нет, и пустая таблица залу не нужна
+  quizBoardBtn.disabled = !st.answers_total;
   quizStopBtn.disabled = st.phase === 'idle';
   quizResetBtn.disabled = !st.answers_total;
 
@@ -219,7 +229,10 @@ async function quizControl(action, fields = {}) {
 }
 
 /* Главный шаг игры: его делает и кнопка, и пробел на вкладке «Квиз».
-   Куда идти дальше, решает стадия, а не ведущий — перепутать нельзя. */
+   Куда идти дальше, решает стадия, а не ведущий — перепутать нельзя.
+   Запуск игры пробелом не делается: на вкладке «Квиз» пробел — обычная
+   клавиша прокрутки списка вопросов, и случайный запуск забрал бы у зала
+   экран посреди события. Запуск — только кнопкой. */
 function quizStep() {
   const step = currentStep();
   if (!step.action || quizStepBtn.disabled) return;
@@ -227,9 +240,8 @@ function quizStep() {
 }
 
 quizStepBtn.addEventListener('click', quizStep);
+quizStartBtn.addEventListener('click', () => quizControl('start'));
 quizBoardBtn.addEventListener('click', () => quizControl('board'));
-quizShowBtn.addEventListener('click', () => quizControl('show'));
-quizFeedBtn.addEventListener('click', () => quizControl('feed'));
 quizStopBtn.addEventListener('click', async () => {
   if (!confirm('Завершить квиз?\n\nЭкран снова начнёт показывать ленту.')) return;
   await quizControl('stop');

@@ -1386,6 +1386,8 @@ async def api_mod_quiz_control(
     Ведущий ходит по цепочке одной кнопкой, и каждое действие — следующий
     её шаг:
 
+    start  — запустить квиз: экран уходит на холл игры (название и QR),
+             зал подключается, вопросы можно дописывать прямо сейчас;
     open   — вопрос открыт, зал отвечает (можно передумать до закрытия);
     close  — приём закрыт, показываем распределение, правильный ещё нет;
     reveal — добавляем правильный ответ;
@@ -1403,7 +1405,22 @@ async def api_mod_quiz_control(
     screen = runtime.screen
     store = event.store
 
-    if action == "open":
+    # сюда панель приходит только со своими стадиями; если в запросе чужая
+    # строка — отказ, а не тихая подмена: иначе браузер с старым скриптом
+    # начал бы рисовать то, чего сервер не показывал
+    raw_phase = str((await request.form()).get("phase") or "").strip()
+    if raw_phase and raw_phase not in quizmod.PHASES:
+        raise HTTPException(status_code=400, detail="Такой стадии квиза нет")
+
+    if action == "start":
+        # запуск: экран плавно уходит на холл игры — название и QR, пока зал
+        # подключается. Вопросы к этому моменту готовы не всегда, поэтому
+        # требовать их здесь нельзя: ведущий дописывает колоду прямо в холле
+        if screen.quiz_phase != "idle":
+            raise HTTPException(status_code=400, detail="Квиз уже идёт")
+        screen.quiz_phase, screen.quiz_question, screen.quiz_visible = "lobby", None, True
+        screen.quiz_final, screen.quiz_opened_at, screen.quiz_prev_phase = False, None, None
+    elif action == "open":
         qid = question_id or screen.quiz_question
         if not qid:
             first = store.quiz_list_questions()
@@ -1466,7 +1483,8 @@ async def api_mod_quiz_control(
                 detail="Финальную таблицу вернуть некуда — завершите квиз",
             )
         target = quizmod.back_phase(screen)
-        if target is None or store.quiz_get_question(screen.quiz_question) is None:
+        if target is None or (target != "lobby"
+                              and store.quiz_get_question(screen.quiz_question) is None):
             raise HTTPException(status_code=400, detail="Возвращаться некуда: вопрос уже прожит")
         screen.quiz_phase, screen.quiz_visible = target, True
         screen.quiz_prev_phase = None

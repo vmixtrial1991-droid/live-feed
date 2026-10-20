@@ -192,6 +192,79 @@ check("порядок меняется кнопкой", h["questions"][0]["id"] 
       str([q["id"] for q in h["questions"]]))
 call("POST", "/api/moderator/quiz/move", {"question_id": q1, "direction": "up"})
 
+print("\n=== Запуск игры: на экране название и QR ===")
+st, h = call("POST", "/api/moderator/quiz/control", {"action": "start"})
+check("запуск выводит игру на экран",
+      st == 200 and h.get("phase") == "lobby" and h.get("visible") is True,
+      str(h)[:120])
+check("в холле вопроса ещё нет", h.get("current") is None, str(h)[:120])
+check("холл переживает перезапуск (лежит в конфиге)",
+      config().get("quiz_phase") == "lobby", str(config().get("quiz_phase")))
+_, quiz = call("GET", "/api/quiz")
+check("телефон гостя ждёт первый вопрос", quiz.get("phase") == "lobby", str(quiz)[:120])
+
+st, _ = call("POST", "/api/moderator/quiz/control", {"action": "start"}, expect=400)
+check("уже запущенный квиз второй раз не запускается", True)
+st, _ = call("POST", "/api/moderator/quiz/control", {"action": "close"}, expect=400)
+check("в холле приём закрывать нечего", True)
+st, _ = call("POST", "/api/moderator/quiz/control", {"action": "next"}, expect=400)
+check("из холла нельзя перепрыгнуть к следующему вопросу", True)
+
+# зал попросили посмотреть лидеров ещё до первого вопроса: это пауза, и
+# шаг «назад» обязан вернуть именно в холл, а не в начало игры
+st, h = call("POST", "/api/moderator/quiz/control", {"action": "board"})
+check("из холла лидеров вывести можно",
+      st == 200 and h.get("phase") == "board" and h.get("back_phase") == "lobby",
+      str(h)[:120])
+st, h = call("POST", "/api/moderator/quiz/control", {"action": "back"})
+check("с промежуточной таблицы возвращаемся в холл",
+      st == 200 and h.get("phase") == "lobby" and h.get("current") is None,
+      str(h)[:120])
+
+st, page = call("GET", f"/screen?d={SCREEN_KEY}")
+check("на экране есть место под холл: название игры и QR для зала",
+      st == 200 and b'id="lobbyTitle"' in page and b'id="lobbyQr"' in page
+      and b'id="quizLobby"' in page, str(st))
+st, body = call("GET", "/api/qr.svg?kind=quiz")
+check("QR на страницу квиза отдаётся сервером", st == 200 and b"<svg" in body[:64], str(st))
+st, h = call("GET", "/api/moderator/quiz")
+check("панель ведущего тоже знает про холл",
+      st == 200 and h.get("phase") == "lobby", str(h)[:120])
+
+if websockets is not None:
+    async def lobby_checks() -> None:
+        async with websockets.connect(f"{WS}/ws/display?d={SCREEN_KEY}") as dws:
+            init = await recv(dws)
+            frame = init.get("quiz") or {}
+            check("экран получает холл: название игры и адрес QR для зала",
+                  frame.get("phase") == "lobby" and frame.get("title")
+                  and frame.get("qr"), str(frame)[:160])
+
+        cookie = "; ".join(f"{k}={v}" for k, v in COOKIES.items())
+        async with websockets.connect(f"{WS}/ws/quiz",
+                                      additional_headers={"Cookie": cookie}) as qws:
+            init = await recv(qws)
+            check("телефон по своему каналу тоже видит холл",
+                  init.get("type") == "init"
+                  and (init.get("quiz") or {}).get("phase") == "lobby",
+                  str(init.get("quiz"))[:120])
+
+        async with websockets.connect(f"{WS}/ws/moderator",
+                                      additional_headers={"Cookie": cookie}) as mws:
+            init = await recv(mws)
+            scr = init.get("screen") or {}
+            check("окно ведущего знает, что игра занимает экран",
+                  init.get("type") == "init" and scr.get("quiz_visible") is True
+                  and scr.get("quiz_phase") == "lobby", str(scr)[:160])
+    asyncio.run(lobby_checks())
+else:
+    print("  OK   холл на экране (websockets не установлен — пропущено)")
+
+st, _ = call("POST", "/api/moderator/quiz/control", {"action": "stop"})
+_, h = call("GET", "/api/moderator/quiz")
+check("запущенный квиз можно завершить, не начав вопросов",
+      h.get("phase") == "idle" and h.get("visible") is False, str(h)[:120])
+
 print("\n=== Игра: открытие и ответы ===")
 st, h = call("POST", "/api/moderator/quiz/control", {"action": "open"})
 check("открыт первый вопрос (q1)",
@@ -365,6 +438,9 @@ st, _ = call("POST", "/api/moderator/quiz/delete", {"question_id": 999999}, expe
 check("чужого вопроса нет", True)
 st, _ = call("POST", "/api/moderator/quiz/control", {"action": "кашу", }, expect=400)
 check("неизвестное действие управляющего отклонено", True)
+st, _ = call("POST", "/api/moderator/quiz/control",
+             {"action": "board", "phase": "гуляем"}, expect=400)
+check("выдуманную стадию панель не протаскивает", True)
 
 st, _ = call("POST", "/api/moderator/quiz/control", {"action": "close"}, expect=400)
 check("закрывать нечего — честно отказано", True)

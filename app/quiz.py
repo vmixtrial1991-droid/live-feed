@@ -4,15 +4,18 @@
 события видят одну и ту же стадию:
 
     idle   — квиза нет, на экране лента;
+    lobby  — квиз запущен, вопроса ещё нет: на экране название игры и QR,
+             зал подключается, лента на это время встаёт;
     open   — вопрос открыт, зал отвечает (можно передумать до закрытия);
     closed — приём закрыт, показываем распределение, правильный ещё нет;
     reveal — показываем и распределение, и правильный ответ;
     board  — таблица лидеров (промежуточная или финальная).
 
-Ведущий ведёт игру одной цепочкой: «Открыть → Закрыть приём → Показать
-ответ → Дальше»; «Дальше» после последнего вопроса уводит экран сразу на
-финальную таблицу. С промежуточной таблицы («Лидеры на экран») можно
-вернуться туда, где игра стояла: стадию помним в ScreenController.
+Ведущий ведёт игру одной цепочкой: «Запустить квиз → Открыть → Закрыть
+приём → Показать ответ → Дальше»; «Дальше» после последнего вопроса уводит
+экран сразу на финальную таблицу. С промежуточной таблицы («Лидеры на
+экран») можно вернуться туда, где игра стояла: стадию помним в
+ScreenController.
 
 Здесь только чтение и сборка: записи делает EventStore, рассылкой занимается
 main.py. Правильный номер ответа зрителям не отдаётся до стадии reveal —
@@ -27,10 +30,10 @@ from .db import EventStore
 from .events import Event
 from .realtime import ScreenController
 
-PHASES = ("idle", "open", "closed", "reveal", "board")
+PHASES = ("idle", "lobby", "open", "closed", "reveal", "board")
 
 # стадии, к которым возвращается шаг «назад» с промежуточной таблицы
-BACK_PHASES = ("open", "closed", "reveal")
+BACK_PHASES = ("lobby", "open", "closed", "reveal")
 
 
 def back_phase(screen: ScreenController) -> str | None:
@@ -41,10 +44,15 @@ def back_phase(screen: ScreenController) -> str | None:
     стадию, из которой ведущий ушёл на таблицу, помнят (и в конфиге тоже).
     Финальная таблица возврата не имеет: там вопроса уже нет.
     """
-    if screen.quiz_phase != "board" or screen.quiz_final or not screen.quiz_question:
+    if screen.quiz_phase != "board" or screen.quiz_final:
         return None
     prev = screen.quiz_prev_phase
-    return prev if prev in BACK_PHASES else None
+    if prev not in BACK_PHASES:
+        return None
+    if prev != "lobby" and not screen.quiz_question:
+        # вопрос мог удалиться, пока зал смотрел лидеров: не к чему возвращать
+        return None
+    return prev
 
 
 def question_public(q: dict) -> dict:
@@ -114,6 +122,17 @@ def display_payload(event: Event, screen: ScreenController, store: EventStore) -
         return None
 
     phase = screen.quiz_phase
+    if phase == "lobby":
+        # игра запущена, но вопроса ещё нет: зал подключается по QR, а ведущий
+        # в это время может спокойно дописывать вопросы
+        return {
+            "phase": "lobby",
+            "title": event.get("title") or event.slug,
+            "subtitle": event.get("subtitle", ""),
+            "participants": store.stats()["participants"],
+            # путь до QR: экран подставит свой ключ и покажет картинку
+            "qr": "/api/qr.svg?kind=quiz",
+        }
     if phase == "board":
         return {
             "phase": "board",

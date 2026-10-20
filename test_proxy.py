@@ -96,13 +96,15 @@ location = headers.get("Location", "")
 check("в Location именно https",
       location.startswith("https://example.com/"), location or "—")
 
-st, _, _ = call("GET", "/", headers={"Host": "example.com",
-                                      "X-Forwarded-Proto": "https"})
+# 4.1: витрина / для анонима — всегда 302 на /join, поэтому «проходит без
+# редиректа» и «свой домен» проверяем на странице входа — она открыта всем.
+st, _, _ = call("GET", "/join", headers={"Host": "example.com",
+                                          "X-Forwarded-Proto": "https"})
 check("https проходит без редиректа", st == 200, str(st))
 
 print("\n=== Защита Host ===")
-st, _, _ = call("GET", "/", headers={"Host": "example.com",
-                                      "X-Forwarded-Proto": "https"})
+st, _, _ = call("GET", "/join", headers={"Host": "example.com",
+                                          "X-Forwarded-Proto": "https"})
 check("свой домен принимается", st == 200, str(st))
 st, _, _ = call("GET", "/", headers={"Host": "attacker.example",
                                       "X-Forwarded-Proto": "https"})

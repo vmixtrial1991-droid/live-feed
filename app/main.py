@@ -40,16 +40,16 @@ from . import archive, auth, config, events, images
 from .events import Event, EventError
 from .realtime import EventRuntime, keepalive, registry
 
+# ВАЖНО: FastAPI этот аргумент не принимает. Раньше конструктор молча
+# глотал неизвестные kwargs (поэтому locally не падало), а с fastapi 0.152
+# незнакомый kwarg — TypeError при старте. Доверие к X-Forwarded-For
+# обеспечивает auth.client_ip(): сам проверяет, от какого адреса пришло
+# соединение (config.TRUSTED_PROXY_HOSTS / TRUSTED_PROXY_NETS).
 app = FastAPI(
     title="Живая лента — несколько событий",
     docs_url=None,
     redoc_url=None,
     openapi_url=None,
-    # за обратным прокси нужно доверять заголовкам от самого прокси
-    forwarded_allow_ips=(
-        ",".join(sorted(config.TRUSTED_PROXY_HOSTS | {str(n) for n in config.TRUSTED_PROXY_NETS}))
-        or None
-    ),
 )
 
 # События, чью базу мы уже открывали в этом процессе

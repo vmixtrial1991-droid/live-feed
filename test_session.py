@@ -11,7 +11,9 @@
     и имя остаётся прежним;
   * смена кода приглашения не выкидывает уже вошедших;
   * cookie всех трёх ролей живут заметно дольше семи часов;
-  * витрина закрыта для всех, кроме администратора.
+  * витрина закрыта для всех, кроме администратора;
+  * экран не вылетает при F5: страница прячет ?d= из адреса, но экранное
+    cookie держит и страницу, и канал эфира.
 
 Запуск: поднять сервер, затем
     python test_session.py
@@ -288,6 +290,56 @@ try:
     m3 = admin_login()
     st, where = m3.get(f"/e/{ev.slug}/")
     check("администратору витрина доступна", st == 200, f"{st} {where}")
+
+    # экран переживает перезагрузку: страница прячет ?d= из адресной
+    # строки, и F5 приходит уже без ключа — пускаем по экранному cookie
+    screen_key = json.load(
+        open(os.path.join(DATA_DIR, "events", ev.slug, "config.json"),
+             encoding="utf-8")).get("screen_key", "")
+    page = Guest()
+    st, _ = page.get(f"/e/{ev.slug}/screen?d={screen_key}")
+    check("экран открылся по ключу", st == 200, str(st))
+    st, _ = page.get(f"/e/{ev.slug}/screen")
+    check("экран жив после F5 без ключа в URL", st == 200, str(st))
+    st, cfg = page.get_json(f"/e/{ev.slug}/api/config")
+    check("конфиг экрана держится на cookie", st == 200 and bool(cfg),
+          str(st))
+    st, _ = Guest().get(f"/e/{ev.slug}/screen")
+    check("чужому экран по-прежнему закрыт", st == 403, str(st))
+    try:
+        import asyncio
+        import websockets
+
+        cookie = ""
+        for line in page.jar.seen:
+            if line.lstrip().startswith(f"lf_screen_{ev.slug}="):
+                cookie = line.split(";", 1)[0].strip()
+        base_ws = ROOT.replace("http", "ws", 1)
+
+        async def ws_ok(url: str) -> bool:
+            async with websockets.connect(url, additional_headers={
+                    "Cookie": cookie}) as ws:
+                msg = json.loads(await ws.recv())
+                return msg.get("type") == "init"
+
+        async def ws_closed(url: str) -> bool:
+            try:
+                async with websockets.connect(url) as ws:
+                    await asyncio.wait_for(ws.recv(), timeout=5)
+                return False
+            except Exception as exc:
+                status = getattr(exc, "status", None)
+                if status is None:
+                    resp = getattr(exc, "response", None)
+                    status = getattr(resp, "status_code", None)
+                return status in (403, 4403) or "403" in str(exc) or "4403" in str(exc)
+
+        check("экран переподключился к эфиру по cookie",
+              asyncio.run(ws_ok(f"{base_ws}/e/{ev.slug}/ws/display")))
+        check("эфир без ключа и cookie закрыт",
+              asyncio.run(ws_closed(f"{base_ws}/e/{ev.slug}/ws/display")))
+    except ImportError:
+        print("websockets не установлен — пропущены 2 проверки")
 
 finally:
     remove(ev.slug)

@@ -3,10 +3,14 @@
 /**
  * Адрес внутри события. Страница лежит по /e/<адрес>/..., поэтому запросы
  * к API, WebSocket и фотографиям собираются с этим префиксом.
- * Префикс проставляет сервер в window.LF при отдаче страницы.
+ * Префикс проставляет сервер в window.LF при отдаче страницы, но если
+ * вставка не сработала (строгая CSP блокирует инлайн-скрипты), префикс
+ * берётся прямо из адреса страницы — запросы всё равно уйдут куда надо.
  */
 function ev(path) {
-  return ((window.LF && window.LF.base) || '') + path;
+  const fromServer = window.LF && window.LF.base;
+  const fromUrl = (location.pathname.match(/^\/e\/[^/]+/) || [''])[0];
+  return (fromServer || fromUrl || '') + path;
 }
 
 async function api(url, options = {}) {

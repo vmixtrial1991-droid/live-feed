@@ -343,7 +343,10 @@ async def page_feed(slug: str, request: Request, t: str = ""):
     """
     event = _prepare(_event_or_404(slug))
     if auth.is_admin(request) or auth.is_moderator(request, event):
-        return _page("feed.html", base=f"/e/{event.slug}")
+        # витрина живёт на ws/display, а тот открывается только с ключом
+        # экрана — передаём ключ странице так же, как странице экрана
+        return _page("feed.html", base=f"/e/{event.slug}",
+                     extra=f",screenKey:{json.dumps(event.screen_key)}")
     if auth.current_participant(request, event) is not None:
         return RedirectResponse(f"/e/{event.slug}/send", status_code=302)
     target = f"/e/{event.slug}/join"
@@ -357,12 +360,15 @@ async def page_screen(slug: str, request: Request, d: str = ""):
     event = _prepare(_event_or_404(slug))
     # 4.1: ключ экрана. Без него экран не открывается — адрес проектора
     # публичен, и без ключа любой мог бы смотреть фото и конфиг события.
-    if not auth.screen_key_valid(event, d):
+    # Ключ прячется из адресной строки после загрузки (см. screen.js),
+    # поэтому при обновлении страницы F5 ключа в URL уже нет — тогда
+    # пускаем по экранному cookie, который поставили при первом заходе.
+    if not (auth.screen_key_valid(event, d) or auth.is_screen(request, event)):
         raise HTTPException(status_code=403, detail="Нужен ключ экрана")
     # ключ прячем из адресной строки после загрузки (см. screen.js), но
     # страницу отдаем с ним в window.LF, чтобы скрипты могли тянуть фото.
     response = _page("screen.html", base=f"/e/{event.slug}",
-                     extra=f",screenKey:{json.dumps(d)}")
+                     extra=f",screenKey:{json.dumps(event.screen_key)}")
     auth.set_screen_cookie(response, event)
     response.headers["Cache-Control"] = "no-store"
     response.headers["X-Robots-Tag"] = "noindex, nofollow"
@@ -1207,9 +1213,11 @@ async def ws_display(ws: WebSocket, slug: str, d: str = "") -> None:
         await ws.close(code=4404)
         return
     _prepare(event)
-    # 4.1: ключ экрана проверяется при подключении. Без него канал не
-    # открывается — иначе любой, кто знает адрес, смотрел бы весь эфир.
-    if not auth.screen_key_valid(event, d):
+    # 4.1: ключ экрана. Без него канал не открывается — иначе любой, кто
+    # знает адрес, смотрел бы весь эфир. Экранный cookie принимаем наравне
+    # с ключом: страница сама прячет ?d= из адресной строки, и при F5
+    # переподключение приходит без ключа, но с cookie из того же пути.
+    if not (auth.screen_key_valid(event, d) or auth.is_screen(ws, event)):
         await ws.close(code=4403)
         return
     runtime = registry.get(event.slug)

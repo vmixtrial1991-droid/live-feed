@@ -24,8 +24,11 @@ let splashUrl = null;   // загруженная картинка; null — п�
    только сами сообщения, без служебной подписи внизу. */
 /* 4.1: ключ экрана. Сервер отдал его в window.LF.screenKey (он же был в
    ?d= адресной строки). Прячем его из адресной строки сразу, чтобы он не
-   утёк через Referer/историю, и дальше тянем все запросы с ним в query. */
-const screenKey = (window.LF && window.LF.screenKey) || '';
+   утёк через Referer/историю, и дальше тянем все запросы с ним в query.
+   Если инлайн-вставка window.LF не сработала (строгая CSP), ключ берём
+   прямо из ?d= — страница открыта именно по этой ссылке. */
+const screenKey = (window.LF && window.LF.screenKey)
+  || (new URLSearchParams(location.search).get('d') || '');
 if (screenKey && location.search.includes('d=')) {
   try { history.replaceState(null, '', location.pathname); } catch (_) {}
 }

@@ -237,6 +237,25 @@ paren, brace = balance_outside_strings(screen_js)
 check("screen.js: скобки сходятся", paren == 0 and brace == 0,
       f"лишних ( {paren}, {{ {brace}" if (paren or brace) else "")
 
+print("\n=== Экран и витрина не слепые (4.1.1) ===")
+check("screen.js: ключ экрана находится и в ?d= адреса, не только в window.LF",
+      "URLSearchParams" in screen_js and ".get('d')" in screen_js)
+common_js = (STATIC / "common.js").read_text(encoding="utf-8")
+check("common.js: префикс события берётся и из адреса страницы",
+      "location.pathname.match" in common_js and "[^/]" in common_js,
+      "если CSP съест инлайн window.LF, запросы всё равно пойдут в событие")
+feed_js = (STATIC / "feed.js").read_text(encoding="utf-8")
+check("feed.js: эфир витрины открывается с ключом экрана",
+      "withKey(ev('/ws/display'))" in feed_js and "screenKey" in feed_js)
+check("feed.js: ключ витрине даёт сервер",
+      "screenKey" in feed_js and "(window.LF && window.LF.screenKey)" in feed_js)
+paren, brace = balance_outside_strings(feed_js)
+check("feed.js: скобки сходятся", paren == 0 and brace == 0,
+      f"лишних ( {paren}, {{ {brace}" if (paren or brace) else "")
+paren, brace = balance_outside_strings(common_js)
+check("common.js: скобки сходятся", paren == 0 and brace == 0,
+      f"лишних ( {paren}, {{ {brace}" if (paren or brace) else "")
+
 screen_css = (STATIC / "screen.css").read_text(encoding="utf-8")
 check("screen.css: заставка перекрывает весь экран",
       re.search(r"\.splash\s*\{[^}]*position:\s*fixed", screen_css) is not None

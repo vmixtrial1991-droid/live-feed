@@ -10,6 +10,15 @@ const cards = new Map();   // id -> элемент
 let currentId = null;
 let currentIdFromScreen = false;
 
+/* 4.1: живой эфир витрины приходит по ws/display, а он открывается только
+   с ключом экрана. Сервер отдаёт ключ странице так же, как странице экрана. */
+const screenKey = (window.LF && window.LF.screenKey) || '';
+function withKey(url) {
+  if (!screenKey) return url;
+  const sep = url.includes('?') ? '&' : '?';
+  return url + sep + 'd=' + encodeURIComponent(screenKey);
+}
+
 /* В пустой состоянии кнопка ведёт на страницу входа — подставляем реальный код. */
 api(ev('/api/config')).then((cfg) => {
   document.getElementById('eventTitle').textContent = cfg.event_title || 'Живая лента';
@@ -81,7 +90,7 @@ function renderTicker(messages) {
   tickerTrack.innerHTML = texts.join('') + texts.join('');
 }
 
-connectWS(ev('/ws/display'), {
+connectWS(withKey(ev('/ws/display')), {
   onStatus(state) {
     setPill(document.getElementById('connPill'), state,
       state === 'online' ? 'в эфире' : state === 'offline' ? 'нет связи' : 'соединяемся…');

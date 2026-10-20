@@ -244,13 +244,24 @@ async def main() -> None:
         print("!! У события нет пароля ведущего — проверка не сможет войти в кабинет")
         drop_event(admin, EVENT)
         sys.exit(1)
+    # 4.1: экран и его канал закрыты ключом — без него ни /screen, ни
+    # /ws/display, ни снимки не откроются. Проверка берёт тот же ключ,
+    # который выдаёт карточка события, и ходит по экранной части с ним.
+    skey = cfg.get("screen_key") or ""
+    if not skey:
+        print("!! У события нет ключа экрана — проверка не сможет смотреть эфир")
+        drop_event(admin, EVENT)
+        sys.exit(1)
 
     print(f"\n=== Сервер: {BASE} ===")
 
     print("\n=== Страницы ===")
-    for path, name in [(EV("/"), "витрина"), (EV("/screen"), "экран"),
-                       (EV("/moderator/login"), "вход ведущего")]:
+    for path, name in [(EV("/"), "витрина"), (EV("/moderator/login"), "вход ведущего")]:
         check(f"{name} открывается", Client().get_status(path) == 200)
+    # 4.1: экран без ключа закрыт, с ключом — открыт
+    check("экран без ключа закрыт (4.1)", Client().get_status(EV("/screen")) == 403)
+    check("экран по ссылке с ключом открывается",
+          Client().get_status(EV(f"/screen?d={skey}")) == 200)
 
     print("\n=== Права доступа ===")
     anon = Client()
@@ -264,6 +275,12 @@ async def main() -> None:
             check("гость не попадает в /ws/moderator", False, "соединение открылось")
     except Exception:
         check("гость не попадает в /ws/moderator", True)
+    # 4.1: канал экрана без ключа не открывается даже у того, кто знает адрес
+    try:
+        async with websockets.connect(f"{WS_EV('/ws/display')}"):
+            check("канал экрана без ключа закрыт (4.1)", False, "соединение открылось")
+    except Exception:
+        check("канал экрана без ключа закрыт (4.1)", True)
 
     print("\n=== Регистрация и вход ===")
     # id сообщений, которые создаёт проверка: в конце удалим ровно их,
@@ -286,9 +303,9 @@ async def main() -> None:
     async with (
         websockets.connect(f"{WS_EV('/ws/moderator')}",
                            additional_headers={"Cookie": lead.cookie_header()}) as modws,
-        websockets.connect(f"{WS_EV('/ws/display')}") as screenws,
-        websockets.connect(f"{WS_EV('/ws/display')}") as screen2,
-        websockets.connect(f"{WS_EV('/ws/display')}") as feedws,
+        websockets.connect(f"{WS_EV('/ws/display')}?d={skey}") as screenws,
+        websockets.connect(f"{WS_EV('/ws/display')}?d={skey}") as screen2,
+        websockets.connect(f"{WS_EV('/ws/display')}?d={skey}") as feedws,
     ):
         for name, ws in (("ведущий", modws), ("экран 1", screenws),
                          ("экран 2", screen2), ("витрина", feedws)):
@@ -327,7 +344,10 @@ async def main() -> None:
               st == 200 and ph["message"]["status"] == "approved" and bool(ph["message"]["image"]))
         size = 0
         photo_path = EV("/media/" + ph["message"]["image"])
-        with urllib.request.urlopen(f"{BASE}{photo_path}", timeout=30) as r:
+        # 4.1: одно имя файла больше не выдаёт снимок всем подряд
+        check("снимок по имени файла без ключа закрыт (4.1)",
+              Client().get_status(photo_path) == 403)
+        with urllib.request.urlopen(f"{BASE}{photo_path}?d={skey}", timeout=30) as r:
             blob = r.read()
             size = len(blob)
         check("фото отдаётся через прокси как JPEG", blob[:2] == b"\xff\xd8",
@@ -396,7 +416,7 @@ async def main() -> None:
             lead.post, EV("/api/moderator/delete"), {"message_id": mid_ph})
         check("удаление убирает из списка", all(m["id"] != mid_ph for m in res["messages"]))
         check("файл удалённого из ленты сообщения остаётся в архиве (4.0)",
-              Client().get_status(EV(f"/media/{ph['message']['image']}")) == 200)
+              Client().get_status(EV(f"/media/{ph['message']['image']}?d={skey}")) == 200)
 
     print("\n=== Автопрокрутка ===")
     # Свои сообменты для этой проверки: если брать оставшиеся от прошлых
@@ -414,7 +434,7 @@ async def main() -> None:
     before = await asyncio.to_thread(lead.get_json, EV("/api/moderator/state"))
     before_id = before["screen"]["current_id"]
     await asyncio.to_thread(lead.post, EV("/api/moderator/screen"), {"action": "play"})
-    async with websockets.connect(f"{WS_EV('/ws/display')}") as w:
+    async with websockets.connect(f"{WS_EV('/ws/display')}?d={skey}") as w:
         await asyncio.wait_for(w.recv(), 10)
         got = await collect(
             w, "screen", timeout=15.0,

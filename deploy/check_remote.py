@@ -338,7 +338,8 @@ async def main() -> None:
                            where=lambda m: any(x["id"] == mid for x in m.get("added", [])))
         check("витрина получила сразу", evf is not None)
 
-        feed = await asyncio.to_thread(guest.get_json, EV("/api/messages"))
+        # 4.1: гость видит только текущий слайд, полный список — кабинет
+        feed = await asyncio.to_thread(lead.get_json, EV("/api/messages"))
         check("сообщение видно и без WebSocket",
               any(m["id"] == mid for m in feed["messages"]))
 

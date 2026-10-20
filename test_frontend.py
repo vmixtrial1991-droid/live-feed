@@ -715,6 +715,12 @@ check("screen.js: промежуточная таблица листается, 
 check("screen.css: игра стоит на общем тёмном градиенте и появляется переходом",
       re.search(r"\.quiz-screen\s*\{[^}]*radial-gradient", screen_css, re.S) is not None
       and re.search(r"\.quiz-screen\s*\{[^}]*transition", screen_css, re.S) is not None)
+quiz_layer = re.search(r"\.quiz-screen\s*\{([^}]*)\}", screen_css, re.S)
+quiz_layer_body = quiz_layer.group(1) if quiz_layer else ""
+check("screen.css: подложка игры сплошная — кадр ленты под ней не просвечивает",
+      "var(--bg)" in quiz_layer_body
+      and re.search(r"linear-gradient\([^)]*rgba\(", quiz_layer_body) is None,
+      "полупрозрачный фон превращает игру в наложение поверх фото из ленты")
 check("screen.css: финальное первое место крупнее остальных",
       re.search(r"\.quiz-s-row\.is-hero", screen_css) is not None)
 check("moderator.css: полоса зала рисуется шириной по доле ответов",

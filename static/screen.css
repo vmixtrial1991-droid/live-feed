@@ -224,16 +224,21 @@
 
    Слой не прячется через hidden: браузерное display:none перебивает
    переход, и вместо плавного наложения получалось мигание. Вместо этого
-   слой лежит внизу всегда, а opacity и visibility решают, видна ли игра;
-   градиент тот же, что на всех страницах приложения, — зал видит игру на
-   привычном тёмном фоне, а не на чёрной заплатке поверх ленты. */
+   слой лежит внизу всегда, а opacity и visibility решают, видна ли игра.
+
+   Подложка обязана быть сплошной. Под слоем живёт последний кадр ленты,
+   картинка заставки или слайдшоу, и полупрозрачный фон превращал игру в
+   наложение поверх чужой фотографии: зал читал вопрос поверх чужого лица.
+   Тона те же, что на всех страницах приложения (base.css), но альфа-канал
+   везде сплошной, поэтому до самого края слоя ничего не просвечивает. */
 .quiz-screen {
   position: absolute; inset: 0; z-index: 25;
   display: flex; align-items: center; justify-content: center;
   background:
     radial-gradient(1100px 620px at 12% -10%, rgba(91, 140, 255, .20), transparent 60%),
     radial-gradient(1000px 600px at 92% 2%, rgba(124, 92, 255, .18), transparent 62%),
-    linear-gradient(135deg, rgba(11, 13, 20, .97), rgba(20, 24, 38, .95) 55%, rgba(11, 13, 20, .97));
+    linear-gradient(135deg, var(--bg), var(--bg-soft) 55%, var(--bg));
+  background-color: var(--bg);
   opacity: 0;
   visibility: hidden;
   transition: opacity .6s ease, visibility 0s linear .6s;

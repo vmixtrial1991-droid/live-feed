@@ -208,45 +208,8 @@ $('dDelete').addEventListener('click', async () => {
 });
 
 // ----------------------------------------------------------------- прочее ---
-/**
- * Копирование текста. Буфер обмена браузера доступен только в защищённом
- * контексте, а сервер часто живёт по http и по адресу — тогда он недоступен.
- * Поэтому сначала пробуем его, а если не вышло, копируем через скрытое
- * поле: работает везде, включая http.
- */
-async function copy(text) {
-  try {
-    if (navigator.clipboard && window.isSecureContext) {
-      await navigator.clipboard.writeText(text);
-      return true;
-    }
-  } catch (_) {
-    // пробуем запасной путь
-  }
-  return copyFallback(text);
-}
-
-function copyFallback(text) {
-  const field = document.createElement('textarea');
-  field.value = text;
-  field.setAttribute('readonly', '');
-  field.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
-  document.body.appendChild(field);
-  field.select();
-  field.setSelectionRange(0, text.length);
-  let ok = false;
-  try {
-    ok = document.execCommand('copy');
-  } catch (_) {
-    ok = false;
-  }
-  document.body.removeChild(field);
-  if (!ok) {
-    // последний способ: показать текст, чтобы человек скопировал сам
-    showToast('Скопируйте вручную: ' + text, 'warn', 12000);
-  }
-  return ok;
-}
+// Копирование (copy/copyFallback) переехало в common.js: кнопка «Скопировать
+// ссылку экрана» нужна и в кабинете ведущего.
 
 $('logoutBtn').addEventListener('click', async () => {
   await postForm('/api/admin/logout', {});

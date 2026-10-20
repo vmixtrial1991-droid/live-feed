@@ -260,9 +260,16 @@ for name in ("admin.html", "admin-login.html"):
 admin_js = (STATIC / "admin.js").read_text(encoding="utf-8")
 check("admin.js: не использует ev() — он вне события", "ev(" not in admin_js,
       "найдено" if "ev(" in admin_js else "")
-check("admin.js: копирование через execCommand, а не только буфер обмена",
-      "execCommand" in admin_js,
-      "нет запасного пути для http")
+check("common.js: копирование через execCommand, а не только буфер обмена",
+      "execCommand" in (STATIC / "common.js").read_text(encoding="utf-8"),
+      "нет запасного пути для http — копирование живёт в common.js")
+check("moderator.html: кнопка «Ссылка экрана» есть",
+      'id="copyScreenLink"' in mod_html,
+      "ведущему нужно отнести ссылку на проектор, а не только открыть её")
+check("moderator.js: кнопка копирует ссылку с ключом экрана",
+      "copyScreenLink" in mod_js and "window.LF.screenKey" in mod_js
+      and "await copy(" in mod_js,
+      "ссылка без ключа на экране бесполезна")
 paren, brace = balance_outside_strings(admin_js)
 check("admin.js: скобки сходятся", paren == 0 and brace == 0,
       f"лишних ( {paren}, {{ {brace}" if (paren or brace) else "")

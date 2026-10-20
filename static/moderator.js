@@ -459,6 +459,17 @@ function loadInvite() {
     .catch(() => { document.getElementById('qrLink').textContent = '—'; });
 }
 
+// 4.1: адрес проектора — со ключом экрана, страница кабинета получает его в
+// window.LF.screenKey. Кнопка «Экран» по этой ссылке открывается сама, а здесь
+// ссылку можно скопировать и отнести на проектор: за этим в админку не бегают.
+document.getElementById('copyScreenLink').addEventListener('click', async () => {
+  const key = (window.LF && window.LF.screenKey) || '';
+  const url = location.origin + ev('/screen' + (key ? '?d=' + encodeURIComponent(key) : ''));
+  const ok = await copy(url);
+  showToast(ok ? 'Ссылка на экран скопирована' : 'Не вышло — скопируйте вручную',
+            ok ? 'ok' : 'warn');
+});
+
 document.getElementById('rotateInvite').addEventListener('click', async () => {
   if (!confirm('Сменить код приглашения?\n\nСтарые QR-коды перестанут работать.')) return;
   try {

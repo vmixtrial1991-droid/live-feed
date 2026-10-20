@@ -82,7 +82,7 @@ function renderQuiz(data) {
   myScore.textContent = `очков: ${scored}`;
 
   show(waitBox, data.phase === 'idle');
-  show(questionBox, data.phase === 'open' || data.phase === 'closed');
+  show(questionBox, data.phase === 'open' || data.phase === 'closed' || data.phase === 'reveal');
   show(boardBox, data.phase === 'board');
 
   if (data.phase === 'idle') {
@@ -153,14 +153,18 @@ async function sendAnswer(questionId, option, btn) {
 function renderClosed(q, data) {
   const counts = data.counts || q.options.map(() => 0);
   const total = counts.reduce((a, b) => a + b, 0) || 1;
+  // reveal — отдельная стадия: на closed распределение уже видно, а
+  // правильного ещё нет, и писать «мимо» по такому кадру было бы враньём
+  const revealed = data.phase === 'reveal';
   optionsBox.replaceChildren(...q.options.map((text, i) => {
     const row = document.createElement('div');
     const share = Math.round((counts[i] / total) * 100);
     let mark = '';
-    if (data.correct === i) mark = '<span class="qo-mark qo-right">✓</span>';
-    else if (data.my_answer === i) mark = '<span class="qo-mark qo-wrong">✗</span>';
+    if (revealed && data.correct === i) mark = '<span class="qo-mark qo-right">✓</span>';
+    else if (revealed && q.scored && data.my_answer === i && data.correct !== i)
+      mark = '<span class="qo-mark qo-wrong">✗</span>';
     row.className = 'quiz-bar'
-      + (data.correct === i ? ' is-right' : '')
+      + (revealed && data.correct === i ? ' is-right' : '')
       + (data.my_answer === i ? ' is-mine' : '');
     row.innerHTML = `<div class="quiz-bar-fill" style="width:${share}%"></div>
       <span class="qo-text">${escapeHTML(text)}</span>
@@ -168,19 +172,27 @@ function renderClosed(q, data) {
       <span class="qo-num">${counts[i]} · ${share}%</span>`;
     return row;
   }));
+  const base = `Ответили: ${data.answered_total || total}.`;
+  if (!revealed) {
+    answerHint.textContent = (data.my_answer == null ? 'Вы не ответили.' : 'Ваш ответ учтён.')
+      + ` Приём закрыт, правильный ответ покажем чуть позже. ${base}`;
+    return;
+  }
   const mine = data.my_answer == null ? 'Вы не ответили.'
     : (q.scored && data.correct === data.my_answer) ? 'Верно!'
       : q.scored ? 'Мимо.' : 'Ваш вариант учтён.';
-  answerHint.textContent = `${mine} Ответили: ${data.answered_total || total}.`;
+  answerHint.textContent = `${mine} ${base}`;
 }
 
 function renderBoard(data) {
-  const medals = ['🥇', '🥈', '🥉'];
+  const medals = { 1: '🥇', 2: '🥈', 3: '🥉' };
   const rows = data.board || [];
-  boardList.replaceChildren(...rows.map((row, i) => {
+  boardList.replaceChildren(...rows.map((row) => {
     const el = document.createElement('div');
     el.className = 'quiz-board-row' + (row.name === myName.textContent ? ' is-mine' : '');
-    el.innerHTML = `<span class="qb-pos">${medals[i] || i + 1}</span>
+    // место приехало с сервера: равный счёт = равное место, и у двух
+    // лидеров на одном очке нет одного третьего места
+    el.innerHTML = `<span class="qb-pos">${medals[row.rank] || row.rank}</span>
       <span class="qb-name">${escapeHTML(row.name)}</span>
       <span class="qb-score">${row.score}</span>`;
     return el;

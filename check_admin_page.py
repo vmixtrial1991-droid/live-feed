@@ -78,10 +78,14 @@ res = json.loads(body or b"{}")
 slug = (res.get("event") or {}).get("slug")
 check("событие создано", st == 200 and bool(slug), str(slug))
 check("адрес латиницей", slug == f"proverka-{mark}", str(slug))
-check("три ссылки плюс витрина", len(res.get("links") or {}) == 4, str(list((res.get("links") or {}).keys())))
+check("пять ссылок: витрина, гости, экран, ведущий, квиз",
+      set((res.get("links") or {}).keys()) == {"join", "feed", "screen", "moderator", "quiz"},
+      str(sorted((res.get("links") or {}).keys())))
 check("ссылка ведущего", f"/e/{slug}/moderator" in res["links"]["moderator"])
 check("ссылка экрана", f"/e/{slug}/screen" in res["links"]["screen"])
 check("QR с кодом", f"/e/{slug}/join?t=" in res["links"]["join"])
+check("ссылка квиза ведёт на квиз с тем же кодом",
+      f"/e/{slug}/quiz?t=" in res["links"]["quiz"], res["links"]["quiz"])
 
 print("\n=== Карточка и QR ===")
 st, body = get(f"/api/admin/events/{slug}")

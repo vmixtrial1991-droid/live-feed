@@ -1,8 +1,11 @@
 /* Квиз (5.0) — вкладка ведущего: вопросы, стадии игры, ссылка с QR.
 
-   Ведущий держит игру теми же кнопками, что и показ ленты: открыть
-   вопрос, закрыть и показать распределение, следующий, лидеры. Экран
-   один — на время игры лента встаёт, ведущий видит это здесь же. */
+   Игру ведёт одна шаговая кнопка: она подписана по текущей стадии
+   («Открыть вопрос → Закрыть приём → Показать ответ → Дальше»), и после
+   последнего вопроса экран сам уходит на финальную таблицу. Экран один —
+   на время игры лента встаёт, ведущий видит это здесь же. Живые полосы
+   вариантов видит только ведущий: зал узнаёт распределение не раньше
+   закрытия приёма. */
 
 const quizList = document.getElementById('quizList');
 const quizEmpty = document.getElementById('quizEmpty');
@@ -10,9 +13,9 @@ const quizPhaseText = document.getElementById('quizPhaseText');
 const quizBoardHost = document.getElementById('quizBoardHost');
 const tabQuizBadge = document.getElementById('tabQuizBadge');
 
-const quizOpenBtn = document.getElementById('quizOpenBtn');
-const quizCloseBtn = document.getElementById('quizCloseBtn');
-const quizNextBtn = document.getElementById('quizNextBtn');
+const quizStepBtn = document.getElementById('quizStepBtn');
+const quizStepGlyph = document.getElementById('quizStepGlyph');
+const quizStepLabel = document.getElementById('quizStepLabel');
 const quizBoardBtn = document.getElementById('quizBoardBtn');
 const quizShowBtn = document.getElementById('quizShowBtn');
 const quizFeedBtn = document.getElementById('quizFeedBtn');
@@ -25,6 +28,7 @@ const qTextCount = document.getElementById('qTextCount');
 const qOptions = document.getElementById('qOptions');
 const qAddOption = document.getElementById('qAddOption');
 const qNoPoints = document.getElementById('qNoPoints');
+const qSeconds = document.getElementById('qSeconds');
 const qSave = document.getElementById('qSave');
 const qCancel = document.getElementById('qCancel');
 const qStatus = document.getElementById('qStatus');
@@ -42,9 +46,26 @@ let editingId = null;          // вопрос, который правят; nul
 const PHASE_LABEL = {
   idle: 'Квиз не идёт',
   open: 'Вопрос открыт, зал отвечает',
-  closed: 'Ответ закрыт, показываем распределение',
+  closed: 'Приём закрыт, зал видит распределение',
+  reveal: 'Ответ показан, зал видит правильный',
   board: 'На экране таблица лидеров',
+  board_final: 'Игра окончена, на экране финальная таблица',
 };
+
+/* Один шаг на каждую стадию: подпись кнопки и есть подсказка, что будет
+   дальше. На таблице шага нет — там игра либо кончена, либо ведущий
+   смотрит промежуточных лидеров. */
+const STEP = {
+  idle:   { action: 'open',   glyph: '▶', label: 'Открыть вопрос' },
+  open:   { action: 'close',  glyph: '⏹', label: 'Закрыть приём' },
+  closed: { action: 'reveal', glyph: '★', label: 'Показать ответ' },
+  reveal: { action: 'next',   glyph: '›', label: 'Дальше' },
+  board:  { action: '',       glyph: '·', label: 'Таблица лидеров' },
+};
+
+// отсчёт на проекторе живёт на сервере, но панель тикает сама между
+// сигналами: иначе цифра стоит на месте, пока гость кто-нибудь не ответит
+let quizDeadline = null;
 
 function renderQuizControls() {
   const st = quizState;
@@ -52,20 +73,29 @@ function renderQuizControls() {
   const cur = order.indexOf(st.current);
   const total = order.length;
 
-  const hasNext = cur >= 0 && cur + 1 < total;
-  quizOpenBtn.disabled = st.phase !== 'idle' || !total;
-  quizCloseBtn.disabled = st.phase !== 'open';
-  quizNextBtn.disabled = !(st.phase === 'open' || st.phase === 'closed') || !hasNext;
+  quizDeadline = (st.time_left != null) ? Date.now() + st.time_left * 1000 : null;
+
+  const step = STEP[st.phase] || STEP.idle;
+  const stepOn = !!step.action && (st.phase !== 'idle' || total > 0);
+  quizStepBtn.disabled = !stepOn;
+  quizStepGlyph.textContent = step.glyph;
+  quizStepLabel.textContent = stepOn ? step.label : 'Сначала добавьте вопросы';
+
   quizBoardBtn.disabled = st.phase === 'idle';
   quizShowBtn.disabled = st.phase === 'idle' || st.visible;
   quizFeedBtn.disabled = !(st.phase !== 'idle' && st.visible);
   quizStopBtn.disabled = st.phase === 'idle';
   quizResetBtn.disabled = !st.answers_total;
 
-  let line = PHASE_LABEL[st.phase] || PHASE_LABEL.idle;
-  if ((st.phase === 'open' || st.phase === 'closed') && cur >= 0) {
+  let line = PHASE_LABEL[st.phase === 'board' && st.final ? 'board_final' : st.phase]
+    || PHASE_LABEL.idle;
+  if ((st.phase === 'open' || st.phase === 'closed' || st.phase === 'reveal') && cur >= 0) {
     const answered = st.questions[cur].answered || 0;
     line += ` · вопрос ${cur + 1} из ${total} · ответили ${answered} из ${st.participants}`;
+    if (quizDeadline !== null) {
+      const left = Math.max(0, Math.ceil((quizDeadline - Date.now()) / 1000));
+      line += left > 0 ? ` · осталось ${left} с` : ' · время вышло';
+    }
   }
   if (st.phase !== 'idle') {
     line += st.visible ? ' · на экране: квиз' : ' · на экране: лента (зал отвечает)';
@@ -80,7 +110,26 @@ function renderQuizControls() {
   }
 }
 
+setInterval(() => {
+  // тикаем только когда отсчёт есть: без таймера перерисовка не нужна
+  if (quizDeadline !== null) renderQuizControls();
+}, 1000);
+
 /* ---------------- Список вопросов ---------------- */
+function tallyRow(q) {
+  // живые полосы: куда тяготеет зал. Залу это откроется только после
+  // закрытия приёма, поэтому панель ведущего — единственное место, где
+  // видно, что зал уже начал отвечать однотипно
+  if (!q.tally || !q.answered) return '';
+  const parts = q.tally.map((n, k) => {
+    const pct = Math.round((n / q.answered) * 100);
+    const right = q.scored && q.correct === k;
+    return `<span class="qt-item${right ? ' is-right' : ''}" style="--w:${pct}%">`
+      + `<i>${escapeHTML(q.options[k] || '')}</i><b>${n}</b></span>`;
+  });
+  return `<div class="quiz-tally" title="Куда тяготеет зал — это видите только вы">${parts.join('')}</div>`;
+}
+
 function renderQuestions() {
   quizEmpty.hidden = quizState.questions.length > 0;
   quizList.replaceChildren(...quizState.questions.map((q, i) => {
@@ -95,26 +144,30 @@ function renderQuestions() {
         <span class="quiz-pos">${i + 1}</span>
         <span class="quiz-qtext">${escapeHTML(q.text)}</span>
         ${q.scored ? '' : '<span class="quiz-chip quiz-chip-free">без очков</span>'}
+        ${q.seconds ? `<span class="quiz-chip quiz-chip-time" title="Отсчёт на проекторе">${q.seconds} с</span>` : ''}
         <span class="quiz-answered" title="Сколько гостей ответили">${q.answered || 0} отв.</span>
         <span class="or-actions">
           <button class="icon-btn" data-qact="up" data-qid="${q.id}" title="Выше">↑</button>
           <button class="icon-btn" data-qact="down" data-qid="${q.id}" title="Ниже">↓</button>
+          <button class="icon-btn" data-qact="copy" data-qid="${q.id}" title="Дублировать копию сразу ниже">⧉</button>
           <button class="icon-btn" data-qact="edit" data-qid="${q.id}" title="Править">✎</button>
           <button class="icon-btn danger" data-qact="delete" data-qid="${q.id}" title="Удалить">✕</button>
         </span>
       </div>
-      <div class="quiz-chips">${opts}</div>`;
+      <div class="quiz-chips">${opts}</div>${tallyRow(q)}`;
     return el;
   }));
 }
 
 function renderBoard() {
-  const medals = ['🥇', '🥈', '🥉'];
+  const medals = { 1: '🥇', 2: '🥈', 3: '🥉' };
   const rows = quizState.board || [];
-  quizBoardHost.replaceChildren(...rows.map((r, i) => {
+  quizBoardHost.replaceChildren(...rows.map((r) => {
     const el = document.createElement('div');
     el.className = 'quiz-board-row';
-    el.innerHTML = `<span class="qb-pos">${medals[i] || i + 1}</span>
+    // место берём с сервера: равные очки = равное место, и у двух первых
+    // нет одного третьего на двоих
+    el.innerHTML = `<span class="qb-pos">${medals[r.rank] || r.rank}</span>
       <span class="qb-name">${escapeHTML(r.name)}</span>
       <span class="qb-score">${r.score}</span>`;
     return el;
@@ -150,9 +203,15 @@ async function quizControl(action, fields = {}) {
   }
 }
 
-quizOpenBtn.addEventListener('click', () => quizControl('open'));
-quizCloseBtn.addEventListener('click', () => quizControl('close'));
-quizNextBtn.addEventListener('click', () => quizControl('next'));
+/* Главный шаг игры: его делает и кнопка, и пробел на вкладке «Квиз».
+   Куда идти дальше, решает стадия, а не ведущий — перепутать нельзя. */
+function quizStep() {
+  const step = STEP[quizState.phase] || STEP.idle;
+  if (!step.action || quizStepBtn.disabled) return;
+  quizControl(step.action);
+}
+
+quizStepBtn.addEventListener('click', quizStep);
 quizBoardBtn.addEventListener('click', () => quizControl('board'));
 quizShowBtn.addEventListener('click', () => quizControl('show'));
 quizFeedBtn.addEventListener('click', () => quizControl('feed'));
@@ -181,6 +240,11 @@ quizList.addEventListener('click', async (e) => {
     if (!confirm('Удалить вопрос? Ответы гостей на него тоже удалятся.')) return;
     try {
       await postForm(ev('/api/moderator/quiz/delete'), { question_id: qid });
+      reload();
+    } catch (ex) { showToast(ex.message, 'warn'); }
+  } else if (act === 'copy') {
+    try {
+      await postForm(ev('/api/moderator/quiz/duplicate'), { question_id: qid });
       reload();
     } catch (ex) { showToast(ex.message, 'warn'); }
   } else if (act === 'edit') {
@@ -213,6 +277,7 @@ function openEditor(question) {
   qStatus.textContent = '';
   qText.value = question ? question.text : '';
   qNoPoints.checked = question ? !question.scored : false;
+  qSeconds.value = question && question.seconds ? String(question.seconds) : '';
   qOptions.replaceChildren();
   const opts = question ? question.options : ['', ''];
   opts.forEach((o) => addOptionRow(o));
@@ -247,6 +312,9 @@ qSave.addEventListener('click', async () => {
     text: qText.value.trim(),
     options: JSON.stringify(texts),
     scored: qNoPoints.checked ? '0' : '1',
+    // поле всегда прилетает: 0 для сервера значит «отсчёта нет», поэтому
+    // стереть таймер можно тем же способом, каким он ставится
+    seconds: qSeconds.value.trim() || '0',
     correct: qNoPoints.checked || !checked
       ? -1 : [...qOptions.querySelectorAll('input[type=radio]')].indexOf(checked),
   };
@@ -280,9 +348,13 @@ quizLinkCopy.addEventListener('click', async () => {
   showToast(ok ? 'Ссылка на квиз скопирована' : 'Скопируйте вручную', ok ? 'ok' : 'warn');
 });
 
-/* окно ведущего принимает сигнал quiz_update из общего канала (moderator.js) */
+/* окно ведущего принимает сигнал quiz_update из общего канала (moderator.js).
+   step и board вызывает клавиатура moderator.js: пробел ведёт цепочку,
+   L выводит лидеров, и обе работают только на вкладке «Квиз» */
 window.quizPanel = {
   reload,
+  step: quizStep,
+  board: () => quizControl('board'),
   init() {
     api(ev('/api/moderator/invite'))
       .then(({ code }) => renderQuizLink(code))

@@ -223,19 +223,16 @@
 
     <section class="control-bar quiz-ctl-bar">
       <div class="control-buttons">
-        <button class="btn ctl" id="quizOpenBtn" title="Показать первый или следующий вопрос">
-          <span class="ctl-glyph">▶</span><span class="ctl-label">Открыть вопрос</span>
-        </button>
-        <button class="btn ctl ctl-main" id="quizCloseBtn" title="Закрыть ответ и показать распределение">
-          <span class="ctl-glyph">✓</span><span class="ctl-label">Закрыть и показать</span>
-        </button>
-        <button class="btn ctl" id="quizNextBtn" title="Следующий вопрос по порядку">
-          <span class="ctl-glyph">›</span><span class="ctl-label">Следующий</span>
+        <!-- Одна шаговая кнопка: её подпись меняется вместе со стадией,
+             и ведущий не ищет, куда жать дальше. Пробел на этой вкладке
+             делает ровно то же самое. -->
+        <button class="btn ctl ctl-main" id="quizStepBtn" title="Следующий шаг игры">
+          <span class="ctl-glyph" id="quizStepGlyph">▶</span><span class="ctl-label" id="quizStepLabel">Открыть вопрос</span>
         </button>
       </div>
 
       <div class="control-side">
-        <button class="btn ghost" id="quizBoardBtn" title="Таблица лидеров на экран">Лидеры на экран</button>
+        <button class="btn ghost" id="quizBoardBtn" title="Таблица лидеров на экран; во время игры листает всех">Лидеры на экран</button>
         <button class="btn ghost" id="quizShowBtn" title="Вернуть экран к текущей стадии квиза">Квиз на экран</button>
         <button class="btn ghost" id="quizFeedBtn" title="Убрать квиз с экрана; зал продолжает отвечать">Вернуть ленту</button>
         <button class="btn ghost" id="quizResetBtn" title="Стереть все ответы и провести тот же набор заново">Сбросить ответы</button>
@@ -249,9 +246,12 @@
       <div class="panel-head">
         <h2>Вопросы</h2>
         <p class="muted quiz-hint">
-          Порядок — сверху вниз: «Открыть вопрос» начинает с первого,
-          «Следующий» идёт по списку. «Без очков» — хитрый вопрос:
-          на экране только распределение мнений, никто не ошибается.
+          Порядок — сверху вниз: шаговая кнопка ведёт игру «открыть →
+          закрыть приём → показать ответ → дальше», после последнего
+          вопроса экран сам уходит на финальную таблицу. «Без очков» —
+          хитрый вопрос: на экране только распределение мнений, никто не
+          ошибается. Время на ответ тикает только на проекторе, телефоны
+          никто не торопит.
         </p>
       </div>
       <div class="quiz-list" id="quizList"></div>
@@ -274,8 +274,13 @@
             <input type="checkbox" id="qNoPoints">
             без очков — только распределение ответов
           </label>
+          <label class="quiz-timer-row">
+            <span>Время ответа, сек</span>
+            <input type="number" id="qSeconds" min="5" max="600" step="5"
+                   placeholder="без лимита" inputmode="numeric">
+          </label>
         </div>
-        <p class="muted small">Кружком отмечается правильный вариант — он подсветится на экране, когда закроете вопрос.</p>
+        <p class="muted small">Кружком отмечается правильный вариант — он подсветится на экране, когда закроете вопрос. Пустое время — без отсчёта.</p>
         <div class="row-actions">
           <button class="btn" id="qSave" type="button">Сохранить вопрос</button>
           <button class="btn ghost" id="qCancel" type="button">Отмена</button>

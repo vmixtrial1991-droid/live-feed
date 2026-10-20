@@ -490,8 +490,20 @@ document.getElementById('logoutBtn').addEventListener('click', async () => {
 });
 
 /* ---------------- Клавиатура ---------------- */
+function quizTabOpen() {
+  return document.getElementById('pageQuiz').classList.contains('is-active');
+}
+
 document.addEventListener('keydown', (e) => {
   if (e.target.matches('input, textarea') || e.metaKey || e.ctrlKey) return;
+  // На вкладке «Квиз» пробел значит не паузу ленты, а следующий шаг игры,
+  // а L выводит лидеров. Остальные клавиши остаются ленте: стрелки и Q
+  // работают и здесь — ведущий может листать фотографии, не выходя из квиза.
+  if (quizTabOpen() && window.quizPanel) {
+    const key = e.key.toLowerCase();
+    if (key === ' ') { e.preventDefault(); window.quizPanel.step(); return; }
+    if (key === 'l' || key === 'л') { e.preventDefault(); window.quizPanel.board(); return; }
+  }
   const map = {
     ' ': () => (state.screen.playing ? 'pause' : 'play'),
     ArrowRight: 'next',

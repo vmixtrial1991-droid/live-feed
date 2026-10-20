@@ -102,6 +102,14 @@ def _prepare(event: Event) -> Event:
             except (TypeError, ValueError):
                 screen.quiz_question = None
             screen.quiz_visible = bool(data.get("quiz_visible"))
+            screen.quiz_final = bool(data.get("quiz_final"))
+            # момент открытия вопроса: по нему экран достраивает отсчёт
+            # после перезапуска, а не начинает его заново
+            opened = data.get("quiz_opened_at")
+            try:
+                screen.quiz_opened_at = float(opened) if opened else None
+            except (TypeError, ValueError):
+                screen.quiz_opened_at = None
         except (EventError, OSError, ValueError):
             pass
         _prepared.add(event.slug)
@@ -142,12 +150,15 @@ def _quiz_persist(event: Event, screen) -> None:
     убираем — конфиг не обрастает мусором после каждого квиза.
     """
     if screen.quiz_phase == "idle":
-        event.update(quiz_phase=None, quiz_question=None, quiz_visible=None)
+        event.update(quiz_phase=None, quiz_question=None, quiz_visible=None,
+                     quiz_final=None, quiz_opened_at=None)
     else:
         event.update(
             quiz_phase=screen.quiz_phase,
             quiz_question=screen.quiz_question,
             quiz_visible=screen.quiz_visible,
+            quiz_final=screen.quiz_final,
+            quiz_opened_at=screen.quiz_opened_at,
         )
 
 
@@ -1161,6 +1172,37 @@ MAX_QUESTION_LEN = 200
 MAX_OPTION_LEN = 80
 MIN_OPTIONS = 2
 MAX_OPTIONS = 6
+MIN_TIMER = 5
+MAX_TIMER = 600
+
+# метка «поле не трогать» для формы правки: пустая строка слишком нужна
+# для «стереть», а выдуманное слово никто случайно не пришлёт
+FORM_KEEP = "__keep__"
+
+
+def _quiz_seconds(raw: str) -> int | None:
+    """Время на ответ из формы: 0 — «без отсчёта», прочее — 5..600.
+
+    Пустая строка для формы значит «поле не присылали», поэтому стирать
+    отсчёт приходится нулём: он и так не проходит проверку диапазона,
+    место свободное.
+
+    Верхняя граница не для строгости: таймер крупным числом стоит на
+    проекторе, и «3600 секунд» зал читает как опечатку, а не как отсчёт.
+    """
+    raw = (raw or "").strip()
+    if not raw or raw == "0":
+        return None
+    try:
+        value = int(raw)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Время ответа — целое число секунд")
+    if not (MIN_TIMER <= value <= MAX_TIMER):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Время ответа — от {MIN_TIMER} до {MAX_TIMER} секунд",
+        )
+    return value
 
 
 def _quiz_options(raw: str) -> list[str]:
@@ -1198,6 +1240,7 @@ async def api_mod_quiz_add(
     options: str = Form(""),
     correct: int = Form(-1),
     scored: str = Form("1"),
+    seconds: str = Form(""),
 ):
     """Новый вопрос встаёт в конец очереди; порядок правится кнопками."""
     event = _event_or_404(slug)
@@ -1211,7 +1254,7 @@ async def api_mod_quiz_add(
         raise HTTPException(status_code=400, detail="Отметьте правильный вариант")
     # у «хитрого» вопроса правильного нет намеренно: смысл в разбросе мнений
     question = event.store.quiz_add_question(
-        text, opts, correct if graded else -1, graded
+        text, opts, correct if graded else -1, graded, _quiz_seconds(seconds)
     )
     runtime = _runtime(event)
     await runtime.hub.to_moderator({"type": "quiz_update"})
@@ -1227,10 +1270,15 @@ async def api_mod_quiz_update(
     options: str = Form(""),
     correct: int = Form(-2),
     scored: str = Form(""),
+    seconds: str = Form(FORM_KEEP),
 ):
     """Правка вопроса. Пустые поля не трогаем: форма присылает только то,
     что изменилось. -2 у correct означает «не менять» ( -1 сам по себе —
-    законное значение «правильного нет» )."""
+    законное значение «правильного нет» ).
+
+    seconds — тот же фокус: «не менять» помечен специальным значением,
+    а пустая строка для формы значит «поля нет вовсе». Стереть отсчёт —
+    значит прислать 0."""
     event = _event_or_404(slug)
     _require_moderator(request, event)
     old = event.store.quiz_get_question(question_id)
@@ -1251,6 +1299,8 @@ async def api_mod_quiz_update(
         fields["correct"] = correct
     elif "scored" in fields and fields["scored"]:
         fields["correct"] = old["correct"]
+    if seconds != FORM_KEEP:
+        fields["seconds"] = _quiz_seconds(seconds)
 
     final_options = fields.get("options", old["options"])
     final_scored = fields.get("scored", old["scored"])
@@ -1263,6 +1313,25 @@ async def api_mod_quiz_update(
     # меняли открытый/закрытый вопрос — экрану и гостям нужен новый кадр
     await _quiz_frame(event, runtime)
     await runtime.hub.to_moderator({"type": "quiz_update"})
+    return {"ok": True, "question": question}
+
+
+@app.post("/e/{slug}/api/moderator/quiz/duplicate")
+async def api_mod_quiz_duplicate(slug: str, request: Request, question_id: int = Form(...)):
+    """Копия вопроса сразу за оригиналом.
+
+    Копия пустая в смысле ответов: у неё свой id, поэтому прошлые ответы
+    к ней не переходят. Ведущему это нужно, когда вопрос работает и его
+    хочется повторить с другим текстом, не набирая варианты заново.
+    """
+    event = _event_or_404(slug)
+    _require_moderator(request, event)
+    question = event.store.quiz_duplicate_question(question_id)
+    if question is None:
+        raise HTTPException(status_code=404, detail="Вопрос не найден")
+    runtime = _runtime(event)
+    await runtime.hub.to_moderator({"type": "quiz_update"})
+    await _quiz_frame(event, runtime)  # «3 из 10» на экране сдвинулось
     return {"ok": True, "question": question}
 
 
@@ -1282,6 +1351,7 @@ async def api_mod_quiz_delete(slug: str, request: Request, question_id: int = Fo
     screen = runtime.screen
     if screen.quiz_question == question_id:
         screen.quiz_phase, screen.quiz_question, screen.quiz_visible = "idle", None, False
+        screen.quiz_final, screen.quiz_opened_at = False, None
         _quiz_persist(event, screen)
     await _quiz_frame(event, runtime)
     await runtime.hub.to_moderator({"type": "quiz_update"})
@@ -1308,14 +1378,18 @@ async def api_mod_quiz_control(
 ):
     """Переключатель стадий квиза: тот же экран, что и у ленты, только режим.
 
-    open — вопрос открыт, зал отвечает (можно передумать до закрытия);
-    close — показываем распределение и правильный ответ;
-    next — следующий по порядку;
-    board — таблица лидеров;
-    feed — убрать квиз с экрана, оставив зал отвечать (фаза не трогается);
-    show — вернуть экран к текущей стадии;
-    stop — закончить квиз, экран снова показывает ленту;
-    reset — стереть все ответы (тот же набор, чистый прогон).
+    Ведущий ходит по цепочке одной кнопкой, и каждое действие — следующий
+    её шаг:
+
+    open   — вопрос открыт, зал отвечает (можно передумать до закрытия);
+    close  — приём закрыт, показываем распределение, правильный ещё нет;
+    reveal — добавляем правильный ответ;
+    next   — следующий по порядку, а после последнего вопроса — финал;
+    board  — промежуточная таблица лидеров (листает всех);
+    feed   — убрать квиз с экрана, оставив зал отвечать (фаза не трогается);
+    show   — вернуть экран к текущей стадии;
+    stop   — закончить квиз, экран снова показывает ленту;
+    reset  — стереть все ответы (тот же набор, чистый прогон).
     """
     event = _prepare(_event_or_404(slug))
     _require_moderator(request, event)
@@ -1331,22 +1405,42 @@ async def api_mod_quiz_control(
                 raise HTTPException(status_code=400, detail="Сначала добавьте вопросы")
             qid = first[0]["id"]
         if store.quiz_get_question(qid) is None:
-            raise HTTPException(status_code=404, detail="Вопрос не найден")
+            raise HTTPException(status_code=400, detail="Вопрос не найден")
         screen.quiz_phase, screen.quiz_question, screen.quiz_visible = "open", qid, True
+        screen.quiz_final = False
+        screen.quiz_opened_at = time.time()
     elif action == "close":
         if screen.quiz_phase != "open":
             raise HTTPException(status_code=400, detail="Вопрос сейчас не открыт")
         screen.quiz_phase = "closed"
+        # отсчёт больше не нужен: приём закрыт, время вопроса кончилось
+        screen.quiz_opened_at = None
+    elif action == "reveal":
+        if screen.quiz_phase != "closed":
+            raise HTTPException(status_code=400, detail="Сначала закройте приём ответов")
+        screen.quiz_phase = "reveal"
     elif action == "next":
+        # дальше идут только после закрытого приёма: иначе зал успевает
+        # ответить на прошлый вопрос, пока на экране уже новый
+        if screen.quiz_phase not in ("closed", "reveal"):
+            raise HTTPException(status_code=400, detail="Сначала закройте приём ответов")
         order = [q["id"] for q in store.quiz_list_questions()]
         if not order:
             raise HTTPException(status_code=400, detail="Сначала добавьте вопросы")
         i = order.index(screen.quiz_question) if screen.quiz_question in order else -1
         if i + 1 >= len(order):
-            raise HTTPException(status_code=400, detail="Это последний вопрос")
-        screen.quiz_phase, screen.quiz_question, screen.quiz_visible = "open", order[i + 1], True
+            # последний вопрос прожит: экран сам уходит на финальную
+            # таблицу, ведущему не нужно ничего искать кнопками
+            screen.quiz_phase, screen.quiz_question = "board", None
+            screen.quiz_visible, screen.quiz_final = True, True
+            screen.quiz_opened_at = None
+        else:
+            screen.quiz_phase, screen.quiz_question, screen.quiz_visible = "open", order[i + 1], True
+            screen.quiz_final = False
+            screen.quiz_opened_at = time.time()
     elif action == "board":
         screen.quiz_phase, screen.quiz_visible = "board", True
+        screen.quiz_final = False
     elif action == "feed":
         screen.quiz_visible = False
     elif action == "show":
@@ -1355,6 +1449,7 @@ async def api_mod_quiz_control(
         screen.quiz_visible = True
     elif action == "stop":
         screen.quiz_phase, screen.quiz_question, screen.quiz_visible = "idle", None, False
+        screen.quiz_final, screen.quiz_opened_at = False, None
     elif action == "reset":
         removed = store.quiz_clear_answers()
     else:

@@ -142,10 +142,16 @@ class ScreenController:
         # 5.0: квиз на экране. Режим тот же, что у заставки и QR: лента
         # на это время встаёт. Фаза живёт на сервере, поэтому каждый
         # подключившийся экран видит ту же стадию квиза, что и остальные:
-        # idle | open | closed | board.
+        # idle | open | closed | reveal | board.
         self.quiz_visible = False
         self.quiz_phase = "idle"
         self.quiz_question: int | None = None
+        # board бывает двух видов: промежуточный (листает всех) и финал
+        # после последнего вопроса (топ-10, первый крупно, без движения).
+        self.quiz_final = False
+        # когда открыт вопрос, от этого момента экран считает отсчёт;
+        # None — таймера нет или приём уже закрыт
+        self.quiz_opened_at: float | None = None
 
     # У обычной ленты и у слайдшоу свои часы: переключение режима не должно
     # начинать отсчёт заново у того, что сейчас не показывается.
@@ -339,6 +345,7 @@ class ScreenController:
             "quiz_visible": self.quiz_visible,
             "quiz_phase": self.quiz_phase,
             "quiz_question": self.quiz_question,
+            "quiz_final": self.quiz_final,
         }
 
 

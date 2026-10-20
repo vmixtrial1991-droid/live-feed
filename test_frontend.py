@@ -656,7 +656,8 @@ check("quiz.js: чужих ответов не показывает — толь
       "data.my_answer" in quiz_js and "counts" in quiz_js)
 check("quiz-panel.js: ведущий управляет всеми стадиями",
       all(a in quiz_panel_js for a in
-          ("'open'", "'close'", "'next'", "'board'", "'feed'", "'show'", "'stop'")))
+          ("'open'", "'close'", "'reveal'", "'next'", "'board'",
+           "'feed'", "'show'", "'stop'")))
 check("quiz-panel.js: QR квиза запрашивается с kind=quiz", "kind=quiz" in quiz_panel_js)
 check("quiz-panel.js: панель перезаряжается по сигналу из общего канала",
       "window.quizPanel" in quiz_panel_js)
@@ -664,6 +665,34 @@ check("moderator.html: вкладка «Квиз» есть", 'id="tabQuiz"' in 
 check("moderator.html: страница вкладки «Квиз» есть", 'id="pageQuiz"' in mod_html)
 check("moderator.html: скрипт квиза подключён", 'src="/static/quiz-panel.js"' in mod_html)
 check("moderator.js: панель получает сигнал quiz_update", "case 'quiz_update'" in mod_js2)
+check("moderator.html: шаговая кнопка одна, трёх кнопок стадии больше нет",
+      'id="quizStepBtn"' in mod_html
+      and not any(i in mod_html for i in ("quizOpenBtn", "quizCloseBtn", "quizNextBtn")))
+check("moderator.html: поле времени ответа в редакторе вопроса", 'id="qSeconds"' in mod_html)
+check("quiz-panel.js: цепочку шагов задаёт стадия, а не ведущий",
+      all(a in quiz_panel_js for a in ("STEP", "quizStepBtn", "quizStep()")))
+check("quiz-panel.js: копия вопроса делается на месте, сразу за оригиналом",
+      "/api/moderator/quiz/duplicate" in quiz_panel_js)
+check("quiz-panel.js: живые полосы зала рисуются только ведущему",
+      "tally" in quiz_panel_js and "quiz-tally" in quiz_panel_js)
+check("quiz-panel.js: отсчёт вопроса уезжает в форму и возвращается в список",
+      "qSeconds" in quiz_panel_js and "quiz-chip-time" in quiz_panel_js)
+check("quiz-panel.js: место в таблице берётся с сервера, а не из порядка строк",
+      "r.rank" in quiz_panel_js)
+check("moderator.js: на вкладке «Квиз» пробел ведёт игру, L выводит лидеров",
+      "quizPanel.step()" in mod_js2 and "quizPanel.board()" in mod_js2)
+check("quiz.js: reveal отделён от closed — «мимо» раньше времени не пишется",
+      "'reveal'" in quiz_js and "revealed" in quiz_js)
+check("quiz.js: и на телефоне места считаются по рангу сервера", "row.rank" in quiz_js)
+check("screen.html: отсчёт живёт на проекторе", 'id="quizTimer"' in screen_html)
+check("screen.js: экран ведёт отсчёт сам, а «время вышло» ничего не блокирует",
+      "quizDeadline" in screen_js and "Время вышло" in screen_js)
+check("screen.js: промежуточная таблица листается, финальная стоит на месте",
+      "BOARD_STEP_MS" in screen_js and "FINAL_TOP" in screen_js and "is-hero" in screen_js)
+check("screen.css: финальное первое место крупнее остальных",
+      re.search(r"\.quiz-s-row\.is-hero", screen_css) is not None)
+check("moderator.css: полоса зала рисуется шириной по доле ответов",
+      re.search(r"\.qt-item::before[^}]*var\(--w", mod_css, re.S) is not None)
 check("slideshow-panel.js: переключатель вкладок знает про третью",
       "tabQuiz" in slide_js and "'quiz'" in slide_js)
 check("screen.html: слой квиза есть", 'id="quizScreen"' in screen_html)

@@ -370,6 +370,27 @@
 }
 .quiz-chip.is-right { border-color: var(--ok); color: var(--ok); }
 .quiz-chip-free { color: var(--warn); border-color: rgba(255, 182, 72, .45); }
+.quiz-chip-time { color: var(--muted); }
+
+/* живые полосы зала: видно только ведущему, и только по вопросам, где
+   уже есть ответы. Зал своё распределение узнает не раньше закрытия приёма */
+.quiz-tally { display: flex; gap: .35rem; flex-wrap: wrap; margin-top: .4rem; }
+.qt-item {
+  position: relative; overflow: hidden; flex: 1 1 90px; min-width: 90px;
+  display: flex; justify-content: space-between; gap: .4rem;
+  border: 1px solid var(--line); border-radius: 8px; padding: .2rem .5rem;
+  font-size: .78rem; color: var(--muted); background: rgba(255, 255, 255, .03);
+}
+/* ширина полосы — доля зала; ведущий смотрит на неё, а не считает проценты */
+.qt-item::before {
+  content: ""; position: absolute; inset: 0 auto 0 0; width: var(--w, 0%);
+  background: rgba(96, 168, 255, .18);
+}
+.qt-item i, .qt-item b { position: relative; font-style: normal; }
+.qt-item i { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qt-item b { color: var(--text); }
+.qt-item.is-right::before { background: rgba(72, 201, 128, .28); }
+.qt-item.is-right b { color: var(--ok); }
 
 /* редактор вопроса: тот же для нового и для правки */
 .quiz-editor {
@@ -386,6 +407,12 @@
   color: var(--muted); font-size: .88rem; cursor: pointer;
 }
 #qNoPoints { accent-color: var(--accent); width: 1.05rem; height: 1.05rem; }
+/* таймер вопроса: пусто — без отсчёта, цифра потом живёт на проекторе */
+.quiz-timer-row {
+  display: flex; align-items: center; gap: .4rem;
+  color: var(--muted); font-size: .88rem;
+}
+#qSeconds { width: 7.5rem; }
 
 /* таблица лидеров в панели ведущей (телефон ведущего) */
 .quiz-board { display: flex; flex-direction: column; gap: .4rem; }

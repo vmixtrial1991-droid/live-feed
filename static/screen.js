@@ -22,9 +22,10 @@ let splashUrl = null;   // загруженная картинка; null — п�
 
 // 5.0: слой квиза. Сервер присылает готовую картинку стадии (вопрос,
 // распределение, лидеры) — у экрана собственного мнения нет, и правильный
-// ответ он узнаёт только когда ведущий закроет вопрос
+// ответ он узнаёт только когда ведущий покажет ответ
 const quizScreen = document.getElementById('quizScreen');
 const quizTag = document.getElementById('quizTag');
+const quizTimer = document.getElementById('quizTimer');
 const quizQText = document.getElementById('quizQText');
 const quizFree = document.getElementById('quizFree');
 const quizOpts = document.getElementById('quizOpts');
@@ -111,40 +112,161 @@ function setQrVisible(visible) {
 /* ---------------- Квиз (5.0) ---------------- */
 let quizFrame = null;   // последний кадр игры от сервера; null — лента
 
-function renderQuiz() {
-  const f = quizFrame;
-  if (!f) { quizScreen.hidden = true; return; }
+/* Отсчёт. Сервер присылает сколько секунд осталось на момент кадра,
+   дальше экран ведёт счёт сам: кадры прилетают не по секундам, а когда
+   кто-то ответит, и цифра стояла бы на месте. Кончаться может только
+   время — приём закрывает ведущий, поэтому «Время вышло!» ничего не
+   блокирует, а только напоминает залу поторопиться. */
+let quizDeadline = null;
+let quizTicker = null;
 
-  if (f.phase === 'board') {
-    quizScreen.hidden = false;
-    quizTag.textContent = 'Квиз';
-    quizQText.textContent = 'Таблица лидеров';
-    quizFree.hidden = true;
-    const medals = ['🥇', '🥈', '🥉'];
-    const rows = (f.board || []).slice(0, 12);
-    quizOpts.replaceChildren(...rows.map((r, i) => {
-      const el = document.createElement('div');
-      el.className = 'quiz-s-row';
-      el.innerHTML = `<span class="quiz-s-pos">${medals[i] || i + 1}</span>
-        <span class="quiz-s-name">${escapeHTML(r.name)}</span>
-        <span class="quiz-s-score">${r.score}</span>`;
-      return el;
-    }));
-    if (!rows.length)
-      quizOpts.innerHTML = '<p class="quiz-s-note">Пока никто не отвечал на зачётные вопросы.</p>';
-    quizCount.textContent = f.scored_total ? `Зачётных вопросов в игре: ${f.scored_total}` : '';
+/* Таблица лидеров бывает двух видов: промежуточная листает весь зал
+   пачками (вести её руками ведущему незачем), финальная — первая
+   десятка, первое место крупно, и стоит неподвижно до конца вечера. */
+const BOARD_PAGE = 10;
+const BOARD_STEP_MS = 8000;
+const FINAL_TOP = 10;
+let boardPages = [];
+let boardPage = 0;
+let boardTimer = null;
+let boardFinal = false;
+let boardTotal = 0;
+
+function stopQuizTicker() {
+  if (quizTicker) { clearInterval(quizTicker); quizTicker = null; }
+  quizDeadline = null;
+  quizTimer.hidden = true;
+  quizTimer.textContent = '';
+  quizTimer.classList.remove('is-over');
+}
+
+function stopBoardScroll() {
+  if (boardTimer) { clearInterval(boardTimer); boardTimer = null; }
+  boardPages = [];
+  boardPage = 0;
+}
+
+function tickQuizTimer() {
+  if (quizDeadline === null) return;
+  const left = Math.max(0, Math.ceil((quizDeadline - Date.now()) / 1000));
+  quizTimer.hidden = false;
+  if (left > 0) {
+    quizTimer.textContent = String(left);
+    return;
+  }
+  quizTimer.classList.add('is-over');
+  quizTimer.textContent = 'Время вышло!';
+  // тикать дальше не о чем: цифра кончилась, висит напоминание
+  if (quizTicker) { clearInterval(quizTicker); quizTicker = null; }
+}
+
+function boardRow(r, hero) {
+  const el = document.createElement('div');
+  el.className = 'quiz-s-row' + (hero ? ' is-hero' : '');
+  const medal = { 1: '🥇', 2: '🥈', 3: '🥉' }[r.rank] || r.rank;
+  el.innerHTML = `<span class="quiz-s-pos">${medal}</span>
+    <span class="quiz-s-name">${escapeHTML(r.name)}</span>
+    <span class="quiz-s-score">${r.score}</span>`;
+  return el;
+}
+
+function paintBoard() {
+  if (!boardPages.length) {
+    quizOpts.innerHTML =
+      '<p class="quiz-s-note">Пока никто не отвечал на зачётные вопросы.</p>';
+    quizCount.textContent = '';
+    return;
+  }
+  if (boardPage >= boardPages.length) boardPage = 0;
+  const rows = boardPages[boardPage];
+  // крупно — только первый ряд первой пачки финала: при равных очках
+  // первых может быть двое, и оба крупных уже не помещаются
+  quizOpts.replaceChildren(
+    ...rows.map((r, i) => boardRow(r, boardFinal && boardPage === 0 && i === 0))
+  );
+  if (boardFinal) {
+    quizCount.textContent = boardTotal > rows.length
+      ? `Показана первая десятка, всех участников — ${boardTotal}`
+      : `Всего участников с ответами: ${boardTotal}`;
+  } else if (boardPages.length > 1) {
+    quizCount.textContent =
+      `Участников: ${boardTotal} · страница ${boardPage + 1} из ${boardPages.length}`;
+  } else {
+    quizCount.textContent = `Участников: ${boardTotal}`;
+  }
+}
+
+function renderBoard(f) {
+  stopQuizTicker();
+  quizScreen.hidden = false;
+  quizTag.textContent = 'Квиз';
+  quizFree.hidden = true;
+
+  // новый кадр прилетает с каждым ответом в зале, поэтому перематывать
+  // страницу назад нельзя — при активном зале нулевая страница никогда бы
+  // не сменилась. Таймер и страницу сохраняем, пока режим тот же и
+  // количество страниц не изменилось
+  const final = !!f.final;
+  const keepScroll = !final && boardTimer !== null && boardFinal === false
+    && Math.ceil((f.board || []).length / BOARD_PAGE) === boardPages.length;
+  if (!keepScroll) stopBoardScroll();
+  boardFinal = final;
+  const all = f.board || [];
+  boardTotal = all.length;
+
+  if (boardFinal) {
+    // финал после последнего вопроса: десятка целиком, без движения
+    quizQText.textContent = 'Финальная таблица';
+    boardPages = [all.slice(0, FINAL_TOP)];
+    paintBoard();
     return;
   }
 
+  quizQText.textContent = 'Таблица лидеров';
+  boardPages = [];
+  for (let i = 0; i < all.length; i += BOARD_PAGE) {
+    boardPages.push(all.slice(i, i + BOARD_PAGE));
+  }
+  paintBoard();
+  if (!keepScroll && boardPages.length > 1) {
+    // пачка висит столько, сколько её успевают прочитать с дальних рядов
+    boardTimer = setInterval(() => { boardPage += 1; paintBoard(); }, BOARD_STEP_MS);
+  }
+}
+
+function renderQuiz() {
+  const f = quizFrame;
+  if (!f) {
+    quizScreen.hidden = true;
+    stopQuizTicker();
+    stopBoardScroll();
+    return;
+  }
+
+  if (f.phase === 'board') { renderBoard(f); return; }
+
   const q = f.question;
-  if (!q) { quizScreen.hidden = true; return; }   // фаза есть, вопроса нет — ждём
+  if (!q) {
+    quizScreen.hidden = true;   // фаза есть, вопроса нет — ждём
+    stopQuizTicker();
+    stopBoardScroll();
+    return;
+  }
   quizScreen.hidden = false;
+  stopBoardScroll();
   quizTag.textContent = f.questions_total
     ? `Вопрос ${f.question_no} из ${f.questions_total}` : `Вопрос ${f.question_no}`;
   quizQText.textContent = q.text;
   quizFree.hidden = !!q.scored;
 
   if (f.phase === 'open') {
+    if (f.seconds_left != null) {
+      quizDeadline = Date.now() + f.seconds_left * 1000;
+      if (!quizTicker) quizTicker = setInterval(tickQuizTimer, 250);
+      tickQuizTimer();
+    } else {
+      stopQuizTicker();
+    }
     quizOpts.replaceChildren(...q.options.map((text) => {
       const el = document.createElement('div');
       el.className = 'quiz-s-opt';
@@ -153,20 +275,26 @@ function renderQuiz() {
     }));
     quizCount.textContent = f.answered_total
       ? `Уже ответили: ${f.answered_total}` : 'Ждём ответы зала…';
-  } else {
-    const counts = f.counts || q.options.map(() => 0);
-    const total = counts.reduce((a, b) => a + b, 0) || 1;
-    quizOpts.replaceChildren(...q.options.map((text, i) => {
-      const share = Math.round((counts[i] / total) * 100);
-      const el = document.createElement('div');
-      el.className = 'quiz-s-opt is-bar' + (f.correct === i ? ' is-right' : '');
-      el.innerHTML = `<span class="quiz-s-fill" style="width:${share}%"></span>
-        <span class="quiz-s-text">${escapeHTML(text)}${f.correct === i ? ' ✓' : ''}</span>
-        <span class="quiz-s-num">${counts[i]} · ${share}%</span>`;
-      return el;
-    }));
-    quizCount.textContent = `Ответили: ${f.answered_total ?? total}`;
+    return;
   }
+
+  // closed — распределение, правильного ещё нет; reveal — уже с ним.
+  // Что класть в кадр, решает сервер: экран не знает верный ответ заранее
+  stopQuizTicker();
+  const counts = f.counts || q.options.map(() => 0);
+  const total = counts.reduce((a, b) => a + b, 0) || 1;
+  quizOpts.replaceChildren(...q.options.map((text, i) => {
+    const share = Math.round((counts[i] / total) * 100);
+    const el = document.createElement('div');
+    el.className = 'quiz-s-opt is-bar' + (f.correct === i ? ' is-right' : '');
+    el.innerHTML = `<span class="quiz-s-fill" style="width:${share}%"></span>
+      <span class="quiz-s-text">${escapeHTML(text)}${f.correct === i ? ' ✓' : ''}</span>
+      <span class="quiz-s-num">${counts[i]} · ${share}%</span>`;
+    return el;
+  }));
+  quizCount.textContent = f.phase === 'closed'
+    ? `Ответили: ${f.answered_total ?? total} · приём закрыт`
+    : `Ответили: ${f.answered_total ?? total}`;
 }
 
 const messages = new Map();   // id -> сообщение ленты

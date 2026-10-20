@@ -56,6 +56,10 @@
 <div class="quiz-screen" id="quizScreen" hidden>
   <div class="quiz-screen-inner">
     <p class="quiz-tag" id="quizTag"></p>
+    <!-- Отсчёт живёт только здесь, на проекторе: телефоны не должны
+         превращать игру в гонку. По истечении — надпись, но ответы всё
+         ещё принимаются: приём закрывает ведущий, а не секундомер. -->
+    <p class="quiz-s-timer" id="quizTimer" hidden></p>
     <h1 class="quiz-q" id="quizQText"></h1>
     <p class="quiz-free" id="quizFree" hidden>Вопрос без очков — здесь важно, как думает зал</p>
     <div class="quiz-opts" id="quizOpts"></div>

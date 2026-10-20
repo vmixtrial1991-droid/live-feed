@@ -72,6 +72,9 @@ CREATE INDEX IF NOT EXISTS idx_gallery_position ON gallery(position);
 -- одна запись, поэтому квиз узнаёт того, кто уже что-то отправлял).
 -- options — JSON-список вариантов; correct — индекс правильного, -1 у
 -- «хитрых» вопросов (scored=0): по ним показываем распределение, очков нет.
+-- seconds — время на ответ в секундах, NULL значит «без таймера»: ведущий
+-- заводит отсчёт сам, экран торопит зал, но по истечении ответа всё равно
+-- принимаются, пока ведущий не закроет приём.
 -- ON DELETE CASCADE: удалил вопрос — ответы уходят следом, хвостов нет.
 CREATE TABLE IF NOT EXISTS quiz_questions (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -80,6 +83,7 @@ CREATE TABLE IF NOT EXISTS quiz_questions (
     correct    INTEGER NOT NULL DEFAULT -1,
     scored     INTEGER NOT NULL DEFAULT 1,
     position   REAL NOT NULL DEFAULT 0,
+    seconds    INTEGER,
     created_at REAL NOT NULL
 );
 
@@ -95,6 +99,11 @@ CREATE TABLE IF NOT EXISTS quiz_answers (
 
 def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
     return {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+
+
+# «параметр не приходил» — не то же самое, что «пришёл как None»:
+# для seconds None законное значение («без таймера»).
+_UNSET = object()
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
@@ -134,6 +143,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if "source_id" not in gal_cols:
         conn.execute("ALTER TABLE gallery ADD COLUMN source_id INTEGER")
 
+    # 5.0: время ответа у вопроса. NULL — без таймера; у заведённых раньше
+    # событий колоны просто не было.
+    if "seconds" not in _columns(conn, "quiz_questions"):
+        conn.execute("ALTER TABLE quiz_questions ADD COLUMN seconds INTEGER")
+
     # модерация убрана, но в старых базах остались её следы
     if "reject_reason" in have:
         conn.execute("UPDATE messages SET status = 'approved' WHERE status = 'pending'")
@@ -170,6 +184,7 @@ def _question_to_dict(row: sqlite3.Row | dict) -> dict[str, Any]:
         "correct": int(d["correct"]),
         "scored": bool(d["scored"]),
         "position": d["position"],
+        "seconds": int(d["seconds"]) if d.get("seconds") else None,
         "created_at": d["created_at"],
     }
 
@@ -482,7 +497,8 @@ class EventStore:
     # не просит, а правка имени обновляет ту же запись.
 
     def quiz_add_question(
-        self, text: str, options: list[str], correct: int, scored: bool
+        self, text: str, options: list[str], correct: int, scored: bool,
+        seconds: int | None = None,
     ) -> dict:
         """Новый вопрос встаёт в конец очереди вопросов."""
         now = time.time()
@@ -491,10 +507,11 @@ class EventStore:
                 "SELECT COALESCE(MAX(position), 0) + 1 FROM quiz_questions"
             ).fetchone()[0]
             cur = conn.execute(
-                "INSERT INTO quiz_questions (text, options, correct, scored, position, created_at) "
-                "VALUES (?,?,?,?,?,?)",
+                "INSERT INTO quiz_questions "
+                "(text, options, correct, scored, position, seconds, created_at) "
+                "VALUES (?,?,?,?,?,?,?)",
                 (text, json.dumps(options, ensure_ascii=False),
-                 correct if scored else -1, 1 if scored else 0, nxt, now),
+                 correct if scored else -1, 1 if scored else 0, nxt, seconds, now),
             )
             row = conn.execute(
                 "SELECT * FROM quiz_questions WHERE id = ?", (cur.lastrowid,)
@@ -508,9 +525,15 @@ class EventStore:
         options: list[str] | None = None,
         correct: int | None = None,
         scored: bool | None = None,
+        seconds: Any = _UNSET,
     ) -> dict | None:
         """Правка вопроса. Ответы не трогаем: кто отвечал на прежнюю
-        редакцию — того ведущий оценивает сам (сбросом или принятием)."""
+        редакцию — того ведущий оценивает сам (сбросом или принятием).
+
+        seconds отдельный случай: NULL — законное «без таймера», поэтому
+        «не менять» отличается от «стереть» только пришёл параметр или нет
+        (_UNSET). Для text/options такой разницы нет: пустого текста или
+        пустого списка вариантов не бывает."""
         sets, params = [], []
         if text is not None:
             sets.append("text = ?")
@@ -524,6 +547,9 @@ class EventStore:
         if scored is not None:
             sets.append("scored = ?")
             params.append(1 if scored else 0)
+        if seconds is not _UNSET:
+            sets.append("seconds = ?")
+            params.append(seconds)
         if not sets:
             return self.quiz_get_question(question_id)
         params.append(question_id)
@@ -580,6 +606,28 @@ class EventStore:
                 [(float(pos), qid) for pos, qid in enumerate(ids, start=1)],
             )
         return True
+
+    def quiz_duplicate_question(self, question_id: int) -> dict | None:
+        """Копия вопроса сразу за оригиналом: копия получает position на
+        пол-шага больше соседнего — ряды и так упорядочены по REAL, а
+        пересобирать всю очередь из-за одной вставки не нужно."""
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM quiz_questions WHERE id = ?", (question_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            cur = conn.execute(
+                "INSERT INTO quiz_questions "
+                "(text, options, correct, scored, position, seconds, created_at) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (row["text"], row["options"], row["correct"], row["scored"],
+                 row["position"] + 0.5, row["seconds"], time.time()),
+            )
+            new = conn.execute(
+                "SELECT * FROM quiz_questions WHERE id = ?", (cur.lastrowid,)
+            ).fetchone()
+        return _question_to_dict(new)
 
     def quiz_answer(self, question_id: int, participant_id: int, option_index: int) -> None:
         """Записать или заменить ответ: до закрытия вопроса можно передумать."""

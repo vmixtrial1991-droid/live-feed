@@ -76,11 +76,25 @@ def call(method: str, url: str, fields: dict | None = None,
 
 COOKIES: dict[str, str] = {}   # гость №1 + ведущий: имена cookie разные
 GUEST2: dict[str, str] = {}    # второй зал — своя банка, свой билет
+GUEST3: dict[str, str] = {}    # третий зал: нужен для равных мест в таблице
 
 
 def config() -> dict:
     with open(CONFIG_PATH, encoding="utf-8") as f:
         return json.load(f)
+
+
+async def recv(ws, timeout: int = 4):
+    """Один кадр из канала: ждём недолго, чтобы проверка не висела вечно."""
+    return json.loads(await asyncio.wait_for(ws.recv(), timeout))
+
+
+async def next_quiz_frame(ws, timeout: int = 5) -> dict:
+    """Следующий кадр квиза для экрана, пропуская служебные сообщения ленты."""
+    while True:
+        msg = await recv(ws, timeout)
+        if msg.get("type") == "quiz":
+            return msg.get("quiz") or {}
 
 
 print("\n=== Страница и вход ===")
@@ -222,16 +236,27 @@ check("вопрос закрыт", h.get("phase") == "closed")
 _, quiz = call("GET", "/api/quiz")
 check("после закрытия видно распределение", quiz.get("counts") == [1, 1, 0],
       str(quiz.get("counts")))
-check("правильный показан только после закрытия", quiz.get("correct") == 1)
+check("на закрытии верного варианта ещё нет", quiz.get("correct") is None,
+      str(quiz.get("correct")))
 check("верный ответ принёс очко", quiz.get("my_score") == 1, str(quiz.get("my_score")))
 _, quiz2 = call("GET", "/api/quiz", jar=GUEST2)
 check("неверный ответа очка не дал", quiz2.get("my_score") == 0)
 st, _ = call("POST", "/api/quiz/answer", {"question_id": q1, "option": 2}, expect=409)
 check("после закрытия ответ не принимается", True)
 
+st, _ = call("POST", "/api/moderator/quiz/control", {"action": "reveal"})
+check("шаг «показать ответ» принимается после закрытия", st == 200)
+_, quiz = call("GET", "/api/quiz")
+check("верный вариант приезжает только на стадии reveal", quiz.get("correct") == 1,
+      str(quiz.get("correct")))
+st, _ = call("POST", "/api/moderator/quiz/control", {"action": "reveal"}, expect=400)
+check("второй раз показывать ответ не нужно", True)
+
 st, h = call("POST", "/api/moderator/quiz/control", {"action": "next"})
 check("следующий вопрос открыт (тот что ниже по списку)",
       h.get("phase") == "open" and h.get("current") == q2, str(h)[:120])
+st, _ = call("POST", "/api/moderator/quiz/control", {"action": "next"}, expect=400)
+check("перепрыгнуть вопрос, не закрыв приём, нельзя", True)
 call("POST", "/api/quiz/answer", {"question_id": q2, "option": 0}, jar=GUEST2)
 call("POST", "/api/quiz/answer", {"question_id": q2, "option": 0})
 st, h = call("POST", "/api/moderator/quiz/control", {"action": "close"})
@@ -240,6 +265,10 @@ check("хитрый вопрос: распределение есть, прав�
       quiz.get("counts") == [2, 0] and quiz.get("correct") is None,
       str({k: quiz.get(k) for k in ("counts", "correct")}))
 check("хитрый вопрос очков не даёт", quiz.get("my_score") == 1)
+call("POST", "/api/moderator/quiz/control", {"action": "reveal"})
+_, quiz = call("GET", "/api/quiz")
+check("на хитром вопросе верного нет даже на reveal",
+      quiz.get("correct") is None, str(quiz.get("correct")))
 
 print("\n=== Экран и стадии ===")
 st, h = call("POST", "/api/moderator/quiz/control", {"action": "board"})
@@ -275,8 +304,6 @@ check("ведущему QR квиза выдаётся по его сессии"
 if websockets is not None:
     async def ws_checks() -> None:
         cookie = "; ".join(f"{k}={v}" for k, v in COOKIES.items())
-        async def recv(ws, timeout=4):
-            return json.loads(await asyncio.wait_for(ws.recv(), timeout))
 
         async with websockets.connect(f"{WS}/ws/display?d={SCREEN_KEY}") as dws:
             init = await recv(dws)
@@ -345,6 +372,171 @@ st, h = call("POST", "/api/moderator/quiz/control", {"action": "board"})
 if st == 200:  # board при idle сервер допускает — экран просто показывает пустую
     check("board при idle не ломает игру", h.get("phase") == "board")
     call("POST", "/api/moderator/quiz/control", {"action": "stop"})
+
+print("\n=== Цепочка шагов, таймер, копия и места ===")
+call("POST", "/api/moderator/quiz/control", {"action": "stop"})
+
+st, r = call("POST", "/api/moderator/quiz/add", {
+    "text": "Первый с отсчётом", "options": '["а", "б"]',
+    "correct": "0", "scored": "1", "seconds": "30"})
+t1 = r.get("question", {}).get("id")
+check("вопрос с отсчётом добавлен",
+      st == 200 and r.get("question", {}).get("seconds") == 30, str(r)[:120])
+st, r = call("POST", "/api/moderator/quiz/add", {
+    "text": "Второй без отсчёта", "options": '["а", "б"]',
+    "correct": "1", "scored": "1"})
+t2 = r.get("question", {}).get("id")
+check("без поля времени отсчёта нет",
+      st == 200 and r.get("question", {}).get("seconds") is None, str(r)[:120])
+
+for bad in ("3", "900", "abc"):
+    st, _ = call("POST", "/api/moderator/quiz/add", {
+        "text": "Плохой отсчёт", "options": '["а", "б"]',
+        "correct": "0", "scored": "1", "seconds": bad}, expect=400)
+check("неподходящее время ответа отклонено", True)
+
+st, r = call("POST", "/api/moderator/quiz/update", {"question_id": t2, "seconds": "45"})
+check("отсчёт проставляется правкой", r["question"]["seconds"] == 45, str(r)[:120])
+st, r = call("POST", "/api/moderator/quiz/update", {"question_id": t2, "text": "Второй без отсчёта?"})
+check("правка без поля seconds отсчёт не трогает", r["question"]["seconds"] == 45)
+st, r = call("POST", "/api/moderator/quiz/update", {"question_id": t2, "seconds": ""})
+check("пустая строка для формы — поле не присылали, отсчёт цел",
+      r["question"]["seconds"] == 45, str(r["question"])[:120])
+st, r = call("POST", "/api/moderator/quiz/update", {"question_id": t2, "seconds": "0"})
+check("нуль убирает отсчёт", r["question"]["seconds"] is None, str(r["question"])[:120])
+
+st, r = call("POST", "/api/moderator/quiz/duplicate", {"question_id": t1})
+copy = r.get("question", {})
+t1c = copy.get("id")
+_, h = call("GET", "/api/moderator/quiz")
+ids = [q["id"] for q in h["questions"]]
+check("копия вопроса появилась", st == 200 and t1c is not None, str(r)[:120])
+check("копия встала сразу за оригиналом",
+      t1c in ids and ids.index(t1c) == ids.index(t1) + 1, str(ids))
+check("копия забрала текст, варианты, верный и отсчёт",
+      copy.get("text") == "Первый с отсчётом" and copy.get("options") == ["а", "б"]
+      and copy.get("correct") == 0 and copy.get("seconds") == 30, str(copy)[:160])
+st, _ = call("POST", "/api/moderator/quiz/duplicate", {"question_id": 999999}, expect=404)
+check("несуществующий вопрос не дублируется", True)
+
+st, h = call("POST", "/api/moderator/quiz/control", {"action": "open"})
+check("открыт первый вопрос цепочки",
+      h.get("phase") == "open" and h.get("current") == t1, str(h)[:120])
+check("ведущему виден остаток времени",
+      isinstance(h.get("time_left"), int) and h["time_left"] <= 30, str(h.get("time_left")))
+check("момент открытия лежит в конфиге", bool(config().get("quiz_opened_at")),
+      str(config().get("quiz_opened_at")))
+_, quiz = call("GET", "/api/quiz")
+check("телефону отсчёт не приезжает — зал не гонят",
+      "seconds_left" not in quiz and "seconds" not in (quiz.get("question") or {}),
+      str(quiz)[:160])
+
+call("POST", "/api/quiz/answer", {"question_id": t1, "option": 1})
+call("POST", "/api/quiz/answer", {"question_id": t1, "option": 0}, jar=GUEST2)
+_, h = call("GET", "/api/moderator/quiz")
+by_id = {q["id"]: q for q in h["questions"]}
+check("ведущий видит живые полосы по вариантам",
+      by_id[t1].get("tally") == [1, 1], str(by_id[t1].get("tally")))
+check("вопросу без ответов полосы не рисуют",
+      by_id[t2].get("tally") is None, str(by_id[t2].get("tally")))
+_, quiz = call("GET", "/api/quiz")
+check("залу распределение до закрытия приёма не показывается",
+      "counts" not in quiz, str(quiz)[:120])
+
+st, h = call("POST", "/api/moderator/quiz/control", {"action": "close"})
+check("шаг «закрыть приём»", h.get("phase") == "closed")
+_, quiz = call("GET", "/api/quiz")
+check("на закрытии зал видит полосы без верного варианта",
+      quiz.get("counts") == [1, 1] and quiz.get("correct") is None, str(quiz)[:160])
+
+st, h = call("POST", "/api/moderator/quiz/control", {"action": "reveal"})
+check("шаг «показать ответ»", h.get("phase") == "reveal")
+_, quiz = call("GET", "/api/quiz")
+check("на reveal зал видит верный вариант", quiz.get("correct") == 0, str(quiz)[:120])
+
+st, h = call("POST", "/api/moderator/quiz/control", {"action": "board"})
+check("обычный вывод лидеров — не финал", h.get("final") is False, str(h.get("final")))
+st, h = call("POST", "/api/moderator/quiz/control", {"action": "open", "question_id": t1})
+check("возврат к вопросу снимает таблицу с экрана", h.get("phase") == "open")
+
+st, _ = call("POST", "/api/join", {"name": "Вика", "invite": TOKEN}, jar=GUEST3)
+st, h = call("POST", "/api/moderator/quiz/control", {"action": "close"})
+st, h = call("POST", "/api/moderator/quiz/control", {"action": "next"})
+check("дальше ведёт к копии сразу за оригиналом",
+      h.get("phase") == "open" and h.get("current") == t1c, str(h)[:120])
+check("копия унаследовала отсчёт и он уже идёт",
+      isinstance(h.get("time_left"), int) and h["time_left"] <= 30, str(h.get("time_left")))
+call("POST", "/api/quiz/answer", {"question_id": t1c, "option": 0})
+call("POST", "/api/quiz/answer", {"question_id": t1c, "option": 1}, jar=GUEST3)
+st, h = call("POST", "/api/moderator/quiz/control", {"action": "close"})
+st, h = call("POST", "/api/moderator/quiz/control", {"action": "next"})
+check("копия тоже проходит по цепочке",
+      h.get("phase") == "open" and h.get("current") == t2, str(h)[:120])
+check("у вопроса без отсчёта времени в сводке нет", h.get("time_left") is None,
+      str(h.get("time_left")))
+
+_, h = call("GET", "/api/moderator/quiz")
+check("тот, кто не отвечал, в полосах не появляется",
+      {q["id"]: q for q in h["questions"]}[t2].get("answered") == 0)
+
+if websockets is not None:
+    async def chain_checks() -> None:
+        async with websockets.connect(f"{WS}/ws/display?d={SCREEN_KEY}") as dws:
+            frame = (await recv(dws)).get("quiz") or {}
+            check("экран получает кадр открытого вопроса без верного",
+                  frame.get("phase") == "open" and "correct" not in frame,
+                  str(frame)[:160])
+            call("POST", "/api/moderator/quiz/control", {"action": "close"})
+            frame = await next_quiz_frame(dws)
+            check("закрытый кадр: полосы есть, верного нет, отсчёта нет",
+                  frame.get("phase") == "closed" and frame.get("correct") is None
+                  and "seconds_left" not in frame, str(frame)[:180])
+            call("POST", "/api/moderator/quiz/control", {"action": "reveal"})
+            frame = await next_quiz_frame(dws)
+            check("reveal-кадр приносит верный вариант",
+                  frame.get("phase") == "reveal" and frame.get("correct") == 1,
+                  str(frame)[:180])
+
+    asyncio.run(chain_checks())
+else:
+    print("  OK   кадры экрана для цепочки (websockets не установлен — пропущено)")
+
+st, _ = call("POST", "/api/moderator/quiz/control", {"action": "close"}, expect=400)
+check("закрывать ещё раз нельзя", True)
+st, h = call("POST", "/api/moderator/quiz/control", {"action": "next"})
+check("после последнего вопроса экран сам уходит на финал",
+      h.get("phase") == "board" and h.get("final") is True and h.get("current") is None,
+      str(h)[:120])
+check("финал переживает перезапуск (лежит в конфиге)",
+      config().get("quiz_final") is True, str(config().get("quiz_final")))
+_, quiz = call("GET", "/api/quiz")
+check("зал тоже видит таблицу", quiz.get("phase") == "board" and bool(quiz.get("board")))
+ranks = [(row["name"], row["score"], row["rank"]) for row in h["board"]]
+tops = [r for r in ranks if r[1] == 1]
+check("равный счёт даёт равное первое место",
+      len(tops) == 2 and all(r[2] == 1 for r in tops), str(ranks))
+check("после равных лидеров место сразу третье",
+      any(r[1] == 0 and r[2] == 3 for r in ranks), str(ranks))
+
+if websockets is not None:
+    async def final_checks() -> None:
+        async with websockets.connect(f"{WS}/ws/display?d={SCREEN_KEY}") as dws:
+            frame = (await recv(dws)).get("quiz") or {}
+            check("экран получает именно финальную таблицу",
+                  frame.get("phase") == "board" and frame.get("final") is True
+                  and frame.get("board"), str(frame)[:160])
+
+    asyncio.run(final_checks())
+else:
+    print("  OK   финальный кадр экрана (websockets не установлен — пропущено)")
+
+st, h = call("POST", "/api/moderator/quiz/control", {"action": "board"})
+check("обычная кнопка лидеров снимает статус финала",
+      h.get("phase") == "board" and h.get("final") is False, str(h.get("final")))
+call("POST", "/api/moderator/quiz/control", {"action": "stop"})
+_, h = call("GET", "/api/moderator/quiz")
+check("завершение убирает финал и отсчёт из состояния",
+      h.get("final") is False and h.get("time_left") is None, str(h)[:120])
 
 print("\n=== Итог ===")
 if failures:

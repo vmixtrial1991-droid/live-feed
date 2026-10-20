@@ -1,6 +1,6 @@
-# Контрольные суммы комплекта развёртывания 4.1
+# Контрольные суммы комплекта развёртывания 4.1.1
 # Проверка после копирования на другую машину:
 #   python -c "import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" файл
 
-# ОТСУТСТВУЕТ: livefeed-4.1-images.tar.gz
-f01c62b1ae66161453ff2cd9a5573427062e42f7481cab8174b8c8f7ed804e5f  livefeed-4.1-source.tar.gz  (0.2 МБ)
+# ОТСУТСТВУЕТ: livefeed-4.1.1-images.tar.gz
+4230985bed547b44002cb00512a94f0570565bc468a94806f13e8f6a8e2d0b91  livefeed-4.1.1-source.tar.gz  (0.2 МБ)

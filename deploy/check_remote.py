@@ -269,7 +269,8 @@ async def main() -> None:
     st, _ = await asyncio.to_thread(anon.post, EV("/api/moderator/rotate-invite"), {})
     check("гость: кабинет закрыт", st in (403, 405), f"статус {st}")
     st, _ = await asyncio.to_thread(anon.post, EV("/api/messages"), {"body": "взлом"})
-    check("гость: отправка без регистрации отклонена", st == 401, f"статус {st}")
+    # 4.0 отвечала 401, ворота 4.1 отсекают раньше — 403 «нужен код приглашения».
+    check("гость: отправка без регистрации отклонена", st in (401, 403), f"статус {st}")
     try:
         async with websockets.connect(f"{WS_EV('/ws/moderator')}"):
             check("гость не попадает в /ws/moderator", False, "соединение открылось")

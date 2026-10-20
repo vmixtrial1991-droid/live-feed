@@ -547,6 +547,11 @@ connectWS(ev('/ws/moderator'), {
       case 'unauthorized':
         location.href = '/moderator/login';
         break;
+      case 'quiz_update':
+        // 5.0: ответы гостей и смены стадии квиза. Панель квиза сама
+        // знает, что перерисовать; ленту это не касается
+        window.quizPanel?.reload?.();
+        break;
       default:
         applyStateFrom(api(ev('/api/moderator/state')));
     }

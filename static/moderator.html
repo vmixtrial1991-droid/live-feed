@@ -30,11 +30,15 @@
 
 <main class="mod-main">
 
-  <!-- Вкладки 4.0: обычная лента и отдельная галерея слайдшоу -->
+  <!-- Вкладки 4.0: обычная лента и отдельная галерея слайдшоу.
+       5.0: третья вкладка — квиз на том же экране режимом. -->
   <div class="tabs" role="tablist">
     <button class="tab is-active" id="tabFeed" role="tab" aria-selected="true">Лента</button>
     <button class="tab" id="tabSlideshow" role="tab" aria-selected="false">
       Слайдшоу <span class="tab-badge" id="tabSlideshowCount">0</span>
+    </button>
+    <button class="tab" id="tabQuiz" role="tab" aria-selected="false">
+      Квиз <span class="tab-badge" id="tabQuizBadge" hidden>0</span>
     </button>
   </div>
 
@@ -212,6 +216,106 @@
 
   </div><!-- /pageSlideshow -->
 
+  <!-- ================= Вкладка «Квиз» (5.0) =================
+       Тот же экран, что и у ленты, только режим другой: лента встаёт,
+       пока ведущий ведёт игру. Вопросы готовятся здесь же. -->
+  <div class="tab-page" id="pageQuiz">
+
+    <section class="control-bar quiz-ctl-bar">
+      <div class="control-buttons">
+        <button class="btn ctl" id="quizOpenBtn" title="Показать первый или следующий вопрос">
+          <span class="ctl-glyph">▶</span><span class="ctl-label">Открыть вопрос</span>
+        </button>
+        <button class="btn ctl ctl-main" id="quizCloseBtn" title="Закрыть ответ и показать распределение">
+          <span class="ctl-glyph">✓</span><span class="ctl-label">Закрыть и показать</span>
+        </button>
+        <button class="btn ctl" id="quizNextBtn" title="Следующий вопрос по порядку">
+          <span class="ctl-glyph">›</span><span class="ctl-label">Следующий</span>
+        </button>
+      </div>
+
+      <div class="control-side">
+        <button class="btn ghost" id="quizBoardBtn" title="Таблица лидеров на экран">Лидеры на экран</button>
+        <button class="btn ghost" id="quizShowBtn" title="Вернуть экран к текущей стадии квиза">Квиз на экран</button>
+        <button class="btn ghost" id="quizFeedBtn" title="Убрать квиз с экрана; зал продолжает отвечать">Вернуть ленту</button>
+        <button class="btn ghost" id="quizResetBtn" title="Стереть все ответы и провести тот же набор заново">Сбросить ответы</button>
+        <button class="btn bad" id="quizStopBtn" title="Закончить игру; экран снова показывает ленту">Завершить</button>
+      </div>
+
+      <p class="muted quiz-state" id="quizPhaseText">Квиз не идёт.</p>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Вопросы</h2>
+        <p class="muted quiz-hint">
+          Порядок — сверху вниз: «Открыть вопрос» начинает с первого,
+          «Следующий» идёт по списку. «Без очков» — хитрый вопрос:
+          на экране только распределение мнений, никто не ошибается.
+        </p>
+      </div>
+      <div class="quiz-list" id="quizList"></div>
+      <div id="quizEmpty" class="empty small">
+        <p>Вопросов пока нет.</p>
+        <p class="muted">Добавьте первый — игра начнётся с него.</p>
+      </div>
+
+      <!-- Редактор вопроса: один и тот же для нового и для правки -->
+      <div class="quiz-editor" id="quizEditor" hidden>
+        <label class="field">
+          <span>Текст вопроса <b id="qTextCount">0</b>/200</span>
+          <textarea id="qText" rows="2" maxlength="200" spellcheck="false"
+                    placeholder="Например: какой год считается годом основания города?"></textarea>
+        </label>
+        <div class="quiz-opt-rows" id="qOptions"></div>
+        <div class="row-actions">
+          <button class="btn ghost small" id="qAddOption" type="button">+ вариант</button>
+          <label class="quiz-nopoints-row">
+            <input type="checkbox" id="qNoPoints">
+            без очков — только распределение ответов
+          </label>
+        </div>
+        <p class="muted small">Кружком отмечается правильный вариант — он подсветится на экране, когда закроете вопрос.</p>
+        <div class="row-actions">
+          <button class="btn" id="qSave" type="button">Сохранить вопрос</button>
+          <button class="btn ghost" id="qCancel" type="button">Отмена</button>
+          <span class="muted small" id="qStatus"></span>
+        </div>
+      </div>
+
+      <div class="row-actions">
+        <button class="btn" id="quizAddBtn">Добавить вопрос</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><h2>Лидеры</h2></div>
+      <div class="quiz-board" id="quizBoardHost"></div>
+      <p class="muted small" id="quizBoardHint">Очко даётся за верный ответ на зачётный вопрос; хитрые очки не дают.</p>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><h2>Ссылка и QR для квиза</h2></div>
+      <div class="qr-row">
+        <div class="qr-box qr-small"><img id="quizQrImg" alt="QR-код квиза" width="170" height="170"></div>
+        <div class="qr-side">
+          <p class="qr-link" id="quizLinkText"></p>
+          <div class="row-actions">
+            <button class="btn small" id="quizLinkCopy" type="button">Копировать ссылку</button>
+            <a class="btn ghost small" id="quizQrDownload" download="qr-quiz.svg">Скачать QR</a>
+            <a class="btn ghost small" id="quizLinkOpen" target="_blank" rel="noopener">Открыть квиз</a>
+          </div>
+          <p class="muted small">
+            Отдельный адрес и отдельный QR. Тот, кто уже отправлял в ленту,
+            попадёт в игру сам, без всякого входа; новый гость введёт тот же
+            код приглашения.
+          </p>
+        </div>
+      </div>
+    </section>
+
+  </div><!-- /pageQuiz -->
+
 
 <!-- Окно правки текста. Раньше стояли два системных prompt() подряд: сначала
      текст, потом имя автора. Во-первых, имя менять не нужно, во-вторых,
@@ -235,5 +339,6 @@
 <script src="/static/common.js"></script>
 <script src="/static/moderator.js"></script>
 <script src="/static/slideshow-panel.js"></script>
+<script src="/static/quiz-panel.js"></script>
 </body>
 </html>

@@ -127,6 +127,7 @@ async function openDetail(slug) {
     $('dMod').textContent = links.moderator;
     $('dScreen').textContent = links.screen;
     $('dFeed').textContent = links.feed;
+    $('dQuiz').textContent = links.quiz || '';
     $('dPass').textContent = password || 'не задан';
     $('dQr').src = `/api/admin/events/${encodeURIComponent(ev.slug)}/qr.svg`;
     $('eTitle').value = ev.title;
@@ -143,6 +144,7 @@ $('dClose').addEventListener('click', () => $('detail').close());
 for (const [id, key] of [
   ['dCopyJoin', 'join'], ['dCopyMod', 'moderator'],
   ['dCopyScreen', 'screen'], ['dCopyFeed', 'feed'],
+  ['dCopyQuiz', 'quiz'],
 ]) {
   $(id).addEventListener('click', async () => {
     const ok = await copy(current.links[key]);
@@ -153,6 +155,7 @@ for (const [id, key] of [
 $('dOpenMod').addEventListener('click', () => window.open(current.links.moderator, '_blank'));
 $('dOpenScreen').addEventListener('click', () => window.open(current.links.screen, '_blank'));
 $('dOpenFeed').addEventListener('click', () => window.open(current.links.feed, '_blank'));
+$('dOpenQuiz').addEventListener('click', () => window.open(current.links.quiz, '_blank'));
 
 $('dPrintQr').addEventListener('click', () => {
   const ev = current.event;

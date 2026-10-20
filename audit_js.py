@@ -47,7 +47,9 @@ PAGE_SCRIPTS: dict[str, list[str]] = {
     "feed.html": ["common.js", "feed.js"],
     "join.html": ["common.js"],
     "login.html": ["common.js"],
-    "moderator.html": ["common.js", "moderator.js", "slideshow-panel.js"],
+    "moderator.html": ["common.js", "moderator.js", "slideshow-panel.js",
+                       "quiz-panel.js"],
+    "quiz.html": ["common.js", "quiz.js"],
     "screen.html": ["common.js", "screen.js"],
     "send.html": ["common.js", "send.js"],
 }

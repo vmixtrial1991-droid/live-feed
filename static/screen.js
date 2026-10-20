@@ -20,6 +20,16 @@ const splashTitle = document.getElementById('splashTitle');
 const splashSubtitle = document.getElementById('splashSubtitle');
 let splashUrl = null;   // загруженная картинка; null — покажем название события
 
+// 5.0: слой квиза. Сервер присылает готовую картинку стадии (вопрос,
+// распределение, лидеры) — у экрана собственного мнения нет, и правильный
+// ответ он узнаёт только когда ведущий закроет вопрос
+const quizScreen = document.getElementById('quizScreen');
+const quizTag = document.getElementById('quizTag');
+const quizQText = document.getElementById('quizQText');
+const quizFree = document.getElementById('quizFree');
+const quizOpts = document.getElementById('quizOpts');
+const quizCount = document.getElementById('quizCount');
+
 /* Названия события и номера слайдов на экране нет: проектор показывает
    только сами сообщения, без служебной подписи внизу. */
 /* 4.1: ключ экрана. Сервер отдал его в window.LF.screenKey (он же был в
@@ -96,6 +106,67 @@ api(ev('/api/moderator/state')).then(() => { modCookie = true; }).catch(() => { 
 function setQrVisible(visible) {
   qrWindow.hidden = !visible;
   if (visible) wake();
+}
+
+/* ---------------- Квиз (5.0) ---------------- */
+let quizFrame = null;   // последний кадр игры от сервера; null — лента
+
+function renderQuiz() {
+  const f = quizFrame;
+  if (!f) { quizScreen.hidden = true; return; }
+
+  if (f.phase === 'board') {
+    quizScreen.hidden = false;
+    quizTag.textContent = 'Квиз';
+    quizQText.textContent = 'Таблица лидеров';
+    quizFree.hidden = true;
+    const medals = ['🥇', '🥈', '🥉'];
+    const rows = (f.board || []).slice(0, 12);
+    quizOpts.replaceChildren(...rows.map((r, i) => {
+      const el = document.createElement('div');
+      el.className = 'quiz-s-row';
+      el.innerHTML = `<span class="quiz-s-pos">${medals[i] || i + 1}</span>
+        <span class="quiz-s-name">${escapeHTML(r.name)}</span>
+        <span class="quiz-s-score">${r.score}</span>`;
+      return el;
+    }));
+    if (!rows.length)
+      quizOpts.innerHTML = '<p class="quiz-s-note">Пока никто не отвечал на зачётные вопросы.</p>';
+    quizCount.textContent = f.scored_total ? `Зачётных вопросов в игре: ${f.scored_total}` : '';
+    return;
+  }
+
+  const q = f.question;
+  if (!q) { quizScreen.hidden = true; return; }   // фаза есть, вопроса нет — ждём
+  quizScreen.hidden = false;
+  quizTag.textContent = f.questions_total
+    ? `Вопрос ${f.question_no} из ${f.questions_total}` : `Вопрос ${f.question_no}`;
+  quizQText.textContent = q.text;
+  quizFree.hidden = !!q.scored;
+
+  if (f.phase === 'open') {
+    quizOpts.replaceChildren(...q.options.map((text) => {
+      const el = document.createElement('div');
+      el.className = 'quiz-s-opt';
+      el.textContent = text;
+      return el;
+    }));
+    quizCount.textContent = f.answered_total
+      ? `Уже ответили: ${f.answered_total}` : 'Ждём ответы зала…';
+  } else {
+    const counts = f.counts || q.options.map(() => 0);
+    const total = counts.reduce((a, b) => a + b, 0) || 1;
+    quizOpts.replaceChildren(...q.options.map((text, i) => {
+      const share = Math.round((counts[i] / total) * 100);
+      const el = document.createElement('div');
+      el.className = 'quiz-s-opt is-bar' + (f.correct === i ? ' is-right' : '');
+      el.innerHTML = `<span class="quiz-s-fill" style="width:${share}%"></span>
+        <span class="quiz-s-text">${escapeHTML(text)}${f.correct === i ? ' ✓' : ''}</span>
+        <span class="quiz-s-num">${counts[i]} · ${share}%</span>`;
+      return el;
+    }));
+    quizCount.textContent = `Ответили: ${f.answered_total ?? total}`;
+  }
 }
 
 const messages = new Map();   // id -> сообщение ленты
@@ -491,6 +562,10 @@ connectWS(withKey(ev('/ws/display')), {
         order = byPosition([...messages.keys()]);
         screenState = msg.screen || screenState;
         shownKey = null;
+        // 5.0: экран, открытый посреди игры (F5, второй проектор), получает
+        // текущую стадию прямо в init — без «покажи заново» у ведущего
+        quizFrame = msg.quiz || null;
+        renderQuiz();
         showCurrent(); preloadNext(); saveSnapshot();
         break;
 
@@ -517,6 +592,13 @@ connectWS(withKey(ev('/ws/display')), {
         showCurrent(); preloadNext(); saveSnapshot();
         break;
       }
+
+      case 'quiz':
+        // 5.0: кадр игры (смена стадии, новый вопрос, ответы зала).
+        // Лента под слоем продолжает стоять — сервер её и так приостановил
+        quizFrame = msg.quiz || null;
+        renderQuiz();
+        break;
 
       case 'screen':
         // заставку ведущий мог сменить или убрать, пока экран был открыт

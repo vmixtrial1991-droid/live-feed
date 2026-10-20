@@ -26,20 +26,31 @@ const archiveStatus = document.getElementById('archiveStatus');
 const slideInterval = document.getElementById('slideshowInterval');
 const slideIntervalVal = document.getElementById('slideshowIntervalVal');
 
-/* ---------------- Вкладки ---------------- */
+/* ---------------- Вкладки ----------------
+   5.0: вкладок стало три — лента, слайдшоу и квиз. Таблица вкладок
+   собрана списком, чтобы добавление четвёртой не требовало править
+   переключатель. */
+const TABS = [
+  ['feed', tabFeed, pageFeed],
+  ['slideshow', tabSlideshow, pageSlideshow],
+  ['quiz', document.getElementById('tabQuiz'), document.getElementById('pageQuiz')],
+];
+
 function switchTab(which) {
-  const feed = which !== 'slideshow';
-  tabFeed.classList.toggle('is-active', feed);
-  tabSlideshow.classList.toggle('is-active', !feed);
-  tabFeed.setAttribute('aria-selected', String(feed));
-  tabSlideshow.setAttribute('aria-selected', String(!feed));
-  pageFeed.classList.toggle('is-active', feed);
-  pageSlideshow.classList.toggle('is-active', !feed);
-  if (!feed) loadArchive();
+  for (const [name, tab, page] of TABS) {
+    if (!tab || !page) continue;   // вкладку могли и не нарисовать
+    const on = name === which;
+    tab.classList.toggle('is-active', on);
+    tab.setAttribute('aria-selected', String(on));
+    page.classList.toggle('is-active', on);
+  }
+  if (which === 'slideshow') loadArchive();
+  if (which === 'quiz') window.quizPanel?.reload?.();
 }
 
 tabFeed.addEventListener('click', () => switchTab('feed'));
 tabSlideshow.addEventListener('click', () => switchTab('slideshow'));
+document.getElementById('tabQuiz').addEventListener('click', () => switchTab('quiz'));
 
 /* ---------------- Галерея ---------------- */
 function inSlideshow() {

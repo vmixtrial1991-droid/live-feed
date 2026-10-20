@@ -50,6 +50,19 @@
   </div>
 </div>
 
+<!-- Квиз (5.0): тот же экран, только режим игры. Лента на это время
+     встаёт. Слой лежит выше заставки и QR: если ведущий открыл вопрос,
+     его должно быть видно при любом фоне. -->
+<div class="quiz-screen" id="quizScreen" hidden>
+  <div class="quiz-screen-inner">
+    <p class="quiz-tag" id="quizTag"></p>
+    <h1 class="quiz-q" id="quizQText"></h1>
+    <p class="quiz-free" id="quizFree" hidden>Вопрос без очков — здесь важно, как думает зал</p>
+    <div class="quiz-opts" id="quizOpts"></div>
+    <p class="quiz-count" id="quizCount"></p>
+  </div>
+</div>
+
 <script src="/static/common.js"></script>
 <script src="/static/screen.js"></script>
 </body>

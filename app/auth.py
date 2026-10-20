@@ -347,8 +347,11 @@ def _is_auth_path(path: str) -> bool:
     """Страницы и запросы, ответы на которые нельзя кешировать."""
     if path == "/admin" or path.startswith("/admin/") or path.startswith("/api/admin"):
         return True
-    # кабинеты ведущих: /e/<адрес>/moderator и /e/<адрес>/api/moderator/...
-    return "/moderator" in path
+    if "/moderator" in path:
+        return True
+    # 5.0: квиз меняется от вопроса к вопросу; закешированный кадр означает
+    # закрытый вопрос, который ведущий уже открыл, или чужие ответы
+    return "/quiz" in path
 
 
 class NoStoreForAuthMiddleware:

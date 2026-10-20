@@ -22,12 +22,16 @@ TICK_INTERVAL = 0.4
 
 
 class Hub:
-    """Рассылает события подписчикам трёх каналов одного события."""
+    """Рассылает события подписчикам четырёх каналов одного события."""
 
     def __init__(self) -> None:
         self.display: set[WebSocket] = set()      # витрина и полный экран
         self.moderator: set[WebSocket] = set()    # кабинет модератора
         self.participants: dict[str, set[WebSocket]] = {}  # токен -> сокеты
+        # 5.0: зал, открывший страницу квиза. Билет участника тот же, что у
+        # ленты, но канал отдельный: квиз меняется часто, а лента при этом
+        # не обязана дёргать каждый телефон в зале.
+        self.quiz: set[WebSocket] = set()
 
     # --- подписка -------------------------------------------------------
     def add_display(self, ws: WebSocket) -> None:
@@ -39,9 +43,13 @@ class Hub:
     def add_participant(self, ws: WebSocket, token: str) -> None:
         self.participants.setdefault(token, set()).add(ws)
 
+    def add_quiz(self, ws: WebSocket) -> None:
+        self.quiz.add(ws)
+
     def remove(self, ws: WebSocket) -> None:
         self.display.discard(ws)
         self.moderator.discard(ws)
+        self.quiz.discard(ws)
         # список копируем: чистка одного сокета меняет сам словарь
         for token, socks in list(self.participants.items()):
             socks.discard(ws)
@@ -49,7 +57,7 @@ class Hub:
                 self.participants.pop(token, None)
 
     def all_sockets(self) -> set[WebSocket]:
-        out = set(self.display) | set(self.moderator)
+        out = set(self.display) | set(self.moderator) | set(self.quiz)
         for socks in self.participants.values():
             out |= socks
         return out
@@ -63,6 +71,7 @@ class Hub:
         self.display.clear()
         self.moderator.clear()
         self.participants.clear()
+        self.quiz.clear()
 
     # --- рассылка -------------------------------------------------------
     @staticmethod
@@ -83,6 +92,10 @@ class Hub:
     async def to_participant(self, token: str, payload: dict[str, Any]) -> None:
         await self._send_many(self.participants.get(token, ()), payload)
 
+    async def to_quiz(self, payload: dict[str, Any]) -> None:
+        """Рассылка по страницам квиза (5.0)."""
+        await self._send_many(self.quiz, payload)
+
     async def broadcast_all(self, payload: dict[str, Any]) -> None:
         await self._send_many(set(self.display) | set(self.moderator), payload)
 
@@ -92,6 +105,7 @@ class Hub:
             "display": len(self.display),
             "moderator": len(self.moderator),
             "participants": sum(len(v) for v in self.participants.values()),
+            "quiz": len(self.quiz),
         }
 
 
@@ -125,6 +139,13 @@ class ScreenController:
         # всегда включает показ: кнопка «запустить» и означает «показать
         # сейчас», а не «восстановить то, что я остановил вчера».
         self.slideshow_playing = True
+        # 5.0: квиз на экране. Режим тот же, что у заставки и QR: лента
+        # на это время встаёт. Фаза живёт на сервере, поэтому каждый
+        # подключившийся экран видит ту же стадию квиза, что и остальные:
+        # idle | open | closed | board.
+        self.quiz_visible = False
+        self.quiz_phase = "idle"
+        self.quiz_question: int | None = None
 
     # У обычной ленты и у слайдшоу свои часы: переключение режима не должно
     # начинать отсчёт заново у того, что сейчас не показывается.
@@ -265,6 +286,9 @@ class ScreenController:
         """Пора ли переключать слайд. Проверка без блокировки — только чтение."""
         if not self.running or self.qr_visible or self.splash_visible:
             return False
+        # 5.0: квиз на экране — лента стоит, пока ведущий его не выключил
+        if self.quiz_visible:
+            return False
         if self._active_len <= 1:
             return False
         return time.monotonic() >= self._due_at()
@@ -276,6 +300,8 @@ class ScreenController:
         async with self._lock:
             # пока ждали блокировку, время могло ещё не наступить
             if not self.running or self.qr_visible or self.splash_visible:
+                return False
+            if self.quiz_visible:
                 return False
             if self._active_len <= 1 or time.monotonic() < self._due_at():
                 return False
@@ -309,6 +335,10 @@ class ScreenController:
                 if self.slideshow_items else 0
             ),
             "active_id": self.active_id,
+            # 5.0: квиз. Экран по этим полям понимает, что сейчас рисовать
+            "quiz_visible": self.quiz_visible,
+            "quiz_phase": self.quiz_phase,
+            "quiz_question": self.quiz_question,
         }
 
 

@@ -347,3 +347,53 @@
 .modal-count b { color: var(--text); }
 .modal-count.is-full b { color: var(--warn); }
 .modal-actions { display: flex; gap: .5rem; justify-content: flex-end; }
+
+/* ---------------- Квиз (5.0) ---------------- */
+.quiz-ctl-bar { align-items: flex-start; }
+.quiz-state { margin: 0; font-size: .88rem; flex: 1; min-width: 180px; }
+
+.quiz-list { display: flex; flex-direction: column; gap: .5rem; }
+.quiz-row {
+  border: 1px solid var(--line); border-radius: 12px;
+  background: var(--bg-soft); padding: .6rem .8rem;
+}
+.quiz-row.is-current { border-color: var(--accent); }
+.quiz-row-top { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.quiz-pos { color: var(--muted); font-weight: 700; min-width: 1.4em; text-align: center; }
+.quiz-qtext { flex: 1; min-width: 200px; }
+.quiz-answered { color: var(--muted); font-size: .82rem; white-space: nowrap; }
+
+.quiz-chips { display: flex; gap: .4rem; flex-wrap: wrap; margin-top: .45rem; }
+.quiz-chip {
+  font-size: .8rem; border: 1px solid var(--line); border-radius: 999px;
+  padding: .15rem .6rem; background: rgba(255, 255, 255, .04);
+}
+.quiz-chip.is-right { border-color: var(--ok); color: var(--ok); }
+.quiz-chip-free { color: var(--warn); border-color: rgba(255, 182, 72, .45); }
+
+/* редактор вопроса: тот же для нового и для правки */
+.quiz-editor {
+  margin-top: 1rem; padding: .9rem;
+  border: 1px dashed var(--accent); border-radius: 12px;
+  display: flex; flex-direction: column; gap: .8rem;
+}
+.quiz-opt-rows { display: flex; flex-direction: column; gap: .45rem; }
+.quiz-opt-row { display: flex; align-items: center; gap: .5rem; }
+.quiz-opt-row input[type="radio"] { accent-color: var(--ok); width: 1.15rem; height: 1.15rem; flex: none; }
+.q-opt-input { flex: 1; }
+.quiz-nopoints-row {
+  display: flex; align-items: center; gap: .4rem;
+  color: var(--muted); font-size: .88rem; cursor: pointer;
+}
+#qNoPoints { accent-color: var(--accent); width: 1.05rem; height: 1.05rem; }
+
+/* таблица лидеров в панели ведущей (телефон ведущего) */
+.quiz-board { display: flex; flex-direction: column; gap: .4rem; }
+.quiz-board-row {
+  display: flex; align-items: center; gap: .7rem;
+  padding: .55rem .8rem; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--bg-soft);
+}
+.qb-pos { width: 2rem; text-align: center; color: var(--muted); font-weight: 700; }
+.qb-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qb-score { font-weight: 800; color: var(--ok); }

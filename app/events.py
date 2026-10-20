@@ -196,6 +196,18 @@ class Event:
     def invite_link(self, base_url: str) -> str:
         return join_link(base_url, self.slug, str(self.get("invite_token", "")))
 
+    def quiz_link(self, base_url: str) -> str:
+        """Ссылка квиза (5.0): отдельный адрес и отдельный QR.
+
+        Код приглашения тот же: гость, который уже отмечался в ленте,
+        попадёт на квиз по своему билету, а новый — введёт код с этой же
+        ссылки. Отдельного кода для квиза нет: зачем два, если один вечер.
+        """
+        return (
+            f"{(base_url or '').rstrip('/')}/e/{self.slug}/quiz"
+            f"?t={self.get('invite_token', '')}"
+        )
+
     def links(self, base_url: str) -> dict[str, str]:
         """Три ссылки, которые админ отдаёт организатору события.
 
@@ -209,6 +221,8 @@ class Event:
             "screen": f"{base}/e/{self.slug}/screen?d={self.screen_key}",
             "moderator": f"{base}/e/{self.slug}/moderator",
             "feed": self.invite_link(base),
+            # 5.0: квиз — своя ссылка и свой QR для зрителей
+            "quiz": self.quiz_link(base),
         }
 
     def summary(self, base_url: str = "") -> dict[str, Any]:

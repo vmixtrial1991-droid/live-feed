@@ -1,0 +1,170 @@
+/* Квиз (5.0) — страница гостя. Телефон в зале: крупные кнопки, ничего
+   не надо искать, ответ одним пальцем. */
+
+.quiz-page {
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100dvh;
+  margin: 0;
+}
+
+.quiz-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: .9rem 1.1rem;
+  border-bottom: 1px solid var(--line);
+}
+.quiz-top h1 { font-size: 1.05rem; margin: 0; }
+.quiz-top .muted { margin: 0; font-size: .82rem; }
+
+.quiz-main {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 1rem 1.1rem 3rem;
+}
+
+/* --- кто я --- */
+.quiz-you {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .5rem;
+  color: var(--muted);
+  font-size: .92rem;
+}
+.quiz-you b { color: var(--text); font-size: 1.05rem; }
+.quiz-score {
+  margin-left: auto;
+  color: var(--ok);
+  font-weight: 700;
+}
+
+.quiz-rename {
+  display: flex;
+  gap: .5rem;
+  margin-top: .6rem;
+}
+.quiz-rename input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--text);
+  padding: .6rem .8rem;
+  font: inherit;
+}
+
+/* --- ожидание --- */
+.quiz-wait { text-align: center; padding: 3rem 1rem; }
+.quiz-wait .big { font-size: 1.3rem; font-weight: 700; }
+
+/* --- вопрос --- */
+.quiz-qn {
+  color: var(--muted);
+  font-size: .85rem;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  margin: 1.2rem 0 .3rem;
+}
+.quiz-question {
+  font-size: 1.35rem;
+  line-height: 1.35;
+  margin: 0 0 .4rem;
+}
+.quiz-nopoints {
+  color: var(--warn);
+  font-size: .85rem;
+  margin: 0 0 .6rem;
+}
+
+.quiz-options {
+  display: flex;
+  flex-direction: column;
+  gap: .6rem;
+  margin-top: 1rem;
+}
+
+.quiz-option {
+  font: inherit;
+  text-align: left;
+  padding: .95rem 1.1rem;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--text);
+  cursor: pointer;
+  min-height: 52px;
+  transition: border-color .15s, background .15s;
+}
+.quiz-option:active { transform: scale(.99); }
+.quiz-option.is-picked {
+  border-color: var(--accent);
+  background: rgba(91, 140, 255, .16);
+  font-weight: 600;
+}
+
+/* --- распределение ответов --- */
+.quiz-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .8rem 1rem;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  overflow: hidden;
+  min-height: 48px;
+}
+.quiz-bar-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: rgba(91, 140, 255, .18);
+}
+.quiz-bar.is-right { border-color: var(--ok); }
+.quiz-bar.is-right .quiz-bar-fill { background: rgba(51, 201, 138, .22); }
+.quiz-bar.is-mine::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 2px dashed var(--accent);
+  border-radius: 14px;
+  pointer-events: none;
+}
+.qo-text { position: relative; flex: 1; }
+.qo-num { position: relative; color: var(--muted); font-size: .85rem; white-space: nowrap; }
+.qo-mark { position: relative; font-weight: 800; }
+.qo-right { color: var(--ok); }
+.qo-wrong { color: var(--bad); }
+
+.quiz-hint {
+  color: var(--muted);
+  font-size: .9rem;
+  margin-top: .9rem;
+}
+
+/* --- таблица лидеров --- */
+.quiz-board-title { font-size: 1.3rem; margin: 1.4rem 0 .8rem; }
+.quiz-board {
+  display: flex;
+  flex-direction: column;
+  gap: .45rem;
+}
+.quiz-board-row {
+  display: flex;
+  align-items: center;
+  gap: .7rem;
+  padding: .7rem .9rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+}
+.quiz-board-row.is-mine { border-color: var(--accent); }
+.qb-pos { width: 2rem; text-align: center; font-weight: 700; color: var(--muted); }
+.qb-name { flex: 1; }
+.qb-score { font-weight: 800; color: var(--ok); }
+
+#boardMe { margin-top: .8rem; }

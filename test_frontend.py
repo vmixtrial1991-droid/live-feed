@@ -634,6 +634,48 @@ check("screen.js: обычная лента не поехала после сл�
       screen_js.count("showCurrent") >= 3,
       "showCurrent зовётся при init, refresh и screen")
 
+# ---------------- Квиз (5.0) ----------------
+quiz_html = (STATIC / "quiz.html").read_text(encoding="utf-8")
+quiz_js = (STATIC / "quiz.js").read_text(encoding="utf-8")
+quiz_panel_js = (STATIC / "quiz-panel.js").read_text(encoding="utf-8")
+check("quiz.html: игра спрятана до входа", 'id="gameBox" hidden' in quiz_html)
+check("quiz.html: вход по тому же коду приглашения", 'id="codeInput"' in quiz_html)
+check("quiz.html: имя можно поменять", 'id="renameBtn"' in quiz_html)
+check("quiz.js: состояние тянется из /api/quiz, канал — /ws/quiz",
+      "ev('/api/quiz')" in quiz_js and "ev('/ws/quiz')" in quiz_js)
+check("quiz.js: код из QR-ссылки (?t=) подставляется", "params.get('t')" in quiz_js)
+check("quiz.js: ответ можно поменять до закрытия", "можно поменять" in quiz_js)
+check("quiz.js: чужих ответов не показывает — только свои и распределение",
+      "data.my_answer" in quiz_js and "counts" in quiz_js)
+check("quiz-panel.js: ведущий управляет всеми стадиями",
+      all(a in quiz_panel_js for a in
+          ("'open'", "'close'", "'next'", "'board'", "'feed'", "'show'", "'stop'")))
+check("quiz-panel.js: QR квиза запрашивается с kind=quiz", "kind=quiz" in quiz_panel_js)
+check("quiz-panel.js: панель перезаряжается по сигналу из общего канала",
+      "window.quizPanel" in quiz_panel_js)
+check("moderator.html: вкладка «Квиз» есть", 'id="tabQuiz"' in mod_html)
+check("moderator.html: страница вкладки «Квиз» есть", 'id="pageQuiz"' in mod_html)
+check("moderator.html: скрипт квиза подключён", 'src="/static/quiz-panel.js"' in mod_html)
+check("moderator.js: панель получает сигнал quiz_update", "case 'quiz_update'" in mod_js2)
+check("slideshow-panel.js: переключатель вкладок знает про третью",
+      "tabQuiz" in slide_js and "'quiz'" in slide_js)
+check("screen.html: слой квиза есть", 'id="quizScreen"' in screen_html)
+check("screen.js: экран рисует кадр игры и берёт его из init",
+      "case 'quiz'" in screen_js and "msg.quiz" in screen_js)
+screen_css = (STATIC / "screen.css").read_text(encoding="utf-8")
+check("screen.css: слой квиза выше заставки (z-index > 20)",
+      re.search(r"\.quiz-screen\s*\{[^}]*z-index:\s*(2[5-9]|[3-9]\d)", screen_css, re.S) is not None)
+check("admin.html: строка ссылки на квиз есть", 'id="dQuiz"' in
+      (STATIC / "admin.html").read_text(encoding="utf-8"))
+check("admin.js: ссылку квиза можно скопировать",
+      "['dCopyQuiz', 'quiz']" in (STATIC / "admin.js").read_text(encoding="utf-8"))
+paren, brace = balance_outside_strings(quiz_js)
+check("quiz.js: скобки сходятся", paren == 0 and brace == 0,
+      f"лишних ( {paren}, {{ {brace}" if (paren or brace) else "")
+paren, brace = balance_outside_strings(quiz_panel_js)
+check("quiz-panel.js: скобки сходятся", paren == 0 and brace == 0,
+      f"лишних ( {paren}, {{ {brace}" if (paren or brace) else "")
+
 print("\n=== Итог ===")
 if FAILURES:
     print(f"Провалено проверок: {len(FAILURES)}")

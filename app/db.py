@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import time
 from contextlib import contextmanager
@@ -65,6 +66,30 @@ CREATE TABLE IF NOT EXISTS gallery (
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_gallery_image ON gallery(image);
 CREATE INDEX IF NOT EXISTS idx_gallery_position ON gallery(position);
+
+-- 5.0: квиз. Вопросы живут вместе с событием, ответы — привязаны к
+-- вопросу и к участнику (тот же участник, что пишет в ленту: один гость —
+-- одна запись, поэтому квиз узнаёт того, кто уже что-то отправлял).
+-- options — JSON-список вариантов; correct — индекс правильного, -1 у
+-- «хитрых» вопросов (scored=0): по ним показываем распределение, очков нет.
+-- ON DELETE CASCADE: удалил вопрос — ответы уходят следом, хвостов нет.
+CREATE TABLE IF NOT EXISTS quiz_questions (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    text       TEXT NOT NULL,
+    options    TEXT NOT NULL,
+    correct    INTEGER NOT NULL DEFAULT -1,
+    scored     INTEGER NOT NULL DEFAULT 1,
+    position   REAL NOT NULL DEFAULT 0,
+    created_at REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS quiz_answers (
+    question_id    INTEGER NOT NULL REFERENCES quiz_questions(id) ON DELETE CASCADE,
+    participant_id INTEGER NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
+    option_index   INTEGER NOT NULL,
+    answered_at    REAL NOT NULL,
+    PRIMARY KEY (question_id, participant_id)
+);
 """
 
 
@@ -125,6 +150,26 @@ def message_to_dict(row: sqlite3.Row | dict) -> dict[str, Any]:
         "status": d["status"],
         "position": d["position"],
         "shown_at": d.get("shown_at"),
+        "created_at": d["created_at"],
+    }
+
+
+def _question_to_dict(row: sqlite3.Row | dict) -> dict[str, Any]:
+    """Строка вопроса: options из JSON обратно в список."""
+    d = dict(row)
+    try:
+        options = json.loads(d["options"])
+    except (TypeError, ValueError):
+        options = []
+    if not isinstance(options, list):
+        options = []
+    return {
+        "id": d["id"],
+        "text": d["text"],
+        "options": [str(o) for o in options],
+        "correct": int(d["correct"]),
+        "scored": bool(d["scored"]),
+        "position": d["position"],
         "created_at": d["created_at"],
     }
 
@@ -430,6 +475,204 @@ class EventStore:
                 "SELECT DISTINCT image FROM messages WHERE image IS NOT NULL"
             ).fetchall()
         return [r["image"] for r in rows]
+
+    # --- квиз (5.0) ------------------------------------------------------
+    # Один гость — одна запись участника: тот же, что пишет в ленту. Поэтому
+    # квиз «узнаёт» человека, который уже что-то отправлял: повторного входа
+    # не просит, а правка имени обновляет ту же запись.
+
+    def quiz_add_question(
+        self, text: str, options: list[str], correct: int, scored: bool
+    ) -> dict:
+        """Новый вопрос встаёт в конец очереди вопросов."""
+        now = time.time()
+        with self.connect() as conn:
+            nxt = conn.execute(
+                "SELECT COALESCE(MAX(position), 0) + 1 FROM quiz_questions"
+            ).fetchone()[0]
+            cur = conn.execute(
+                "INSERT INTO quiz_questions (text, options, correct, scored, position, created_at) "
+                "VALUES (?,?,?,?,?,?)",
+                (text, json.dumps(options, ensure_ascii=False),
+                 correct if scored else -1, 1 if scored else 0, nxt, now),
+            )
+            row = conn.execute(
+                "SELECT * FROM quiz_questions WHERE id = ?", (cur.lastrowid,)
+            ).fetchone()
+        return _question_to_dict(row)
+
+    def quiz_update_question(
+        self,
+        question_id: int,
+        text: str | None = None,
+        options: list[str] | None = None,
+        correct: int | None = None,
+        scored: bool | None = None,
+    ) -> dict | None:
+        """Правка вопроса. Ответы не трогаем: кто отвечал на прежнюю
+        редакцию — того ведущий оценивает сам (сбросом или принятием)."""
+        sets, params = [], []
+        if text is not None:
+            sets.append("text = ?")
+            params.append(text)
+        if options is not None:
+            sets.append("options = ?")
+            params.append(json.dumps(options, ensure_ascii=False))
+        if correct is not None:
+            sets.append("correct = ?")
+            params.append(correct)
+        if scored is not None:
+            sets.append("scored = ?")
+            params.append(1 if scored else 0)
+        if not sets:
+            return self.quiz_get_question(question_id)
+        params.append(question_id)
+        with self.connect() as conn:
+            conn.execute(
+                f"UPDATE quiz_questions SET {', '.join(sets)} WHERE id = ?", params
+            )
+        return self.quiz_get_question(question_id)
+
+    def quiz_get_question(self, question_id: int) -> dict | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM quiz_questions WHERE id = ?", (question_id,)
+            ).fetchone()
+        return _question_to_dict(row) if row else None
+
+    def quiz_list_questions(self) -> list[dict]:
+        """Все вопросы в порядке проведения."""
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM quiz_questions ORDER BY position ASC, id ASC"
+            ).fetchall()
+        return [_question_to_dict(r) for r in rows]
+
+    def quiz_delete_question(self, question_id: int) -> bool:
+        """Удалить вопрос; ответы уходят каскадом вместе с ним."""
+        with self.connect() as conn:
+            cur = conn.execute("DELETE FROM quiz_questions WHERE id = ?", (question_id,))
+            return bool(cur.rowcount)
+
+    def quiz_move_question(self, question_id: int, direction: str) -> bool:
+        """Порядок вопросов: up | down | first | last — как в очереди ленты."""
+        with self.connect() as conn:
+            ids = [
+                r["id"]
+                for r in conn.execute(
+                    "SELECT id FROM quiz_questions ORDER BY position ASC, id ASC"
+                )
+            ]
+            if question_id not in ids:
+                return False
+            i = ids.index(question_id)
+            target = {
+                "up": max(0, i - 1),
+                "down": min(len(ids) - 1, i + 1),
+                "first": 0,
+                "last": len(ids) - 1,
+            }.get(direction)
+            if target is None or target == i:
+                return False
+            ids.insert(target, ids.pop(i))
+            conn.executemany(
+                "UPDATE quiz_questions SET position = ? WHERE id = ?",
+                [(float(pos), qid) for pos, qid in enumerate(ids, start=1)],
+            )
+        return True
+
+    def quiz_answer(self, question_id: int, participant_id: int, option_index: int) -> None:
+        """Записать или заменить ответ: до закрытия вопроса можно передумать."""
+        with self.connect() as conn:
+            conn.execute(
+                "INSERT INTO quiz_answers (question_id, participant_id, option_index, answered_at) "
+                "VALUES (?,?,?,?) "
+                "ON CONFLICT(question_id, participant_id) DO UPDATE SET "
+                "option_index = excluded.option_index, answered_at = excluded.answered_at",
+                (question_id, participant_id, option_index, time.time()),
+            )
+
+    def quiz_get_answer(self, question_id: int, participant_id: int) -> int | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT option_index FROM quiz_answers WHERE question_id = ? AND participant_id = ?",
+                (question_id, participant_id),
+            ).fetchone()
+        return row["option_index"] if row else None
+
+    def quiz_counts(self, question_id: int, n_options: int) -> list[int]:
+        """Сколько голосов на каждом варианте — для распределения."""
+        counts = [0] * max(0, int(n_options))
+        if not counts:
+            return counts
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT option_index, COUNT(*) AS n FROM quiz_answers "
+                "WHERE question_id = ? GROUP BY option_index",
+                (question_id,),
+            ).fetchall()
+        for r in rows:
+            if 0 <= r["option_index"] < len(counts):
+                counts[r["option_index"]] = r["n"]
+        return counts
+
+    def quiz_answered_total(self, question_id: int) -> int:
+        with self.connect() as conn:
+            return conn.execute(
+                "SELECT COUNT(*) FROM quiz_answers WHERE question_id = ?",
+                (question_id,),
+            ).fetchone()[0]
+
+    def quiz_leaderboard(self, limit: int = 20) -> list[dict]:
+        """Таблица лидеров: балл за верный ответ на зачётный вопрос.
+
+        Хитрые вопросы (scored=0) очков не дают. Порядок: больше балл —
+        раньше ответил первым из своих — потом по имени, чтобы таблица
+        не менялась от перезапроса к перезапросу.
+        """
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT p.name AS name, "
+                "       SUM(CASE WHEN qa.option_index = q.correct THEN 1 ELSE 0 END) AS score, "
+                "       COUNT(qa.question_id) AS answered, "
+                "       MIN(qa.answered_at) AS first_at "
+                "FROM quiz_answers qa "
+                "JOIN quiz_questions q ON q.id = qa.question_id AND q.scored = 1 AND q.correct >= 0 "
+                "JOIN participants p ON p.id = qa.participant_id "
+                "GROUP BY qa.participant_id, p.name "
+                "ORDER BY score DESC, first_at ASC, p.name ASC "
+                "LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def quiz_score(self, participant_id: int) -> int:
+        """Балл одного участника (для надписи «у вас N очков»)."""
+        with self.connect() as conn:
+            return conn.execute(
+                "SELECT COALESCE(SUM(CASE WHEN qa.option_index = q.correct THEN 1 ELSE 0 END), 0) "
+                "FROM quiz_answers qa "
+                "JOIN quiz_questions q ON q.id = qa.question_id AND q.scored = 1 AND q.correct >= 0 "
+                "WHERE qa.participant_id = ?",
+                (participant_id,),
+            ).fetchone()[0]
+
+    def quiz_scored_count(self) -> int:
+        """Сколько зачётных вопросов уже задано — для подписей на экране."""
+        with self.connect() as conn:
+            return conn.execute(
+                "SELECT COUNT(*) FROM quiz_questions WHERE scored = 1 AND correct >= 0"
+            ).fetchone()[0]
+
+    def quiz_clear_answers(self) -> int:
+        """Сбросить все ответы — провести тот же набор заново."""
+        with self.connect() as conn:
+            cur = conn.execute("DELETE FROM quiz_answers")
+            return cur.rowcount or 0
+
+    def quiz_total_answers(self) -> int:
+        with self.connect() as conn:
+            return conn.execute("SELECT COUNT(*) FROM quiz_answers").fetchone()[0]
 
     # --- сообщения ------------------------------------------------------
     def participant_by_token(self, token: str | None) -> dict | None:

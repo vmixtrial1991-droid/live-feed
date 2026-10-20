@@ -32,7 +32,7 @@ for f in deploy/check_remote.py test_splash.py test_events.py test_api.py \
          test_limits.py check_admin_page.py testlib.py \
          test_slideshow.py test_realtime.py test_no_moderation.py \
          test_migration.py test_proxy_networks.py test_cert_gate.py \
-         test_session.py test_code_entry.py; do
+         test_session.py test_code_entry.py test_quiz.py; do
     docker cp "$f" "$APP:/tmp/$(basename "$f")" 2>/dev/null
 done
 # проверке скриптов страниц нужен рядом каталог static — поэтому в /app
@@ -117,6 +117,7 @@ run "сети прокси"       "$INSIDE" /tmp/test_proxy_networks.py /app
 run "ворота сертификата" "$INSIDE" /tmp/test_cert_gate.py /app
 run "сессии"            "$INSIDE" /tmp/test_session.py
 run "ввод кода"         "$INSIDE" /tmp/test_code_entry.py
+run "квиз"              "$INSIDE" /tmp/test_quiz.py
 
 printf "    %-22s " "скрипты страниц"
 out="$(docker exec -w /app "$APP" python /app/test_frontend.py 2>&1)"
@@ -170,7 +171,7 @@ docker exec -u root "$APP" rm -f /tmp/check_remote.py /tmp/test_splash.py \
     /tmp/check_admin_page.py /tmp/testlib.py /app/test_frontend.py \
     /tmp/test_slideshow.py /tmp/test_realtime.py /tmp/test_no_moderation.py \
     /tmp/test_migration.py /tmp/test_proxy_networks.py /tmp/test_cert_gate.py \
-    /tmp/test_session.py /tmp/test_code_entry.py 2>/dev/null
+    /tmp/test_session.py /tmp/test_code_entry.py /tmp/test_quiz.py 2>/dev/null
 # из контейнера убираем, а сам аудит с /opt/livefeed не трогаем: он часть
 # комплекта, check_release.sh требует его рядом, и следующий прогон
 # verify.sh без него не проверит статику вовсе

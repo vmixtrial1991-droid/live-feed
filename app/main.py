@@ -37,6 +37,7 @@ from fastapi.responses import (
 from fastapi.staticfiles import StaticFiles
 
 from . import archive, auth, config, events, images
+from . import quiz as quizmod
 from .events import Event, EventError
 from .realtime import EventRuntime, keepalive, registry
 
@@ -90,6 +91,17 @@ def _prepare(event: Event) -> Event:
             screen.interval = int(data.get("interval", 12) or 12)
             screen.slideshow_interval = int(data.get("slideshow_interval", 15) or 15)
             screen.reset_deadline()
+            # 5.0: квиз переживает перезапуск сервера. Ведущий открывал
+            # вопрос, uvicorn перезагрузился — зал продолжает отвечать,
+            # а экран показывает ту же стадию, а не пустоту.
+            phase = str(data.get("quiz_phase") or "idle")
+            if phase in quizmod.PHASES:
+                screen.quiz_phase = phase
+            try:
+                screen.quiz_question = int(data.get("quiz_question") or 0) or None
+            except (TypeError, ValueError):
+                screen.quiz_question = None
+            screen.quiz_visible = bool(data.get("quiz_visible"))
         except (EventError, OSError, ValueError):
             pass
         _prepared.add(event.slug)
@@ -107,6 +119,36 @@ def _runtime(event: Event) -> EventRuntime:
     runtime.screen.sync_items(event.store.live_ids())
     runtime.screen.sync_slideshow(event.store.gallery_ids())
     return runtime
+
+
+async def _quiz_frame(event: Event, runtime: EventRuntime) -> None:
+    """Отправляет текущий кадр квиза экрану и сигнал страницам.
+
+    Экран получает целую картину (вопрос, распределение, рейтинг) — он
+    один на всех. Страницам гостей — только сигнал обновиться: каждый
+    спросит СВОЮ картину у своего API, чтобы чужой ответ не разбегался
+    по залу.
+    """
+    payload = quizmod.display_payload(event, runtime.screen, event.store)
+    await runtime.hub.to_display({"type": "quiz", "quiz": payload})
+    await runtime.hub.to_quiz({"type": "quiz_update"})
+
+
+def _quiz_persist(event: Event, screen) -> None:
+    """Стадия квиза живёт в конфиге события.
+
+    Перезапуск сервера посреди вечера не должен стирать квиз из зала:
+    ведущий откроет страницу/экран, а стадия на месте. В idle ключи
+    убираем — конфиг не обрастает мусором после каждого квиза.
+    """
+    if screen.quiz_phase == "idle":
+        event.update(quiz_phase=None, quiz_question=None, quiz_visible=None)
+    else:
+        event.update(
+            quiz_phase=screen.quiz_phase,
+            quiz_question=screen.quiz_question,
+            quiz_visible=screen.quiz_visible,
+        )
 
 
 _STATIC_VERSION: str | None = None
@@ -319,10 +361,12 @@ async def api_admin_delete(slug: str, request: Request):
 
 
 @app.get("/api/admin/events/{slug}/qr.svg")
-async def api_admin_qr(slug: str, request: Request):
+async def api_admin_qr(slug: str, request: Request, kind: str = ""):
     _require_admin(request)
     event = _event_or_404(slug)
-    return _qr_svg(event.invite_link(events.base_url_from(request)))
+    # 5.0: kind=quiz — отдельный QR на квиз; ссылка строится тем же кодом
+    link = (event.quiz_link if kind == "quiz" else event.invite_link)
+    return _qr_svg(link(events.base_url_from(request)))
 
 
 # --------------------------------------------------------------------------
@@ -419,6 +463,19 @@ async def page_send(slug: str, request: Request, t: str = ""):
     return _page("send.html", base=f"/e/{event.slug}")
 
 
+@app.get("/e/{slug}/quiz", response_class=HTMLResponse)
+async def page_quiz(slug: str, request: Request, t: str = ""):
+    """Страница квиза (5.0). Адрес публичный, содержимое — по билету.
+
+    Отдельного входа нет: гость, который уже отмечался в ленте, приходит
+    сюда со своим cookie и сразу видит вопросы. Новый гость вводит тот же
+    код приглашения — страница сама покажет форму, когда API скажет «нет
+    билета». Ссылка из QR несёт ?t=, чтобы код был подставлен заранее.
+    """
+    event = _prepare(_event_or_404(slug))
+    return _page("quiz.html", base=f"/e/{event.slug}")
+
+
 @app.get("/e/{slug}/moderator", response_class=HTMLResponse)
 async def page_moderator(slug: str, request: Request):
     event = _prepare(_event_or_404(slug))
@@ -506,6 +563,73 @@ async def api_me(slug: str, request: Request):
         "messages": event.store.participant_messages(person.id),
         "stats": event.store.stats(),
     }
+
+
+# --------------------------------------------------------------------------
+# Квиз (5.0): API гостя
+# --------------------------------------------------------------------------
+# Билет у квиза тот же, что у ленты: кто уже отмечался в зале, тот на
+# квизе узнаётся автоматически, без второго входа. Имя правится на месте —
+# участник остаётся тем же, меняются только следующие сообщения и ответы.
+
+@app.get("/e/{slug}/api/quiz")
+async def api_quiz(slug: str, request: Request):
+    """Текущая стадия квиза для гостя: вопрос, свой ответ, очки."""
+    event = _prepare(_event_or_404(slug))
+    person = auth.current_participant(request, event)
+    if person is None:
+        raise HTTPException(status_code=403, detail="Нужен код приглашения")
+    runtime = _runtime(event)
+    data = quizmod.participant_view(event.store, runtime.screen, person.id)
+    data["name"] = person.name
+    return data
+
+
+@app.post("/e/{slug}/api/quiz/answer")
+async def api_quiz_answer(
+    slug: str, request: Request, question_id: int = Form(...), option: int = Form(...)
+):
+    """Ответ гостя. До закрытия вопроса его можно передумать — замена."""
+    event = _prepare(_event_or_404(slug))
+    person = auth.current_participant(request, event)
+    if person is None:
+        raise HTTPException(status_code=403, detail="Нужен код приглашения")
+
+    runtime = _runtime(event)
+    screen = runtime.screen
+    if screen.quiz_phase != "open" or screen.quiz_question != question_id:
+        raise HTTPException(status_code=409, detail="Вопрос не открыт или уже закрыт")
+    q = event.store.quiz_get_question(question_id)
+    if q is None:
+        raise HTTPException(status_code=404, detail="Вопрос не найден")
+    if not (0 <= option < len(q["options"])):
+        raise HTTPException(status_code=400, detail="Нет такого варианта")
+
+    event.store.quiz_answer(question_id, person.id, option)
+    # счётчик ответивших уходит на экран и в панель ведущего; остальные
+    # страницы молчат: свой ответ они уже знают
+    await _quiz_frame(event, runtime)
+    await runtime.hub.to_moderator({"type": "quiz_update"})
+    return {"ok": True, "answered_total": event.store.quiz_answered_total(question_id)}
+
+
+@app.post("/e/{slug}/api/quiz/name")
+async def api_quiz_name(slug: str, request: Request, name: str = Form("")):
+    """Сменить имя. Тот же участник, те же очки — другое имя.
+
+    Ранее отправленные сообщения остаются со старым автором: переписывать
+    прошлое назад нельзя. Всё новое — лента, ответы, таблица лидеров —
+    пойдёт уже под новым именем.
+    """
+    event = _prepare(_event_or_404(slug))
+    person = auth.current_participant(request, event)
+    if person is None:
+        raise HTTPException(status_code=403, detail="Нужен код приглашения")
+    clean = " ".join((name or "").split())[:40]
+    if not clean:
+        raise HTTPException(status_code=400, detail="Введите имя")
+    event.store.rename_participant(person.id, clean)
+    return {"ok": True, "name": clean}
 
 
 @app.post("/e/{slug}/api/messages")
@@ -707,13 +831,15 @@ async def api_invite_link(slug: str, request: Request, d: str = "") -> dict:
 
 
 @app.get("/e/{slug}/api/qr.svg")
-async def qr_svg(slug: str, request: Request, d: str = ""):
+async def qr_svg(slug: str, request: Request, d: str = "", kind: str = ""):
     event = _prepare(_event_or_404(slug))
     if not (auth.is_admin(request) or auth.is_moderator(request, event)
             or auth.screen_key_valid(event, d)
             or auth.screen_key_valid(event, request.query_params.get("d"))):
         raise HTTPException(status_code=403, detail="Нужен ключ экрана")
-    return _qr_svg(event.invite_link(events.base_url_from(request)))
+    # 5.0: kind=quiz — QR на страницу квиза (тот же код приглашения внутри)
+    link = (event.quiz_link if kind == "quiz" else event.invite_link)
+    return _qr_svg(link(events.base_url_from(request)))
 
 
 # --------------------------------------------------------------------------
@@ -1025,6 +1151,225 @@ async def api_rotate_invite(slug: str, request: Request):
 
 
 # --------------------------------------------------------------------------
+# Квиз (5.0): панель ведущего — вопросы и управление стадиями
+# --------------------------------------------------------------------------
+# Лимиты своих, отдельных от ленты, и это не придирка: вопрос читают с
+# дальних рядов зала, поэтому текст длиннее 200 знаков уже теряется,
+# а шесть вариантов — потолок, дальше экран не вмещает.
+
+MAX_QUESTION_LEN = 200
+MAX_OPTION_LEN = 80
+MIN_OPTIONS = 2
+MAX_OPTIONS = 6
+
+
+def _quiz_options(raw: str) -> list[str]:
+    """Варианты из формы: список прилетает JSON-ом, пустые отсекаем."""
+    try:
+        parsed = json.loads(raw or "")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Варианты должны быть списком")
+    if not isinstance(parsed, list):
+        raise HTTPException(status_code=400, detail="Варианты должны быть списком")
+    options = [" ".join(str(o).split())[:MAX_OPTION_LEN] for o in parsed]
+    options = [o for o in options if o]
+    if not (MIN_OPTIONS <= len(options) <= MAX_OPTIONS):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Вариантов должно быть от {MIN_OPTIONS} до {MAX_OPTIONS}",
+        )
+    return options
+
+
+@app.get("/e/{slug}/api/moderator/quiz")
+async def api_mod_quiz(slug: str, request: Request):
+    """Сводка для панели: вопросы, стадии, счётчики ответивших, лидеры."""
+    event = _prepare(_event_or_404(slug))
+    _require_moderator(request, event)
+    runtime = _runtime(event)
+    return quizmod.host_state(event.store, runtime.screen)
+
+
+@app.post("/e/{slug}/api/moderator/quiz/add")
+async def api_mod_quiz_add(
+    slug: str,
+    request: Request,
+    text: str = Form(""),
+    options: str = Form(""),
+    correct: int = Form(-1),
+    scored: str = Form("1"),
+):
+    """Новый вопрос встаёт в конец очереди; порядок правится кнопками."""
+    event = _event_or_404(slug)
+    _require_moderator(request, event)
+    text = " ".join((text or "").split())[:MAX_QUESTION_LEN]
+    if not text:
+        raise HTTPException(status_code=400, detail="Напишите текст вопроса")
+    opts = _quiz_options(options)
+    graded = str(scored).lower() in ("1", "true", "on", "yes")
+    if graded and not (0 <= correct < len(opts)):
+        raise HTTPException(status_code=400, detail="Отметьте правильный вариант")
+    # у «хитрого» вопроса правильного нет намеренно: смысл в разбросе мнений
+    question = event.store.quiz_add_question(
+        text, opts, correct if graded else -1, graded
+    )
+    runtime = _runtime(event)
+    await runtime.hub.to_moderator({"type": "quiz_update"})
+    return {"ok": True, "question": question}
+
+
+@app.post("/e/{slug}/api/moderator/quiz/update")
+async def api_mod_quiz_update(
+    slug: str,
+    request: Request,
+    question_id: int = Form(...),
+    text: str = Form(""),
+    options: str = Form(""),
+    correct: int = Form(-2),
+    scored: str = Form(""),
+):
+    """Правка вопроса. Пустые поля не трогаем: форма присылает только то,
+    что изменилось. -2 у correct означает «не менять» ( -1 сам по себе —
+    законное значение «правильного нет» )."""
+    event = _event_or_404(slug)
+    _require_moderator(request, event)
+    old = event.store.quiz_get_question(question_id)
+    if old is None:
+        raise HTTPException(status_code=404, detail="Вопрос не найден")
+
+    fields: dict = {}
+    if text.strip():
+        fields["text"] = " ".join(text.split())[:MAX_QUESTION_LEN]
+    if options.strip():
+        fields["options"] = _quiz_options(options)
+    if scored != "":
+        graded = str(scored).lower() in ("1", "true", "on", "yes")
+        fields["scored"] = graded
+        if not graded:
+            fields["correct"] = -1
+    if correct != -2:
+        fields["correct"] = correct
+    elif "scored" in fields and fields["scored"]:
+        fields["correct"] = old["correct"]
+
+    final_options = fields.get("options", old["options"])
+    final_scored = fields.get("scored", old["scored"])
+    final_correct = fields.get("correct", old["correct"])
+    if final_scored and not (0 <= final_correct < len(final_options)):
+        raise HTTPException(status_code=400, detail="Отметьте правильный вариант")
+
+    question = event.store.quiz_update_question(question_id, **fields)
+    runtime = _runtime(event)
+    # меняли открытый/закрытый вопрос — экрану и гостям нужен новый кадр
+    await _quiz_frame(event, runtime)
+    await runtime.hub.to_moderator({"type": "quiz_update"})
+    return {"ok": True, "question": question}
+
+
+@app.post("/e/{slug}/api/moderator/quiz/delete")
+async def api_mod_quiz_delete(slug: str, request: Request, question_id: int = Form(...)):
+    """Удалить вопрос; ответы уходят каскадом.
+
+    Если удаляли именно тот вопрос, который сейчас открыт, квиз останавли-
+    вается: висящая фаза без вопроса — это дыра, экран показал бы пустоту.
+    """
+    event = _event_or_404(slug)
+    _require_moderator(request, event)
+    if not event.store.quiz_delete_question(question_id):
+        raise HTTPException(status_code=404, detail="Вопрос не найден")
+
+    runtime = _runtime(event)
+    screen = runtime.screen
+    if screen.quiz_question == question_id:
+        screen.quiz_phase, screen.quiz_question, screen.quiz_visible = "idle", None, False
+        _quiz_persist(event, screen)
+    await _quiz_frame(event, runtime)
+    await runtime.hub.to_moderator({"type": "quiz_update"})
+    return {"ok": True}
+
+
+@app.post("/e/{slug}/api/moderator/quiz/move")
+async def api_mod_quiz_move(
+    slug: str, request: Request, question_id: int = Form(...), direction: str = Form("up")
+):
+    event = _event_or_404(slug)
+    _require_moderator(request, event)
+    if not event.store.quiz_move_question(question_id, direction):
+        raise HTTPException(status_code=400, detail="Вопрос уже на своём месте")
+    runtime = _runtime(event)
+    await runtime.hub.to_moderator({"type": "quiz_update"})
+    await _quiz_frame(event, runtime)  # «3 из 10» на экране могло сдвинуться
+    return {"ok": True}
+
+
+@app.post("/e/{slug}/api/moderator/quiz/control")
+async def api_mod_quiz_control(
+    slug: str, request: Request, action: str = Form(...), question_id: int = Form(0)
+):
+    """Переключатель стадий квиза: тот же экран, что и у ленты, только режим.
+
+    open — вопрос открыт, зал отвечает (можно передумать до закрытия);
+    close — показываем распределение и правильный ответ;
+    next — следующий по порядку;
+    board — таблица лидеров;
+    feed — убрать квиз с экрана, оставив зал отвечать (фаза не трогается);
+    show — вернуть экран к текущей стадии;
+    stop — закончить квиз, экран снова показывает ленту;
+    reset — стереть все ответы (тот же набор, чистый прогон).
+    """
+    event = _prepare(_event_or_404(slug))
+    _require_moderator(request, event)
+    runtime = _runtime(event)
+    screen = runtime.screen
+    store = event.store
+
+    if action == "open":
+        qid = question_id or screen.quiz_question
+        if not qid:
+            first = store.quiz_list_questions()
+            if not first:
+                raise HTTPException(status_code=400, detail="Сначала добавьте вопросы")
+            qid = first[0]["id"]
+        if store.quiz_get_question(qid) is None:
+            raise HTTPException(status_code=404, detail="Вопрос не найден")
+        screen.quiz_phase, screen.quiz_question, screen.quiz_visible = "open", qid, True
+    elif action == "close":
+        if screen.quiz_phase != "open":
+            raise HTTPException(status_code=400, detail="Вопрос сейчас не открыт")
+        screen.quiz_phase = "closed"
+    elif action == "next":
+        order = [q["id"] for q in store.quiz_list_questions()]
+        if not order:
+            raise HTTPException(status_code=400, detail="Сначала добавьте вопросы")
+        i = order.index(screen.quiz_question) if screen.quiz_question in order else -1
+        if i + 1 >= len(order):
+            raise HTTPException(status_code=400, detail="Это последний вопрос")
+        screen.quiz_phase, screen.quiz_question, screen.quiz_visible = "open", order[i + 1], True
+    elif action == "board":
+        screen.quiz_phase, screen.quiz_visible = "board", True
+    elif action == "feed":
+        screen.quiz_visible = False
+    elif action == "show":
+        if screen.quiz_phase == "idle":
+            raise HTTPException(status_code=400, detail="Квиз сейчас не идёт")
+        screen.quiz_visible = True
+    elif action == "stop":
+        screen.quiz_phase, screen.quiz_question, screen.quiz_visible = "idle", None, False
+    elif action == "reset":
+        removed = store.quiz_clear_answers()
+    else:
+        raise HTTPException(status_code=400, detail="Неизвестное действие")
+
+    _quiz_persist(event, screen)
+    await _quiz_frame(event, runtime)
+    await runtime.hub.to_moderator({"type": "quiz_update"})
+    data = quizmod.host_state(store, screen)
+    if action == "reset":
+        data["removed"] = removed
+    return data
+
+
+# --------------------------------------------------------------------------
 # Слайдшоу (4.0): галочка у фотографии, галерея и запуск на экран
 # --------------------------------------------------------------------------
 @app.post("/e/{slug}/api/moderator/slideshow")
@@ -1233,6 +1578,46 @@ async def ws_display(ws: WebSocket, slug: str, d: str = "") -> None:
                 "stats": event.store.stats(),
                 "screen": runtime.screen.state(),
                 "splash": event.splash_url(),
+                # 5.0: экран, открытый посреди квиза (F5, второй проектор),
+                # получает текущую стадию сразу — без «покажи заново»
+                "quiz": quizmod.display_payload(event, runtime.screen, event.store),
+            }
+        )
+        await _pump(ws)
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+    finally:
+        runtime.hub.remove(ws)
+
+
+@app.websocket("/e/{slug}/ws/quiz")
+async def ws_quiz(ws: WebSocket, slug: str) -> None:
+    """Канал страниц квиза (5.0). Билет — тот же, что у ленты.
+
+    По каналу летает только сигнал «изменилось». содержимое каждый гость
+    забирает своим GET-ом: так его вопрос, его ответ и его очки не уезжают
+    чужим телефонам.
+    """
+    event = events.get_event(slug)
+    if event is None:
+        await ws.close(code=4404)
+        return
+    _prepare(event)
+    person = auth.current_participant(_FakeRequest(ws), event)
+    if person is None:
+        await ws.close(code=4401)
+        return
+
+    runtime = registry.get(event.slug)
+    await ws.accept()
+    runtime.hub.add_quiz(ws)
+    try:
+        await ws.send_json(
+            {
+                "type": "init",
+                "quiz": quizmod.participant_view(event.store, runtime.screen, person.id),
             }
         )
         await _pump(ws)

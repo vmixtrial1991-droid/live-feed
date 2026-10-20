@@ -19,7 +19,7 @@ services:
     # Имя образа с версией: тот же комплект можно положить на сервер заранее
     # (docker load) — тогда compose возьмёт готовый, а если образа нет,
     # соберёт его сам. Собирается только когда образа нет.
-    image: livefeed:4.0
+    image: livefeed:4.1
     container_name: live-feed-app
     restart: unless-stopped
     env_file: .env

@@ -321,16 +321,18 @@ async def main() -> None:
         check("отправка сразу в эфире, без проверки",
               st == 200 and sent["message"]["status"] == "approved")
 
-        ev = await collect(modws, "new", where=lambda m: m["message"]["id"] == mid)
+        # 4.1: дельта вместо полного снимка: список новых — в «added»
+        ev = await collect(modws, "new",
+                           where=lambda m: any(x["id"] == mid for x in m.get("added", [])))
         check("ведущий увидел без перезагрузки", ev is not None)
         evs = await collect(screenws, "new",
-                            where=lambda m: any(x["id"] == mid for x in m["messages"]))
+                            where=lambda m: any(x["id"] == mid for x in m.get("added", [])))
         check("экран 1 получил сразу", evs is not None)
         evs2 = await collect(screen2, "new",
-                             where=lambda m: any(x["id"] == mid for x in m["messages"]))
+                             where=lambda m: any(x["id"] == mid for x in m.get("added", [])))
         check("экран 2 получил сразу", evs2 is not None)
         evf = await collect(feedws, "new",
-                           where=lambda m: any(x["id"] == mid for x in m["messages"]))
+                           where=lambda m: any(x["id"] == mid for x in m.get("added", [])))
         check("витрина получила сразу", evf is not None)
 
         feed = await asyncio.to_thread(anon.get_json, EV("/api/messages"))

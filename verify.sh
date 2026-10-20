@@ -67,8 +67,16 @@ run() {
         out="$(docker exec -e ADMIN_PASSWORD="$PW" -e LF_TEST_ROOT="$url" \
                -e LF_DATA_DIR=/app/data "$APP" python "$script" "$url" 2>&1)"
     fi
+    local rc=$?   # код именно запуска набора: следующие присваивания его сотрут
     LAST_OK="$(printf '%s' "$out" | grep -cE '^  OK')"
     bad="$(printf '%s' "$out" | grep -cE '^  FAIL')"
+    # код возврата: набор мог упасть с исключением в середине — строк FAIL
+    # при этом нет, и такой прогон выглядел бы успешным (в 4.1 наружный
+    # сценарий именно так и «прошёл», хотя валился на первой же дельте)
+    if [ "$rc" != "0" ] && [ "$bad" = "0" ]; then
+        bad=1
+        printf '        набор прервался с кодом %s без строк FAIL — считаем провалом\n' "$rc"
+    fi
     TOTAL_OK=$((TOTAL_OK + LAST_OK))
     TOTAL_FAIL=$((TOTAL_FAIL + bad))
     printf "    %-22s OK=%-4s FAIL=%s\n" "$name" "$LAST_OK" "$bad"

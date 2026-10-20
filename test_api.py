@@ -188,6 +188,11 @@ st, _ = call("POST", "/api/moderator/login", {"password": PASS}, expect=200)
 check("вход по паролю", True)
 check("cookie выставлена", f"lf_mod_{SLUG}" in COOKIES)
 
+st, mod_page = call("GET", "/moderator")
+check("кабинет открывается по cookie", st == 200 and b"<html" in bytes(mod_page).lower())
+check("страница кабинета знает ключ экрана (4.1)", b"screenKey" in bytes(mod_page),
+      "без ключа кнопка «Экран» упрётся в «Нужен ключ экрана»")
+
 _, mod = call("GET", "/api/moderator/state")
 check("в кабинете весь список", len(mod["messages"]) == 2, str(len(mod["messages"])))
 check("сводки нет: только всего и участников",

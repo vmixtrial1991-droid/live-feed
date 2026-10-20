@@ -418,7 +418,11 @@ async def page_moderator(slug: str, request: Request):
     event = _prepare(_event_or_404(slug))
     if not auth.is_moderator(request, event):
         return RedirectResponse(f"/e/{event.slug}/moderator/login", status_code=302)
-    return _page("moderator.html", base=f"/e/{event.slug}")
+    # 4.1: кнопка «Экран» в кабинете обязана нести ключ экрана — без ?d=
+    # экран отвечает «Нужен ключ экрана», и ведущий не смог бы открыть
+    # свою же ссылку в соседней вкладке.
+    return _page("moderator.html", base=f"/e/{event.slug}",
+                 extra=f",screenKey:{json.dumps(event.screen_key)}")
 
 
 @app.get("/e/{slug}/moderator/login", response_class=HTMLResponse)

@@ -382,6 +382,10 @@ check("common.js: рабочие ссылки на месте",
       all(x in (STATIC / "common.js").read_text(encoding="utf-8")
           for x in ("toSend: '/send'", "toSendBig: '/send'", "toScreen: '/screen'")),
       "убирая витрину, не снеси страницу отправки и экран")
+check("common.js: кнопка «Экран» несёт ключ экрана (4.1)",
+      "d=" in (STATIC / "common.js").read_text(encoding="utf-8")
+      and "window.LF.screenKey" in (STATIC / "common.js").read_text(encoding="utf-8"),
+      "экран без ?d= отвечает 403, ведущий не откроет свою ссылку")
 
 print("\n=== Ввод кода руками (4.0.1) ===")
 join_html = (STATIC / "join.html").read_text(encoding="utf-8")

@@ -171,7 +171,14 @@ function wireEventLinks() {
   // закрывать надо, это отдельное решение.
   for (const [id, path] of Object.entries(links)) {
     const el = document.getElementById(id);
-    if (el) el.href = ev(path);
+    if (!el) continue;
+    let href = ev(path);
+    // 4.1: экран открывается только с ключом. Страница получает его в
+    // window.LF.screenKey, и кнопка «Экран» обязана отнести его с собой.
+    if (path === '/screen' && window.LF && window.LF.screenKey) {
+      href += '?d=' + encodeURIComponent(window.LF.screenKey);
+    }
+    el.href = href;
   }
 }
 

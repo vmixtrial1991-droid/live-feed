@@ -5,6 +5,15 @@
 gzip, состав архива и то, что в манифесте лежат именно те образы и та же
 версия, что развёрнута сейчас.
 
+Архив образов — часть комплекта не всегда. Когда на сервере его планируется
+собирать на месте поверх рабочей версии (сети там нет), в комплекте только
+исходники; тогда проверки образов честно пропускаются, а не берутся из
+старого комплекта другой версии.
+
+Версия берётся из docker-compose.yml — того же места, откуда её читают
+deploy.sh и build_kit.py. Прибить её здесь руками — грабля: комплект уже
+4.1, а проверка крутится вокруг 4.0 и рапортует «провалов нет».
+
 Запуск без сервера: python verify_kit.py
 """
 
@@ -13,12 +22,19 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+import re
 import sys
 import tarfile
 from pathlib import Path
 
-DIST = Path(__file__).parent / "dist"
-VER = "4.0"
+ROOT = Path(__file__).parent
+DIST = ROOT / "dist"
+
+compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+m = re.search(r"image:\s*(livefeed:[\d.]+)", compose)
+if not m:
+    raise SystemExit("Не нашёл строку image: livefeed:<версия> в docker-compose.yml")
+VER = m.group(1).split("livefeed:")[1]
 IMAGES = DIST / f"livefeed-{VER}-images.tar.gz"
 SOURCE = DIST / f"livefeed-{VER}-source.tar.gz"
 
@@ -48,72 +64,76 @@ def sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-print("=== Комплект развёртывания 4.0 ===")
-check("архив образов на месте", IMAGES.exists(), str(IMAGES.name))
+print(f"=== Комплект развёртывания {VER} ===")
 check("архив исходников на месте", SOURCE.exists(), str(SOURCE.name))
 
-if not IMAGES.exists():
-    sys.exit(1)
+digest = ""
+size = 0
+if IMAGES.exists():
+    check("архив образов на месте", True, str(IMAGES.name))
+    size = IMAGES.stat().st_size
+    check("архив не пустой", size > 10 * 1024 * 1024, human(size))
 
-size = IMAGES.stat().st_size
-check("архив не пустой", size > 10 * 1024 * 1024, human(size))
+    print("\n=== Передача по сети ===")
+    # Читаем потоково: на недоверенном архиве это ещё и проверка границ gzip
+    try:
+        total = 0
+        with gzip.open(IMAGES, "rb") as gz:
+            while chunk := gz.read(1 << 20):
+                total += len(chunk)
+        check("архив целый, gzip читается до конца", True, human(total))
+        check("размер после распаковки совпадает", total > 0, f"{human(total)}")
+    except (gzip.BadGzipFile, EOFError, OSError) as exc:
+        check("архив целый, gzip читается до конца", False, str(exc))
+        sys.exit(1)
 
-print("\n=== Передача по сети ===")
-# Читаем потоково: на недоверенном архиве это ещё и проверка границ gzip
-try:
-    total = 0
-    with gzip.open(IMAGES, "rb") as gz:
-        while chunk := gz.read(1 << 20):
-            total += len(chunk)
-    check("архив целый, gzip читается до конца", True, human(total))
-    check("размер после распаковки совпадает", total > 0, f"{human(total)}")
-except (gzip.BadGzipFile, EOFError, OSError) as exc:
-    check("архив целый, gzip читается до конца", False, str(exc))
-    sys.exit(1)
+    digest = sha256(IMAGES)
+    print(f"  sha256: {digest}")
 
-digest = sha256(IMAGES)
-print(f"  sha256: {digest}")
+    print("\n=== Что внутри ===")
+    try:
+        with tarfile.open(IMAGES, "r:gz") as tar:
+            names = tar.getnames()
+            manifest = json.loads(tar.extractfile("manifest.json").read())
+    except Exception as exc:  # noqa: BLE001
+        check("архив открывается как tar", False, str(exc))
+        sys.exit(1)
 
-print("\n=== Что внутри ===")
-try:
-    with tarfile.open(IMAGES, "r:gz") as tar:
-        names = tar.getnames()
-        manifest = json.loads(tar.extractfile("manifest.json").read())
-except Exception as exc:  # noqa: BLE001
-    check("архив открывается как tar", False, str(exc))
-    sys.exit(1)
+    check("архив открывается как tar", True, f"{len(names)} записей")
+    check("внутри манифест", "manifest.json" in names)
+    check("слои на месте",
+          any(n.startswith("blobs/sha256/") for n in names),
+          f"{sum(1 for n in names if n.startswith('blobs/sha256/'))} слоёв")
 
-check("архив открывается как tar", True, f"{len(names)} записей")
-check("внутри манифест", "manifest.json" in names)
-check("слои на месте",
-      any(n.startswith("blobs/sha256/") for n in names),
-      f"{sum(1 for n in names if n.startswith('blobs/sha256/'))} слоёв")
+    tags: list[str] = []
+    for entry in manifest:
+        tags += entry.get("RepoTags") or []
+    print(f"  образы в манифесте: {tags}")
 
-tags: list[str] = []
-for entry in manifest:
-    tags += entry.get("RepoTags") or []
-print(f"  образы в манифесте: {tags}")
+    check("в комплекте образ приложения", f"livefeed:{VER}" in tags, str(tags))
+    check("в комплекте образ nginx", "nginx:1.27-alpine" in tags, str(tags))
+    # чужие версии livefeed внутри — на другой машине развернётся не то
+    check("других версий livefeed в комплекте нет",
+          all(t.startswith("nginx:") or t == f"livefeed:{VER}" for t in tags),
+          str(tags))
 
-check("в комплекте образ приложения", f"livefeed:{VER}" in tags, str(tags))
-check("в комплекте образ nginx", "nginx:1.27-alpine" in tags, str(tags))
-check("версия образа совпадает с развёрнутой", f"livefeed:{VER}" in tags)
-check("старой версии в комплекте нет",
-      f"livefeed:3.7" not in tags, "иначе на другой машине развернётся не то")
-
-# Конфиг образа: без него контейнер не стартует как надо
-try:
-    cfg_name = manifest[0]["Config"]
-    cfg = json.loads(tarfile.open(IMAGES, "r:gz").extractfile(cfg_name).read())
-    env = cfg.get("config", {}).get("Env", [])
-    check("в образе задан пользователь livefeed",
-          any(u.startswith("USER=") and "root" not in u for u in env)
-          or cfg.get("config", {}).get("User") == "livefeed",
-          cfg.get("config", {}).get("User", "по умолчанию"))
-    check("в образе прописано хранилище данных",
-          "/app/data" in (cfg.get("config", {}).get("Volumes") or {}),
-          str(cfg.get("config", {}).get("Volumes")))
-except Exception as exc:  # noqa: BLE001
-    check("конфигурация образа читается", False, str(exc))
+    # Конфиг образа: без него контейнер не стартует как надо
+    try:
+        cfg_name = manifest[0]["Config"]
+        cfg = json.loads(tarfile.open(IMAGES, "r:gz").extractfile(cfg_name).read())
+        env = cfg.get("config", {}).get("Env", [])
+        check("в образе задан пользователь livefeed",
+              any(u.startswith("USER=") and "root" not in u for u in env)
+              or cfg.get("config", {}).get("User") == "livefeed",
+              cfg.get("config", {}).get("User", "по умолчанию"))
+        check("в образе прописано хранилище данных",
+              "/app/data" in (cfg.get("config", {}).get("Volumes") or {}),
+              str(cfg.get("config", {}).get("Volumes")))
+    except Exception as exc:  # noqa: BLE001
+        check("конфигурация образа читается", False, str(exc))
+else:
+    print("  образов в комплекте нет — образ соберётся на сервере поверх "
+          "рабочей версии; проверки образов пропущены")
 
 print("\n=== Исходники ===")
 with tarfile.open(SOURCE, "r:gz") as tar:
@@ -126,13 +146,14 @@ for need in ("deploy.sh", "docker-compose.yml", "app/main.py",
     check(f"есть {need}", need in src_names)
 
 with tarfile.open(SOURCE, "r:gz") as tar:
-    compose = tar.extractfile("docker-compose.yml").read().decode("utf-8")
-check("версия в compose совпадает с образом",
-      f"image: livefeed:{VER}" in compose)
+    compose_src = tar.extractfile("docker-compose.yml").read().decode("utf-8")
+check("версия в compose совпадает с комплектом",
+      f"image: livefeed:{VER}" in compose_src)
 
 print("\n=== Итог ===")
-print(f"  образы:   {IMAGES.name}  {human(size)}")
-print(f"            sha256 {digest}")
+if IMAGES.exists():
+    print(f"  образы:   {IMAGES.name}  {human(size)}")
+    print(f"            sha256 {digest}")
 print(f"  исходники: {SOURCE.name}  {human(SOURCE.stat().st_size)}")
 print(f"  {passed} OK, {failed} FAIL")
 sys.exit(1 if failed else 0)

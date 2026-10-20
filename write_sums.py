@@ -8,10 +8,18 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from pathlib import Path
 
 DIST = Path(__file__).parent / "dist"
-VER = "4.0"
+ROOT = Path(__file__).parent
+# версия — оттуда же, откуда её берут deploy.sh и build_kit.py;
+# прибита руками = разойдётся с комплектом
+compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+m = re.search(r"image:\s*(livefeed:[\d.]+)", compose)
+if not m:
+    raise SystemExit("Не нашёл строку image: livefeed:<версия> в docker-compose.yml")
+VER = m.group(1).split("livefeed:")[1]
 
 FILES = [
     DIST / f"livefeed-{VER}-images.tar.gz",

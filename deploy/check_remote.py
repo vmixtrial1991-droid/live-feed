@@ -265,7 +265,10 @@ async def main() -> None:
 
     print("\n=== Права доступа ===")
     anon = Client()
-    check("гость: витрина доступна", anon.get_json(EV("/api/messages")) is not None)
+    # 4.1: витрина больше не раздаёт ленту всем подряд — лента по билету,
+    # а открыта только страница входа по коду
+    check("гость: лента без билета закрыта (4.1)",
+          anon.get_status(EV("/api/messages")) == 403)
     st, _ = await asyncio.to_thread(anon.post, EV("/api/moderator/rotate-invite"), {})
     check("гость: кабинет закрыт", st in (403, 405), f"статус {st}")
     st, _ = await asyncio.to_thread(anon.post, EV("/api/messages"), {"body": "взлом"})
@@ -335,7 +338,7 @@ async def main() -> None:
                            where=lambda m: any(x["id"] == mid for x in m.get("added", [])))
         check("витрина получила сразу", evf is not None)
 
-        feed = await asyncio.to_thread(anon.get_json, EV("/api/messages"))
+        feed = await asyncio.to_thread(guest.get_json, EV("/api/messages"))
         check("сообщение видно и без WebSocket",
               any(m["id"] == mid for m in feed["messages"]))
 
@@ -390,8 +393,13 @@ async def main() -> None:
         check("экран узнал про QR", ev is not None)
         st, res = await asyncio.to_thread(lead.post, EV("/api/moderator/screen"), {"action": "qr", "value": "0"})
         check("QR скрыт", res["screen"]["qr_visible"] is False)
-        link = await asyncio.to_thread(anon.get_json, EV("/api/invite-link"))
-        check("ссылка для QR доступна без пароля",
+        # 4.1: код приглашения экрану выдаётся по своему ключу, а не всем:
+        # адрес проектора публичен
+        check("ссылка для QR без ключа не отдаётся (4.1)",
+              Client().get_status(EV("/api/invite-link")) == 403)
+        link = await asyncio.to_thread(
+            anon.get_json, EV(f"/api/invite-link?d={skey}"))
+        check("ссылка для QR доступна экрану по ключу",
               bool(link.get("link")) and bool(link.get("code")), str(link.get("code")))
 
         print("\n=== Порядок показа ===")

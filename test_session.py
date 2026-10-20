@@ -223,9 +223,16 @@ try:
               age >= MIN_SESSION_SECONDS,
               f"{age} с ≈ {age / 3600:.1f} ч")
 
-    # значения живут в конфиге, а не разбросаны по коду
-    cfg_src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                "app", "config.py"), encoding="utf-8").read()
+    # значения живут в конфиге, а не разбросаны по коду.
+    # На сервере скрипт лежит в /tmp, а исходники — в /app/app: поэтому
+    # ищем config.py среди известных мест, а не рядом с собой вслепую
+    cfg_path = next((p for p in (
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "app", "config.py"),
+        "/app/app/config.py",
+        "/opt/live-feed/app/config.py",
+    ) if os.path.exists(p)), "")
+    cfg_src = open(cfg_path, encoding="utf-8").read() if cfg_path else ""
+    check("config.py найден", bool(cfg_src), cfg_path or "не найден")
     for name in ("PARTICIPANT_COOKIE_MAX_AGE", "MODERATOR_COOKIE_MAX_AGE",
                  "ADMIN_COOKIE_MAX_AGE"):
         m2 = re.search(rf"^{name} = (.+)$", cfg_src, re.M)

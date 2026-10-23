@@ -519,6 +519,18 @@ document.addEventListener('keydown', (e) => {
 });
 
 /* ---------------- Приём данных ---------------- */
+/* Высота шапки — в переменную: панель управления прилипает под ней, а на
+   узком экране шапка переносится и становится вдвое выше. С фиксированными
+   64px верхняя кнопка панели уезжала под шапку и была недоступна. */
+function syncTopbarHeight() {
+  const bar = document.querySelector('.topbar');
+  if (!bar) return;
+  document.documentElement.style.setProperty(
+    '--topbar-h', `${Math.round(bar.getBoundingClientRect().height)}px`);
+}
+syncTopbarHeight();
+window.addEventListener('resize', syncTopbarHeight);
+
 connectWS(ev('/ws/moderator'), {
   onStatus(st) {
     setPill(document.getElementById('connPill'), st,

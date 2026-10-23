@@ -728,6 +728,17 @@ check("moderator.css: полоса зала рисуется шириной по
 check("slideshow-panel.js: переключатель вкладок знает про третью",
       "tabQuiz" in slide_js and "'quiz'" in slide_js)
 check("screen.html: слой квиза есть", 'id="quizScreen"' in screen_html)
+check("screen.html: содержимое слоя завёрнуто в масштабируемый блок",
+      screen_html.count('class="quiz-fit"') == 2,
+      "длинный вопрос и таблица на десять человек иначе обрежутся краем экрана")
+check("screen.js: экран сжимает длинный вопрос, а не обрезает его",
+      "function fitQuiz(" in screen_js and "function fitQuizActive(" in screen_js
+      and "QUIZ_FIT_MIN" in screen_js)
+check("screen.js: при смене размера окна игра пересчитывает масштаб",
+      "fitQuizActive();" in screen_js.split("window.addEventListener('resize'")[1][:300]
+      if "window.addEventListener('resize'" in screen_js else False)
+check("screen.css: длинное слово не вылезает за край проектора",
+      re.search(r"\.quiz-q\s*\{[^}]*overflow-wrap:\s*anywhere", screen_css, re.S) is not None)
 check("screen.js: экран рисует кадр игры и берёт его из init",
       "case 'quiz'" in screen_js and "msg.quiz" in screen_js)
 screen_css = (STATIC / "screen.css").read_text(encoding="utf-8")

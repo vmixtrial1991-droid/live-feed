@@ -58,23 +58,30 @@
   <!-- Холл игры: зал только подключается. Название события и QR, чтобы
      зрители попали в игру со своих телефонов, а вопроса ещё нет -->
   <div class="quiz-block quiz-lobby" id="quizLobby" hidden>
-    <p class="quiz-tag">Квиз</p>
-    <h1 class="quiz-lobby-title" id="lobbyTitle"></h1>
-    <p class="quiz-lobby-sub" id="lobbySub" hidden></p>
-    <div class="quiz-lobby-qr"><img id="lobbyQr" alt="QR-код квиза" width="420" height="420"></div>
-    <p class="quiz-count" id="lobbyHint"></p>
+    <!-- .quiz-fit — то, что экран масштабирует целиком: длинный вопрос,
+         шесть длинных вариантов и таблица на десять человек в кадр не
+         влезают при натуральном размере, а прокрутки на проекторе нет -->
+    <div class="quiz-fit">
+      <p class="quiz-tag">Квиз</p>
+      <h1 class="quiz-lobby-title" id="lobbyTitle"></h1>
+      <p class="quiz-lobby-sub" id="lobbySub" hidden></p>
+      <div class="quiz-lobby-qr"><img id="lobbyQr" alt="QR-код квиза" width="420" height="420"></div>
+      <p class="quiz-count" id="lobbyHint"></p>
+    </div>
   </div>
 
   <div class="quiz-block quiz-screen-inner" id="quizPlay" hidden>
-    <p class="quiz-tag" id="quizTag"></p>
-    <!-- Отсчёт живёт только здесь, на проекторе: телефоны не должны
-         превращать игру в гонку. По истечении — надпись, но ответы всё
-         ещё принимаются: приём закрывает ведущий, а не секундомер. -->
-    <p class="quiz-s-timer" id="quizTimer" hidden></p>
-    <h1 class="quiz-q" id="quizQText"></h1>
-    <p class="quiz-free" id="quizFree" hidden>Вопрос без очков — здесь важно, как думает зал</p>
-    <div class="quiz-opts" id="quizOpts"></div>
-    <p class="quiz-count" id="quizCount"></p>
+    <div class="quiz-fit">
+      <p class="quiz-tag" id="quizTag"></p>
+      <!-- Отсчёт живёт только здесь, на проекторе: телефоны не должны
+           превращать игру в гонку. По истечении — надпись, но ответы всё
+           ещё принимаются: приём закрывает ведущий, а не секундомер. -->
+      <p class="quiz-s-timer" id="quizTimer" hidden></p>
+      <h1 class="quiz-q" id="quizQText"></h1>
+      <p class="quiz-free" id="quizFree" hidden>Вопрос без очков — здесь важно, как думает зал</p>
+      <div class="quiz-opts" id="quizOpts"></div>
+      <p class="quiz-count" id="quizCount"></p>
+    </div>
   </div>
 </div>
 

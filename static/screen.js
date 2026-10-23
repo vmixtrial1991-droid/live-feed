@@ -235,6 +235,48 @@ function showQuizBlock(block, key) {
   return swap;
 }
 
+/* Влезает ли блок в экран при натуральном размере — и насколько его надо
+   уменьшить, если нет.
+
+   Проектор не прокручивается и полос прокрутки не показывает: всё, что
+   вышло за край, зал просто не увидит. А выйти оно может легко — двести
+   символов вопроса, шесть вариантов по восемьдесят символов или десять
+   строк финальной таблицы на 16:9. Поэтому меряем натуральную высоту
+   внутренности (.quiz-fit) и, если она больше слоя, сжимаем её целиком
+   трансформацией: вёрстка остаётся прежней, текст просто мельче, а
+   варианты не разъезжаются на две строки.
+
+   Порог 0.35 — только страховка от нуля: по-настоящему длинный вопрос
+   сожмётся так, что читать его с задних рядов будет нельзя, и это сигнал
+   ведущему сократить текст. Обрезать молча хуже: зал увидит половину
+   вопроса и не поймёт, что от него хотят. */
+const QUIZ_FIT_MIN = 0.35;
+
+function fitQuiz(block) {
+  const inner = block.querySelector('.quiz-fit');
+  const host = block.parentElement;   // .quiz-screen — он и есть весь экран
+  if (!inner || !host) return;
+  inner.style.transform = '';
+  const box = inner.getBoundingClientRect();
+  const cs = getComputedStyle(block);
+  // и по высоте, и по ширине: одного неразрывного слова (ссылка, капс без
+  // пробелов) хватает, чтобы строка уехала за правый край проектора
+  const roomH = host.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+  const roomW = host.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+  if (!box.height || !roomH || !roomW) return;
+  const scale = Math.min(1, roomH / box.height, roomW / box.width);
+  if (scale >= 0.999) return;
+  inner.style.transform = `scale(${Math.max(QUIZ_FIT_MIN, scale).toFixed(3)})`;
+}
+
+/* Подогнать тот блок, который сейчас на экране: содержимое меняется и без
+   смены блока (распределение ответов, пачка таблицы), и после каждой такой
+   правки масштаб надо пересчитать. */
+function fitQuizActive() {
+  if (!quizLobby.hidden) fitQuiz(quizLobby);
+  if (!quizPlay.hidden) fitQuiz(quizPlay);
+}
+
 /* Холл игры: ведущий запустил квиз, а вопроса ещё нет. Зал читает название
    и сканирует QR, а ведущий в это время спокойно дописывает вопросы. */
 function renderLobby(f) {
@@ -253,6 +295,7 @@ function renderLobby(f) {
   lobbyHint.textContent = f.participants
     ? `Отсканируйте код — уже с нами: ${f.participants}`
     : 'Отсканируйте код — первый вопрос вот-вот начнётся';
+  fitQuizActive();
 }
 
 function renderBoard(f) {
@@ -279,6 +322,7 @@ function renderBoard(f) {
     quizQText.textContent = 'Финальная таблица';
     boardPages = [all.slice(0, FINAL_TOP)];
     paintBoard();
+    fitQuizActive();
     return;
   }
 
@@ -288,9 +332,11 @@ function renderBoard(f) {
     boardPages.push(all.slice(i, i + BOARD_PAGE));
   }
   paintBoard();
+  fitQuizActive();
   if (!keepScroll && boardPages.length > 1) {
     // пачка висит столько, сколько её успевают прочитать с дальних рядов
-    boardTimer = setInterval(() => { boardPage += 1; paintBoard(); }, BOARD_STEP_MS);
+    boardTimer = setInterval(() => { boardPage += 1; paintBoard(); fitQuizActive(); },
+      BOARD_STEP_MS);
   }
 }
 
@@ -333,6 +379,7 @@ function renderQuiz() {
     }));
     quizCount.textContent = f.answered_total
       ? `Уже ответили: ${f.answered_total}` : 'Ждём ответы зала…';
+    fitQuizActive();
     return;
   }
 
@@ -353,6 +400,7 @@ function renderQuiz() {
   quizCount.textContent = f.phase === 'closed'
     ? `Ответили: ${f.answered_total ?? total} · приём закрыт`
     : `Ответили: ${f.answered_total ?? total}`;
+  fitQuizActive();
 }
 
 const messages = new Map();   // id -> сообщение ленты
@@ -841,9 +889,17 @@ stage.addEventListener('click', () => {
 let relayoutTimer = null;
 window.addEventListener('resize', () => {
   clearTimeout(relayoutTimer);
-  relayoutTimer = setTimeout(layoutSlide, 120);
+  relayoutTimer = setTimeout(() => {
+    layoutSlide();
+    // игра подстраивается тоже: на другом экране вопрос или таблица может
+    // перестать влезать целиком
+    fitQuizActive();
+  }, 120);
 });
 document.addEventListener('fullscreenchange', () => {
   clearTimeout(relayoutTimer);
-  relayoutTimer = setTimeout(layoutSlide, 200);
+  relayoutTimer = setTimeout(() => {
+    layoutSlide();
+    fitQuizActive();
+  }, 200);
 });

@@ -9,6 +9,10 @@
 }
 
 /* ---------- Панель управления ---------- */
+/* Прилипает под шапкой. Шапка на узком экране переносится и становится
+   выше, а 64px — это её высота в одну строку: с фиксированным числом
+   панель уезжала под шапку, и верхняя кнопка оказывалась недоступна.
+   Переменную --topbar-h выставляет moderator.js по фактической высоте. */
 .control-bar {
   background: var(--card);
   border: 1px solid var(--line);
@@ -19,7 +23,7 @@
   gap: clamp(.8rem, 2vw, 1.6rem);
   align-items: center;
   box-shadow: var(--shadow);
-  position: sticky; top: 64px; z-index: 20;
+  position: sticky; top: calc(var(--topbar-h, 64px) + .5rem); z-index: 20;
 }
 
 .control-buttons { display: flex; gap: .6rem; }
@@ -292,9 +296,17 @@
 #archiveWipe:disabled { opacity: .45; }
 
 @media (max-width: 860px) {
-  .control-bar { grid-template-columns: 1fr; gap: 1rem; }
-  .control-side { flex-direction: row; }
-  .control-side .btn { flex: 1; }
+  /* minmax(0, 1fr), а не 1fr: у 1fr минимальная ширина — min-content, и
+     ряд кнопок с подписями («Лидеры на экран», «Открыть первый вопрос»)
+     делал колонку шире экрана. В итоге вся вкладка получала
+     горизонтальную прокрутку, а правая кнопка уезжала за край */
+  .control-bar { grid-template-columns: minmax(0, 1fr); gap: 1rem; }
+  .control-bar > * { min-width: 0; }
+  .control-buttons { flex-wrap: wrap; }
+  .control-buttons .ctl { min-width: 0; }
+  .ctl-label { white-space: normal; }
+  .control-side { flex-direction: row; flex-wrap: wrap; }
+  .control-side .btn { flex: 1; white-space: normal; }
   .onair-row { flex-wrap: wrap; }
   .onair-row .or-text { flex: 1 1 100%; order: 3; white-space: normal; }
   .or-author { order: 4; }
@@ -351,6 +363,8 @@
 /* ---------------- Квиз (5.0) ---------------- */
 .quiz-ctl-bar { align-items: flex-start; }
 .quiz-state { margin: 0; font-size: .88rem; flex: 1; min-width: 180px; }
+/* шапка панели: на узком экране она переносится, и «прилипание» под ней
+   считает moderator.js (--topbar-h), иначе верхняя кнопка уезжает под шапку */
 
 .quiz-list { display: flex; flex-direction: column; gap: .5rem; }
 .quiz-row {
@@ -360,13 +374,21 @@
 .quiz-row.is-current { border-color: var(--accent); }
 .quiz-row-top { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 .quiz-pos { color: var(--muted); font-weight: 700; min-width: 1.4em; text-align: center; }
-.quiz-qtext { flex: 1; min-width: 200px; }
+/* длинный вопрос в списке не растягивает строку на весь экран: панель —
+   сетка, и без min-width:0 текст вылезал вправо за карточку */
+.quiz-qtext {
+  flex: 1 1 200px; min-width: 0;
+  overflow-wrap: anywhere;
+}
 .quiz-answered { color: var(--muted); font-size: .82rem; white-space: nowrap; }
 
 .quiz-chips { display: flex; gap: .4rem; flex-wrap: wrap; margin-top: .45rem; }
 .quiz-chip {
   font-size: .8rem; border: 1px solid var(--line); border-radius: 999px;
   padding: .15rem .6rem; background: rgba(255, 255, 255, .04);
+  /* вариант в восемьдесят символов одним словом иначе вылезал из карточки
+     и включал горизонтальную прокрутку всей вкладки */
+  max-width: 100%; overflow-wrap: anywhere;
 }
 .quiz-chip.is-right { border-color: var(--ok); color: var(--ok); }
 .quiz-chip-free { color: var(--warn); border-color: rgba(255, 182, 72, .45); }
@@ -391,6 +413,14 @@
 .qt-item b { color: var(--text); }
 .qt-item.is-right::before { background: rgba(72, 201, 128, .28); }
 .qt-item.is-right b { color: var(--ok); }
+
+/* Кнопки правки вопроса. .or-actions рассчитан на строку ленты: там они в
+   один ряд справа от текста. В карточке вопроса места меньше, и пять
+   кнопок в столбик растягивали карточку на пол-экрана, выдавливая текст
+   влево. Здесь они идут в ряд под текстом. */
+.quiz-row .or-actions {
+  margin-left: auto; display: flex; gap: .25rem; flex: none;
+}
 
 /* редактор вопроса: тот же для нового и для правки */
 .quiz-editor {
@@ -421,6 +451,6 @@
   padding: .55rem .8rem; border: 1px solid var(--line); border-radius: 10px;
   background: var(--bg-soft);
 }
-.qb-pos { width: 2rem; text-align: center; color: var(--muted); font-weight: 700; }
+.qb-pos { width: 2rem; text-align: center; color: var(--muted); font-weight: 700; flex: none; }
 .qb-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.qb-score { font-weight: 800; color: var(--ok); }
+.qb-score { font-weight: 800; color: var(--ok); flex: none; }

@@ -1466,6 +1466,14 @@ async def api_mod_quiz_control(
     elif action == "board":
         if screen.quiz_phase == "idle":
             raise HTTPException(status_code=400, detail="Квиз сейчас не идёт")
+        # финальная таблица — итог вечера, а не пауза: повторное «лидеры»
+        # снимало с неё флаг финала, и итог превращался в промежуточную
+        # таблицу, которая сама листает всех
+        if screen.quiz_phase == "board" and screen.quiz_final:
+            raise HTTPException(
+                status_code=400,
+                detail="Игра уже закончена — финальная таблица на экране",
+            )
         # на таблицу уходят посмотреть лидеров и вернуться, поэтому помним,
         # откуда именно: шаг «назад» ведёт туда же, а не в начало вопроса
         if screen.quiz_phase != "board":

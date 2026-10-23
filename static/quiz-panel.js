@@ -71,8 +71,16 @@ const STEP = {
 };
 
 // отсчёт на проекторе живёт на сервере, но панель тикает сама между
-// сигналами: иначе цифра стоит на месте, пока гость кто-нибудь не ответит
+// сигналами: иначе цифра стоит на месте, пока кто-нибудь не ответит.
+// Живёт отдельно от renderQuizControls: перерисовка не имеет права
+// пересчитывать дедлайн от старого серверного числа, иначе каждая секунда
+// начинала отсчёт заново и цифра замирала
 let quizDeadline = null;
+
+function armQuizDeadline() {
+  quizDeadline = (quizState.time_left != null)
+    ? Date.now() + quizState.time_left * 1000 : null;
+}
 
 /* Куда ведёт текущий шаг. На промежуточной таблице это возврат к вопросу,
    и решает сервер: он знает стадию, из которой ведущий ушёл на лидеров. */
@@ -88,8 +96,6 @@ function renderQuizControls() {
   const cur = order.indexOf(st.current);
   const total = order.length;
 
-  quizDeadline = (st.time_left != null) ? Date.now() + st.time_left * 1000 : null;
-
   const step = currentStep();
   const stepOn = !!step.action && total > 0;
   // пока игра не запущена, шаговой кнопки не видно: на её месте «Запустить
@@ -99,11 +105,19 @@ function renderQuizControls() {
   quizStepBtn.hidden = st.phase === 'idle';
   quizStepBtn.disabled = !stepOn;
   quizStepGlyph.textContent = step.glyph;
-  quizStepLabel.textContent = stepOn ? step.label : 'Сначала добавьте вопросы';
+  // почему шаг недоступен — три разные причины, и «добавьте вопросы» на
+  // финальной таблице читается как поломка: там игра уже прожита
+  if (stepOn) quizStepLabel.textContent = step.label;
+  else if (!total) quizStepLabel.textContent = 'Сначала добавьте вопросы';
+  else if (st.phase === 'board' && st.final) quizStepLabel.textContent = 'Игра окончена';
+  else quizStepLabel.textContent = step.label || 'Шага нет';
 
   // «Лидеры на экран» включается когда есть что показывать: в холле ответов
-  // ещё нет, и пустая таблица залу не нужна
-  quizBoardBtn.disabled = !st.answers_total;
+  // ещё нет, и пустая таблица залу не нужна. На финальной таблице кнопка
+  // выключена: нажатие снимало с неё флаг финала и превращало итог вечера
+  // в промежуточную таблицу, которая листает всех
+  const onFinalBoard = st.phase === 'board' && st.final;
+  quizBoardBtn.disabled = !st.answers_total || onFinalBoard;
   quizStopBtn.disabled = st.phase === 'idle';
   quizResetBtn.disabled = !st.answers_total;
 
@@ -208,6 +222,7 @@ async function reload() {
   // а сигналы об ответах гостей прилетают часто
   try {
     quizState = await api(ev('/api/moderator/quiz'));
+    armQuizDeadline();
     renderQuizControls();
     renderBoard();
     if (quizEditor.hidden) renderQuestions();
@@ -220,6 +235,7 @@ async function reload() {
 async function quizControl(action, fields = {}) {
   try {
     quizState = await postForm(ev('/api/moderator/quiz/control'), { action, ...fields });
+    armQuizDeadline();
     renderQuizControls();
     renderBoard();
     if (quizEditor.hidden) renderQuestions();

@@ -256,6 +256,19 @@
   padding: clamp(1rem, 3vh, 2.5rem) clamp(1.5rem, 4vw, 3rem);
   text-align: center;
   color: var(--text);
+  /* проектор не прокручивается: всё, что не влезло, зал не увидит.
+     Поэтому блок не растягивает экран, а сжимает внутренность (fitQuiz) */
+  max-height: 100%;
+}
+
+/* Внутренность блока — то, что экран масштабирует целиком, когда текста
+   много. Трансформация не пересчитывает вёрстку: вариант остаётся одной
+   строкой, просто мельче. Угол сверху по центру: сжатое содержимое
+   остаётся на месте верхней кромки и ровно занимает свой блок, а не
+   уезжает вниз половиной разницы высот. */
+.quiz-fit {
+  transform-origin: center top;
+  will-change: transform;
 }
 .quiz-block.is-swap { animation: quizSwap .45s ease-out; }
 @keyframes quizSwap {
@@ -307,6 +320,9 @@
   font-size: clamp(1.6rem, 4.6vw, 3.6rem);
   line-height: 1.15;
   margin: 0 0 .5em;
+  /* длинная ссылка или капс без пробелов не должно уезжать за край:
+     переносим на любом месте, а не только по пробелам */
+  overflow-wrap: anywhere;
 }
 /* Большая цифра отсчёта: её видно с задних рядов. Кончилась — вместо
    цифры висит напоминание, но ответы продолжают приниматься: приём
@@ -340,6 +356,7 @@
   padding: clamp(.6rem, 1.8vh, 1.2rem) clamp(1rem, 2.5vw, 1.8rem);
   font-size: clamp(1rem, 2.6vw, 2rem);
   text-align: left;
+  overflow-wrap: anywhere;
 }
 .quiz-s-opt.is-right { border-color: var(--ok); }
 .quiz-s-opt.is-bar { display: flex; align-items: center; gap: 1em; }
@@ -371,6 +388,7 @@
 .quiz-s-name {
   flex: 1; text-align: left;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  min-width: 0;
 }
 .quiz-s-score { font-weight: 800; color: var(--ok); font-variant-numeric: tabular-nums; }
 .quiz-s-note { color: var(--muted); font-size: clamp(.9rem, 2vw, 1.3rem); }

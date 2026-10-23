@@ -75,6 +75,7 @@
   font-size: 1.35rem;
   line-height: 1.35;
   margin: 0 0 .4rem;
+  overflow-wrap: anywhere;
 }
 .quiz-nopoints {
   color: var(--warn);
@@ -99,6 +100,7 @@
   color: var(--text);
   cursor: pointer;
   min-height: 52px;
+  overflow-wrap: anywhere;
   transition: border-color .15s, background .15s;
 }
 .quiz-option:active { transform: scale(.99); }
@@ -136,7 +138,7 @@
   border-radius: 14px;
   pointer-events: none;
 }
-.qo-text { position: relative; flex: 1; }
+.qo-text { position: relative; flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .qo-num { position: relative; color: var(--muted); font-size: .85rem; white-space: nowrap; }
 .qo-mark { position: relative; font-weight: 800; }
 .qo-right { color: var(--ok); }
@@ -165,8 +167,8 @@
   background: var(--card);
 }
 .quiz-board-row.is-mine { border-color: var(--accent); }
-.qb-pos { width: 2rem; text-align: center; font-weight: 700; color: var(--muted); }
-.qb-name { flex: 1; }
-.qb-score { font-weight: 800; color: var(--ok); }
+.qb-pos { width: 2rem; text-align: center; font-weight: 700; color: var(--muted); flex: none; }
+.qb-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.qb-score { font-weight: 800; color: var(--ok); flex: none; }
 
 #boardMe { margin-top: .8rem; }

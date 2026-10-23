@@ -629,9 +629,11 @@ if websockets is not None:
 else:
     print("  OK   финальный кадр экрана (websockets не установлен — пропущено)")
 
-st, h = call("POST", "/api/moderator/quiz/control", {"action": "board"})
-check("обычная кнопка лидеров снимает статус финала",
-      h.get("phase") == "board" and h.get("final") is False, str(h.get("final")))
+st, _ = call("POST", "/api/moderator/quiz/control", {"action": "board"}, expect=400)
+check("финальную таблицу нельзя превратить в промежуточную повторным «лидеры»", True)
+_, h = call("GET", "/api/moderator/quiz")
+check("финал на месте после отказа",
+      h.get("phase") == "board" and h.get("final") is True, str(h.get("final")))
 call("POST", "/api/moderator/quiz/control", {"action": "stop"})
 _, h = call("GET", "/api/moderator/quiz")
 check("завершение убирает финал и отсчёт из состояния",

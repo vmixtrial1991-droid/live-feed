@@ -1183,6 +1183,12 @@ MAX_TIMER = 600
 # название игры на холле: оно стоит крупно над QR, длинное не влезает
 MAX_QUIZ_TITLE_LEN = 60
 
+# Вопрос с картинкой: картинка съедает половину кадра, и длинный текст
+# рядом с ней уже не читается. Поэтому в этом режиме лимиты жёстче, а на
+# экране ответы стоят в два столбца — так они видны целиком под картинкой.
+WITH_IMAGE_QUESTION_LEN = 90
+WITH_IMAGE_OPTION_LEN = 40
+
 # метка «поле не трогать» для формы правки: пустая строка слишком нужна
 # для «стереть», а выдуманное слово никто случайно не пришлёт
 FORM_KEEP = "__keep__"
@@ -1213,15 +1219,46 @@ def _quiz_seconds(raw: str) -> int | None:
     return value
 
 
-def _quiz_options(raw: str) -> list[str]:
-    """Варианты из формы: список прилетает JSON-ом, пустые отсекаем."""
+async def _quiz_image(event: Event, upload: UploadFile | None) -> str | None:
+    """Сохраняет картинку вопроса тем же путём, что и фото ленты.
+
+    Возвращает имя файла или None, если картинку не прикладывали. Сервер
+    сам пережимает её до 1600 px по длинной стороне (images.save_upload),
+    поэтому с телефона можно присылать что угодно — проектор получит
+    нормальный по весу файл, а не двенадцать мегабайт с камеры.
+    """
+    if upload is None or not upload.filename:
+        return None
+    data = await upload.read()
+    try:
+        return images.save_upload(data, event.uploads_dir, upload.filename)
+    except images.ImageError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+def _quiz_options(raw: str, limit: int = MAX_OPTION_LEN) -> list[str]:
+    """Варианты из формы: список прилетает JSON-ом, пустые отсекаем.
+
+    limit в вопросе с картинкой меньше: два столбца вариантов должны
+    читаться с дальних рядов рядом с фотографией, а не спорить с ней.
+    """
     try:
         parsed = json.loads(raw or "")
     except ValueError:
         raise HTTPException(status_code=400, detail="Варианты должны быть списком")
     if not isinstance(parsed, list):
         raise HTTPException(status_code=400, detail="Варианты должны быть списком")
-    options = [" ".join(str(o).split())[:MAX_OPTION_LEN] for o in parsed]
+    # длинный вариант при картинке не обрезаем молча: ведущий не увидит,
+    # что часть текста пропала, и зал прочитает другое
+    for raw_opt in parsed:
+        clean_opt = " ".join(str(raw_opt).split())
+        if len(clean_opt) > limit:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Вариант длиннее {limit} символов не поместится рядом "
+                       f"с картинкой. Сократите на {len(clean_opt) - limit}.",
+            )
+    options = [" ".join(str(o).split())[:limit] for o in parsed]
     options = [o for o in options if o]
     if not (MIN_OPTIONS <= len(options) <= MAX_OPTIONS):
         raise HTTPException(
@@ -1272,20 +1309,39 @@ async def api_mod_quiz_add(
     correct: int = Form(-1),
     scored: str = Form("1"),
     seconds: str = Form(""),
+    image: UploadFile | None = File(None),
 ):
-    """Новый вопрос встаёт в конец очереди; порядок правится кнопками."""
+    """Новый вопрос встаёт в конец очереди; порядок правится кнопками.
+
+    Картинка необязательна. Если она есть, лимиты текста жёстче, а экран
+    ставит ответы в два столбца: фотография занимает заметную часть кадра.
+    Файл проходит тот же путь, что и фото ленты, — пережимается сервером
+    до 1600 px по длинной стороне и сохраняется в uploads события.
+    """
     event = _event_or_404(slug)
     _require_moderator(request, event)
-    text = " ".join((text or "").split())[:MAX_QUESTION_LEN]
+
+    stored = await _quiz_image(event, image)
+    text_limit = WITH_IMAGE_QUESTION_LEN if stored else MAX_QUESTION_LEN
+    option_limit = WITH_IMAGE_OPTION_LEN if stored else MAX_OPTION_LEN
+
+    text = " ".join((text or "").split())
     if not text:
         raise HTTPException(status_code=400, detail="Напишите текст вопроса")
-    opts = _quiz_options(options)
+    if len(text) > text_limit:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Вопрос с картинкой — до {text_limit} символов. "
+                   f"Сократите на {len(text) - text_limit}.",
+        )
+    opts = _quiz_options(options, option_limit)
     graded = str(scored).lower() in ("1", "true", "on", "yes")
     if graded and not (0 <= correct < len(opts)):
         raise HTTPException(status_code=400, detail="Отметьте правильный вариант")
     # у «хитрого» вопроса правильного нет намеренно: смысл в разбросе мнений
     question = event.store.quiz_add_question(
-        text, opts, correct if graded else -1, graded, _quiz_seconds(seconds)
+        text, opts, correct if graded else -1, graded, _quiz_seconds(seconds),
+        image=stored,
     )
     runtime = _runtime(event)
     await runtime.hub.to_moderator({"type": "quiz_update"})
@@ -1302,6 +1358,8 @@ async def api_mod_quiz_update(
     correct: int = Form(-2),
     scored: str = Form(""),
     seconds: str = Form(FORM_KEEP),
+    image: UploadFile | None = File(None),
+    drop_image: str = Form(""),
 ):
     """Правка вопроса. Пустые поля не трогаем: форма присылает только то,
     что изменилось. -2 у correct означает «не менять» ( -1 сам по себе —
@@ -1309,18 +1367,35 @@ async def api_mod_quiz_update(
 
     seconds — тот же фокус: «не менять» помечен специальным значением,
     а пустая строка для формы значит «поля нет вовсе». Стереть отсчёт —
-    значит прислать 0."""
+    значит прислать 0.
+
+    Картинка: новую присылают файлом, `drop_image=1` убирает прежнюю.
+    Ни того, ни другого — картинка остаётся как была.
+    """
     event = _event_or_404(slug)
     _require_moderator(request, event)
     old = event.store.quiz_get_question(question_id)
     if old is None:
         raise HTTPException(status_code=404, detail="Вопрос не найден")
 
+    new_image = await _quiz_image(event, image)
+    drop = str(drop_image).lower() in ("1", "true", "on", "yes")
+    final_image = new_image if new_image else (None if drop else old.get("image"))
+    text_limit = WITH_IMAGE_QUESTION_LEN if final_image else MAX_QUESTION_LEN
+    option_limit = WITH_IMAGE_OPTION_LEN if final_image else MAX_OPTION_LEN
+
     fields: dict = {}
     if text.strip():
-        fields["text"] = " ".join(text.split())[:MAX_QUESTION_LEN]
+        clean_text = " ".join(text.split())
+        if len(clean_text) > text_limit:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Вопрос с картинкой — до {text_limit} символов. "
+                       f"Сократите на {len(clean_text) - text_limit}.",
+            )
+        fields["text"] = clean_text
     if options.strip():
-        fields["options"] = _quiz_options(options)
+        fields["options"] = _quiz_options(options, option_limit)
     if scored != "":
         graded = str(scored).lower() in ("1", "true", "on", "yes")
         fields["scored"] = graded
@@ -1332,6 +1407,10 @@ async def api_mod_quiz_update(
         fields["correct"] = old["correct"]
     if seconds != FORM_KEEP:
         fields["seconds"] = _quiz_seconds(seconds)
+    # image: None значит «убрать», поэтому «не трогать» — только когда ни
+    # файла, ни просьбы убрать не было
+    if new_image or drop:
+        fields["image"] = final_image
 
     final_options = fields.get("options", old["options"])
     final_scored = fields.get("scored", old["scored"])

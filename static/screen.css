@@ -371,6 +371,73 @@
   display: flex; flex-direction: column;
   gap: clamp(.5rem, 1.4vh, 1rem);
 }
+
+/* Вопрос с картинкой: фото слева, вопрос и ответы справа. Ответы сеткой
+   2x2 (1 2 сверху, 3 4 снизу): с картинкой сервер пускает варианты не
+   длиннее 40 знаков, и в два столбца они читаются быстрее, чем столбиком,
+   а высота тратится вдвое меньше — как раз то, что нужно рядом с фото. */
+.quiz-body.has-image {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: clamp(1rem, 3vw, 2.4rem);
+  align-items: center;
+  text-align: left;
+}
+.quiz-shot { min-width: 0; display: flex; justify-content: center; }
+.quiz-shot img {
+  display: block;
+  max-width: 100%;
+  max-height: min(58vh, 520px);
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, .03);
+}
+/* сетка ответов: 1 2 сверху, 3 4 снизу */
+.quiz-body.has-image .quiz-opts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: clamp(.5rem, 1.2vh, .9rem);
+  margin-top: .55em;
+}
+/* с картинкой вопрос и ответы делят высоту с фото: заголовок помельче,
+   чтобы 2x2 влезли целиком */
+.quiz-body.has-image .quiz-q {
+  font-size: clamp(1.2rem, 2.6vw, 2.3rem);
+  margin-bottom: 0;
+}
+.quiz-body.has-image .quiz-s-opt {
+  font-size: clamp(.85rem, 1.5vw, 1.35rem);
+  padding: clamp(.5rem, 1.3vh, .9rem) clamp(.7rem, 1.5vw, 1.1rem);
+}
+/* В режиме с картинкой ячейка узкая: номер, текст и проценты в одну строку
+   не помещаются, и слова рвались посередине («Квадр/ат»). Поэтому процент
+   уходит под текст, а сам текст переносится только по словам. */
+.quiz-body.has-image .quiz-s-opt.is-bar {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas:
+    "idx text"
+    "idx num";
+  align-items: center;
+  gap: .15em .6em;
+}
+.quiz-body.has-image .quiz-s-opt.is-bar .quiz-s-idx { grid-area: idx; align-self: start; }
+.quiz-body.has-image .quiz-s-opt.is-bar .quiz-s-text {
+  grid-area: text;
+  overflow-wrap: break-word;   /* только по словам, а не посреди слова */
+  word-break: normal;
+  hyphens: none;
+}
+.quiz-body.has-image .quiz-s-opt.is-bar .quiz-s-num {
+  grid-area: num;
+  font-size: .85em;
+}
+
+/* тег и подпись «ответили» — по центру всей карточки, как и без фото */
+.quiz-body.has-image .quiz-tag,
+.quiz-body.has-image .quiz-count { text-align: center; }
 .quiz-s-opt {
   position: relative; overflow: hidden;
   border: 1px solid var(--line); border-radius: 14px;

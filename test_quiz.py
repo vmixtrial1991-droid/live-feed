@@ -79,6 +79,57 @@ GUEST2: dict[str, str] = {}    # второй зал — своя банка, с
 GUEST3: dict[str, str] = {}    # третий зал: нужен для равных мест в таблице
 
 
+def upload(url: str, fields: dict, file_field: str, filename: str,
+           data: bytes, expect: int | None = None):
+    """multipart-запрос: форма плюс файл. Cookie — из общей банки."""
+    import uuid
+
+    boundary = "----lftest" + uuid.uuid4().hex
+    body = bytearray()
+    for k, v in fields.items():
+        body += f"--{boundary}\r\n".encode()
+        body += f'Content-Disposition: form-data; name="{k}"\r\n\r\n'.encode()
+        body += str(v).encode() + b"\r\n"
+    body += f"--{boundary}\r\n".encode()
+    body += (f'Content-Disposition: form-data; name="{file_field}"; '
+             f'filename="{filename}"\r\n').encode()
+    body += b"Content-Type: image/jpeg\r\n\r\n" + data + b"\r\n"
+    body += f"--{boundary}--\r\n".encode()
+    req = urllib.request.Request(
+        BASE + url, data=bytes(body), method="POST",
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+    )
+    if COOKIES:
+        req.add_header("Cookie", "; ".join(f"{k}={v}" for k, v in COOKIES.items()))
+    status, raw = None, b""
+    try:
+        with urllib.request.urlopen(req) as resp:
+            raw, status = resp.read(), resp.status
+    except urllib.error.HTTPError as exc:
+        raw, status = exc.read(), exc.code
+    if expect is not None and status != expect:
+        check(f"upload {url}", False, f"статус {status}, ждали {expect}: {raw[:160]!r}")
+    try:
+        return status, json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return status, raw
+
+
+def sample_jpeg(width: int = 2400, height: int = 1600) -> bytes:
+    """Тестовая картинка: заведомо больше предела 1600 по длинной стороне."""
+    import io as _io
+
+    from PIL import Image, ImageDraw
+
+    img = Image.new("RGB", (width, height), (30, 44, 84))
+    d = ImageDraw.Draw(img)
+    d.ellipse([width // 4, height // 4, width * 3 // 4, height * 3 // 4],
+              fill=(120, 170, 255))
+    buf = _io.BytesIO()
+    img.save(buf, "JPEG", quality=95)
+    return buf.getvalue()
+
+
 def config() -> dict:
     with open(CONFIG_PATH, encoding="utf-8") as f:
         return json.load(f)
@@ -193,6 +244,66 @@ st, r = call("POST", "/api/moderator/quiz/update",
 check("правка текста не трогает остальные поля",
       st == 200 and r["question"]["text"] == "Сколько будет 2+2 ?"
       and r["question"]["correct"] == 1)
+
+print("\n=== Вопрос с картинкой ===")
+st, r = upload("/api/moderator/quiz/add", {
+    "text": "Что на картинке?",
+    "options": json.dumps(["Круг", "Квадрат", "Треугольник", "Звезда"], ensure_ascii=False),
+    "correct": "0", "scored": "1", "seconds": "20",
+}, "image", "shape.jpg", sample_jpeg())
+qimg = (r.get("question") or {}).get("id")
+check("вопрос с картинкой создаётся", st == 200 and qimg is not None, str(r)[:140])
+check("у вопроса запомнилось имя файла картинки",
+      bool((r.get("question") or {}).get("image")), str(r.get("question"))[:120])
+
+# файл лёг в uploads события и пережат до 1600 px по длинной стороне
+files = [p for p in os.listdir(os.path.join(DATA_DIR, "events", SLUG, "uploads"))
+         if p.startswith(tuple("0123456789"))]
+check("картинка лежит в папке загрузок события", len(files) >= 1, str(files[:3]))
+if files:
+    from PIL import Image as _Image
+    path = os.path.join(DATA_DIR, "events", SLUG, "uploads", files[0])
+    with _Image.open(path) as im:
+        check("сервер пережал картинку до 1600 px", max(im.size) <= 1600, str(im.size))
+
+st, _ = upload("/api/moderator/quiz/add", {
+    "text": "Очень длинный вопрос " * 5,
+    "options": json.dumps(["а", "б"], ensure_ascii=False),
+    "correct": "0", "scored": "1",
+}, "image", "shape.jpg", sample_jpeg(), expect=400)
+check("с картинкой длинный текст вопроса отклоняется", True)
+st, _ = upload("/api/moderator/quiz/add", {
+    "text": "Коротко",
+    "options": json.dumps(["а" * 60, "б"], ensure_ascii=False),
+    "correct": "0", "scored": "1",
+}, "image", "shape.jpg", sample_jpeg(), expect=400)
+check("с картинкой длинный вариант отклоняется", True)
+_, h = call("GET", "/api/moderator/quiz")
+check("отклонённые вопросы в колоду не попали",
+      not any(q["text"].startswith("Очень длинный") for q in h["questions"]),
+      str([q["text"][:20] for q in h["questions"]]))
+
+st, _ = call("POST", "/api/moderator/quiz/update",
+             {"question_id": qimg, "drop_image": "1"})
+_, h = call("GET", "/api/moderator/quiz")
+q_after = next((q for q in h["questions"] if q["id"] == qimg), None)
+check("картинку можно убрать правкой",
+      st == 200 and q_after is not None and not q_after.get("image"),
+      str(q_after)[:120])
+# возвращаем картинку: без неё нечем проверить кадр экрана
+st, _ = upload("/api/moderator/quiz/update", {
+    "question_id": qimg, "text": "Что на картинке?",
+    "options": json.dumps(["Круг", "Квадрат"], ensure_ascii=False),
+    "correct": "0", "scored": "1", "seconds": "20",
+}, "image", "shape.jpg", sample_jpeg())
+check("картинку можно вернуть правкой", st == 200, str(st))
+
+# проверки картинки самодостаточны: колода нужна остальным разделам ровно
+# из двух вопросов, поэтому лишний вопрос убираем сразу после проверки
+call("POST", "/api/moderator/quiz/delete", {"question_id": qimg})
+_, h = call("GET", "/api/moderator/quiz")
+check("после проверки картинки колода снова из двух вопросов",
+      len(h["questions"]) == 2, str([q["id"] for q in h["questions"]]))
 
 st, _ = call("POST", "/api/moderator/quiz/move",
              {"question_id": q2, "direction": "up"})

@@ -702,6 +702,21 @@ check("moderator.html: справа остались лидеры, сброс и
 check("moderator.html: поле времени ответа в редакторе вопроса", 'id="qSeconds"' in mod_html)
 check("moderator.html: в подсказке редактора сказано про два-четыре варианта",
       "от двух до четырёх" in mod_html)
+check("moderator.html: в редакторе есть загрузка картинки к вопросу",
+      'id="qImage"' in mod_html and 'accept="image/*"' in mod_html
+      and 'id="qImageDrop"' in mod_html)
+check("screen.html: тело вопроса умеет раскладываться с картинкой",
+      'class="quiz-body"' in screen_html and 'id="quizShot"' in screen_html
+      and 'id="quizShotImg"' in screen_html)
+check("screen.js: картинка ставится только когда она есть у вопроса",
+      "function setQuizImage" in screen_js and "has-image" in screen_js)
+check("screen.css: с картинкой ответы встают сеткой, а фото слева",
+      re.search(r"\.quiz-body\.has-image\s*\{[^}]*grid-template-columns", screen_css, re.S)
+      is not None
+      and re.search(r"\.quiz-body\.has-image \.quiz-opts\s*\{[^}]*grid-template-columns:\s*1fr 1fr",
+                    screen_css, re.S) is not None)
+check("quiz-panel.js: с картинкой лимиты текста жёстче",
+      "imgText: 90" in quiz_panel_js and "imgOption: 40" in quiz_panel_js)
 check("moderator.html: поле названия игры на вкладке «Квиз»",
       'id="quizTitleInput"' in mod_html and 'id="quizTitleSave"' in mod_html)
 check("quiz-panel.js: название игры уходит на сервер и подставляет событие подсказкой",

@@ -446,6 +446,17 @@
   border: 1px dashed var(--accent); border-radius: 12px;
   display: flex; flex-direction: column; gap: .8rem;
 }
+/* Файл выбираем кнопкой-подписью: сам input спрятан, но остаётся в
+   потоке для клавиатуры и для label for=. */
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+.quiz-image-row { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
+.quiz-image-preview {
+  display: block; width: 72px; height: 72px; object-fit: cover;
+  border-radius: 10px; border: 1px solid var(--line);
+}
 .quiz-opt-rows { display: flex; flex-direction: column; gap: .45rem; }
 .quiz-opt-row { display: flex; align-items: center; gap: .5rem; }
 .quiz-opt-row input[type="radio"] { accent-color: var(--ok); width: 1.15rem; height: 1.15rem; flex: none; }

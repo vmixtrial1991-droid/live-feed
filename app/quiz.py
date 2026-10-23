@@ -25,6 +25,7 @@ main.py. Правильный номер ответа зрителям не от
 from __future__ import annotations
 
 import time
+from urllib.parse import quote
 
 from .db import EventStore
 from .events import Event
@@ -55,18 +56,28 @@ def back_phase(screen: ScreenController) -> str | None:
     return prev
 
 
-def question_public(q: dict) -> dict:
+def question_public(q: dict, with_image: bool = False) -> dict:
     """Вопрос для зрителей: текст, варианты, зачётность — без правильного.
 
     seconds сюда не входит намеренно: отсчёт видит только проектор,
     телефоны не должны превращать игру в гонку.
+
+    Картинка — только для проектора (with_image=True). На телефоне гость
+    видит вопрос и варианты без неё: экран в руке маленький, фото рядом с
+    текстом отнимает место у кнопок, а рассматривать его зал всё равно
+    будет на большом экране. Ключ экрана к ссылке добавляет screen.js
+    (withKey): /media без пропуска не отдаётся.
     """
-    return {
+    data = {
         "id": q["id"],
         "text": q["text"],
         "options": q["options"],
         "scored": bool(q["scored"]),
     }
+    image = q.get("image")
+    if with_image and image:
+        data["image"] = "/media/" + quote(str(image))
+    return data
 
 
 def _position_of(store: EventStore, question_id: int) -> tuple[int, int]:
@@ -164,7 +175,8 @@ def display_payload(event: Event, screen: ScreenController, store: EventStore) -
     no, total = _position_of(store, q["id"])
     payload: dict = {
         "phase": phase,
-        "question": question_public(q),
+        # картинку получает только проектор: на телефоне она не нужна
+        "question": question_public(q, with_image=True),
         "question_no": no,
         "questions_total": total,
         "answered_total": store.quiz_answered_total(q["id"]),

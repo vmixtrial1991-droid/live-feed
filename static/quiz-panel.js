@@ -44,8 +44,24 @@ const quizLinkOpen = document.getElementById('quizLinkOpen');
 const quizQrImg = document.getElementById('quizQrImg');
 const quizQrDownload = document.getElementById('quizQrDownload');
 
+const qImage = document.getElementById('qImage');
+const qImagePreview = document.getElementById('qImagePreview');
+const qImageName = document.getElementById('qImageName');
+const qImageDrop = document.getElementById('qImageDrop');
+const qImageHint = document.getElementById('qImageHint');
+const qTextMax = document.getElementById('qTextMax');
+
 let quizState = { phase: 'idle', questions: [], board: [] };
 let editingId = null;          // вопрос, который правят; null — новый
+let qImageFile = null;         // выбранный файл; ещё не загружен
+let qImageExisting = null;     // картинка вопроса, который правят
+let qImageRemove = false;      // просьба убрать прежнюю картинку
+
+/* Пределы текста. С картинкой они жёстче: на экране фото занимает
+   половину кадра, и длинный текст рядом с ним не читается. Значения
+   повторяют серверные (MAX_QUESTION_LEN / WITH_IMAGE_*): сервер всё равно
+   проверит, а здесь они нужны, чтобы ведущий видел предел до отправки. */
+const LIMITS = { text: 200, option: 80, imgText: 90, imgOption: 40 };
 
 /* ---------------- Стадия и кнопки ---------------- */
 const PHASE_LABEL = {
@@ -339,13 +355,29 @@ quizList.addEventListener('click', async (e) => {
    что всё равно не примут. */
 const MAX_OPTIONS = 4;
 
+/* Предел текста варианта зависит от того, есть ли у вопроса картинка:
+   рядом с фото сервер принимает только 40 знаков, и поле должно честно
+   показывать тот же предел, а не давать набрать лишнее. */
+function optionLimit() {
+  return (qImageFile || (qImageExisting && !qImageRemove)) ? LIMITS.imgOption : LIMITS.option;
+}
+
+function syncOptionLimits() {
+  const lim = optionLimit();
+  [...qOptions.querySelectorAll('.q-opt-input')].forEach((inp) => {
+    inp.maxLength = lim;
+    inp.placeholder = lim === LIMITS.imgOption
+      ? `Вариант ответа (до ${lim})` : 'Вариант ответа';
+  });
+}
+
 function addOptionRow(text = '') {
   const row = document.createElement('div');
   row.className = 'quiz-opt-row';
   row.innerHTML = `
     <input type="radio" name="qCorrect" title="Правильный вариант">
     <span class="quiz-opt-idx"></span>
-    <input type="text" class="q-opt-input" maxlength="80" placeholder="Вариант ответа">
+    <input type="text" class="q-opt-input" placeholder="Вариант ответа">
     <button class="icon-btn danger" type="button" title="Убрать вариант">✕</button>`;
   row.querySelector('input[type=text]').value = text;
   row.querySelector('button').addEventListener('click', () => {
@@ -358,6 +390,7 @@ function addOptionRow(text = '') {
   });
   qOptions.appendChild(row);
   syncOptionButtons();
+  syncOptionLimits();
   return row;
 }
 
@@ -388,6 +421,10 @@ function openEditor(question) {
   qText.value = question ? question.text : '';
   qNoPoints.checked = question ? !question.scored : false;
   qSeconds.value = question && question.seconds ? String(question.seconds) : '';
+  // картинка: своя у правимого вопроса, пустая у нового
+  clearImageChoice();
+  qImageExisting = question && question.image ? question.image : null;
+  if (qImageExisting) showImageState(qImageExisting);
   qOptions.replaceChildren();
   // новый вопрос начинается с одной строки: остальные добавляются кнопкой.
   // Пустой список выглядел бы как «вопрос без вариантов», хотя сервер
@@ -398,6 +435,7 @@ function openEditor(question) {
     const radios = qOptions.querySelectorAll('input[type=radio]');
     if (radios[question.correct]) radios[question.correct].checked = true;
   }
+  syncTextLimits();
   updateQTextCount();
   syncOptionButtons();
   qText.focus();
@@ -406,9 +444,74 @@ function openEditor(question) {
 function closeEditor() {
   quizEditor.hidden = true;
   editingId = null;
+  clearImageChoice();
+  qImageExisting = null;
 }
 
-function updateQTextCount() { qTextCount.textContent = String(qText.value.length); }
+/* Картинка в редакторе: выбранный файл или уже сохранённая у вопроса.
+   Пределы текста и подсказка зависят от того, будет ли картинка у
+   вопроса, поэтому пересчитываются на каждое изменение. */
+function clearImageChoice() {
+  qImageFile = null;
+  qImageRemove = false;
+  qImage.value = '';
+  qImagePreview.hidden = true;
+  qImagePreview.removeAttribute('src');
+  qImageDrop.hidden = true;
+}
+
+function showImageState(name) {
+  qImagePreview.src = `/media/${encodeURIComponent(name)}?w=320`;
+  qImagePreview.hidden = false;
+  qImageDrop.hidden = false;
+  qImageName.textContent = name;
+}
+
+function hasImage() {
+  return !!qImageFile || (!!qImageExisting && !qImageRemove);
+}
+
+function syncTextLimits() {
+  const withImg = hasImage();
+  const textLim = withImg ? LIMITS.imgText : LIMITS.text;
+  qText.maxLength = textLim;
+  qTextMax.textContent = String(textLim);
+  qImageHint.hidden = !withImg;
+  qImageName.textContent = qImageFile
+    ? qImageFile.name
+    : (qImageExisting && !qImageRemove ? qImageExisting : 'нет картинки — вопрос текстовый');
+  syncOptionLimits();
+}
+
+qImage.addEventListener('change', () => {
+  const file = qImage.files && qImage.files[0];
+  if (!file) return;
+  qImageFile = file;
+  qImageRemove = false;
+  qImagePreview.src = URL.createObjectURL(file);
+  qImagePreview.hidden = false;
+  qImageName.textContent = file.name;
+  qImageDrop.hidden = false;
+  syncTextLimits();
+});
+
+qImageDrop.addEventListener('click', () => {
+  qImageFile = null;
+  qImageRemove = !!qImageExisting;   // прежнюю надо ещё и на сервере убрать
+  qImage.value = '';
+  qImagePreview.hidden = true;
+  qImagePreview.removeAttribute('src');
+  qImageDrop.hidden = true;
+  qImageName.textContent = 'нет картинки — вопрос текстовый';
+  syncTextLimits();
+  updateQTextCount();
+});
+
+function updateQTextCount() {
+  qTextCount.textContent = String(qText.value.length);
+  const lim = qText.maxLength > 0 ? qText.maxLength : LIMITS.text;
+  qTextCount.parentElement.classList.toggle('is-over', qText.value.length > lim);
+}
 qText.addEventListener('input', updateQTextCount);
 qAddOption.addEventListener('click', () => {
   if (qOptions.children.length >= MAX_OPTIONS) return;   // кнопка и так погашена
@@ -440,6 +543,22 @@ qSave.addEventListener('click', async () => {
     qStatus.textContent = 'Отметьте правильный вариант кружком слева';
     return;
   }
+  // предел длины проверяем здесь же: сервер откажет, но ведущему лучше
+  // узнать до отправки, а не потерять набранное на ошибке
+  const textLim = hasImage() ? LIMITS.imgText : LIMITS.text;
+  if (qText.value.trim().length > textLim) {
+    qStatus.textContent = `С картинкой вопрос — до ${textLim} знаков, `
+      + `сейчас ${qText.value.trim().length}`;
+    qText.focus();
+    return;
+  }
+  const optLim = optionLimit();
+  const longOpt = kept.find((r) => r.text.length > optLim);
+  if (longOpt) {
+    qStatus.textContent = `Вариант длиннее ${optLim} знаков не поместится `
+      + `рядом с картинкой — сократите`;
+    return;
+  }
   const fields = {
     text: qText.value.trim(),
     options: JSON.stringify(kept.map((r) => r.text)),
@@ -449,12 +568,19 @@ qSave.addEventListener('click', async () => {
     seconds: qSeconds.value.trim() || '0',
     correct: qNoPoints.checked ? -1 : correct,
   };
+  // файл отправляем только когда он есть: FormData поддерживает и
+  // multipart, и простые поля, поэтому один путь на оба случая
+  const body = new FormData();
+  Object.entries(fields).forEach(([k, v]) => body.append(k, String(v)));
+  if (editingId) body.append('question_id', String(editingId));
+  if (qImageFile) body.append('image', qImageFile);
+  if (qImageRemove) body.append('drop_image', '1');
   try {
-    if (editingId) {
-      await postForm(ev('/api/moderator/quiz/update'), { question_id: editingId, ...fields });
-    } else {
-      await postForm(ev('/api/moderator/quiz/add'), fields);
-    }
+    const url = editingId
+      ? ev('/api/moderator/quiz/update') : ev('/api/moderator/quiz/add');
+    const res = await fetch(url, { method: 'POST', body, credentials: 'same-origin' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || 'Не сохранилось');
     closeEditor();
     reload();
   } catch (ex) {

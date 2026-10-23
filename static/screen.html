@@ -73,13 +73,24 @@
   <div class="quiz-block quiz-screen-inner" id="quizPlay" hidden>
     <div class="quiz-fit">
       <p class="quiz-tag" id="quizTag"></p>
-      <!-- Отсчёт живёт только здесь, на проекторе: телефоны не должны
-           превращать игру в гонку. По истечении — надпись, но ответы всё
-           ещё принимаются: приём закрывает ведущий, а не секундомер. -->
-      <p class="quiz-s-timer" id="quizTimer" hidden></p>
-      <h1 class="quiz-q" id="quizQText"></h1>
-      <div class="quiz-opts" id="quizOpts"></div>
-      <p class="quiz-count" id="quizCount"></p>
+      <!-- Тело вопроса: без картинки это обычный столбик, с картинкой —
+           две колонки (фото слева, вопрос и ответы справа) и ответы
+           сеткой 2x2. Класс has-image ставит screen.js, когда у вопроса
+           есть файл. -->
+      <div class="quiz-body" id="quizBody">
+        <div class="quiz-shot" id="quizShot" hidden>
+          <img id="quizShotImg" alt="">
+        </div>
+        <div class="quiz-ask">
+          <!-- Отсчёт живёт только здесь, на проекторе: телефоны не должны
+               превращать игру в гонку. По истечении — надпись, но ответы всё
+               ещё принимаются: приём закрывает ведущий, а не секундомер. -->
+          <p class="quiz-s-timer" id="quizTimer" hidden></p>
+          <h1 class="quiz-q" id="quizQText"></h1>
+          <div class="quiz-opts" id="quizOpts"></div>
+          <p class="quiz-count" id="quizCount"></p>
+        </div>
+      </div>
     </div>
   </div>
 </div>

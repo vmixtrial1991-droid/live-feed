@@ -282,10 +282,26 @@
       <!-- Редактор вопроса: один и тот же для нового и для правки -->
       <div class="quiz-editor" id="quizEditor" hidden>
         <label class="field">
-          <span>Текст вопроса <b id="qTextCount">0</b>/200</span>
+          <span>Текст вопроса <b id="qTextCount">0</b>/<b id="qTextMax">200</b></span>
           <textarea id="qText" rows="2" maxlength="200" spellcheck="false"
                     placeholder="Например: какой год считается годом основания города?"></textarea>
         </label>
+
+        <!-- Картинка вопроса: только на проектор. Файл пережимается на
+             сервере, как и фото ленты, поэтому с телефона можно присылать
+             что угодно. С картинкой лимиты текста жёстче, а ответы на
+             экране встают сеткой 2x2 — об этом честно написано ниже. -->
+        <div class="quiz-image-row">
+          <label class="btn ghost small" for="qImage">🖼 Картинка к вопросу</label>
+          <input type="file" id="qImage" accept="image/*" class="visually-hidden">
+          <img id="qImagePreview" class="quiz-image-preview" alt="" hidden>
+          <span class="muted small" id="qImageName">нет картинки — вопрос текстовый</span>
+          <button class="btn ghost small" id="qImageDrop" type="button" hidden>Убрать</button>
+        </div>
+        <p class="muted small" id="qImageHint">
+          С картинкой вопрос — до 90 знаков, варианты — до 40, и на экране
+          они встанут двумя столбцами рядом с фото.
+        </p>
         <div class="quiz-opt-rows" id="qOptions"></div>
         <div class="row-actions">
           <button class="btn ghost small" id="qAddOption" type="button">+ вариант</button>

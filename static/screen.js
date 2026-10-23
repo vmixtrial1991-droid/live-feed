@@ -31,6 +31,9 @@ const lobbySub = document.getElementById('lobbySub');
 const lobbyQr = document.getElementById('lobbyQr');
 const lobbyHint = document.getElementById('lobbyHint');
 const quizTag = document.getElementById('quizTag');
+const quizBody = document.getElementById('quizBody');
+const quizShot = document.getElementById('quizShot');
+const quizShotImg = document.getElementById('quizShotImg');
 const quizTimer = document.getElementById('quizTimer');
 const quizQText = document.getElementById('quizQText');
 const quizOpts = document.getElementById('quizOpts');
@@ -215,6 +218,9 @@ function setQuizLayer(on) {
     stopQuizTicker();
     stopBoardScroll();
     shownBlock = null;
+    // слой погас — фото вопроса больше не нужно: следующий вопрос может
+    // быть без картинки, и старый кадр не должен мигнуть
+    setQuizImage(null);
   }
 }
 
@@ -333,6 +339,7 @@ function renderBoard(f) {
   setQuizLayer(true);
   showQuizBlock(quizPlay, 'board');
   quizTag.textContent = 'Квиз';
+  setQuizImage(null);
 
   // новый кадр прилетает с каждым ответом в зале, поэтому перематывать
   // страницу назад нельзя — при активном зале нулевая страница никогда бы
@@ -369,6 +376,24 @@ function renderBoard(f) {
   }
 }
 
+/* Картинка вопроса. Живёт только на проекторе: телефон её не получает,
+   и это осознанно — в руке фото отнимает место у кнопок.
+   null — вопроса с картинкой нет, блок остаётся обычным столбиком. */
+function setQuizImage(src) {
+  const has = !!src;
+  quizBody.classList.toggle('has-image', has);
+  quizShot.hidden = !has;
+  if (has) {
+    if (quizShotImg.getAttribute('src') !== src) {
+      // адрес приходит с ключом экрана и без кэша на сервере; грузим сразу,
+      // а не после первого кадра, чтобы фото успело появиться к вопросу
+      quizShotImg.src = src;
+    }
+  } else if (quizShotImg.getAttribute('src')) {
+    quizShotImg.removeAttribute('src');
+  }
+}
+
 function renderQuiz() {
   const f = quizFrame;
   if (!f) {
@@ -390,6 +415,8 @@ function renderQuiz() {
   quizTag.textContent = f.questions_total
     ? `Вопрос ${f.question_no} из ${f.questions_total}` : `Вопрос ${f.question_no}`;
   quizQText.textContent = q.text;
+  // картинку ставим до раскладки: от неё зависит, столбик это или сетка
+  setQuizImage(q.image ? withKey(ev(q.image)) : null);
 
   if (f.phase === 'open') {
     if (f.seconds_left != null) {

@@ -84,6 +84,7 @@ CREATE TABLE IF NOT EXISTS quiz_questions (
     scored     INTEGER NOT NULL DEFAULT 1,
     position   REAL NOT NULL DEFAULT 0,
     seconds    INTEGER,
+    image      TEXT,
     created_at REAL NOT NULL
 );
 
@@ -148,6 +149,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if "seconds" not in _columns(conn, "quiz_questions"):
         conn.execute("ALTER TABLE quiz_questions ADD COLUMN seconds INTEGER")
 
+    # 5.0: картинка к вопросу. NULL — вопрос текстовый, как раньше.
+    if "image" not in _columns(conn, "quiz_questions"):
+        conn.execute("ALTER TABLE quiz_questions ADD COLUMN image TEXT")
+
     # модерация убрана, но в старых базах остались её следы
     if "reject_reason" in have:
         conn.execute("UPDATE messages SET status = 'approved' WHERE status = 'pending'")
@@ -185,6 +190,9 @@ def _question_to_dict(row: sqlite3.Row | dict) -> dict[str, Any]:
         "scored": bool(d["scored"]),
         "position": d["position"],
         "seconds": int(d["seconds"]) if d.get("seconds") else None,
+        # имя файла картинки вопроса или None. Сам файл лежит в uploads
+        # события, рядом с фотографиями ленты
+        "image": d.get("image"),
         "created_at": d["created_at"],
     }
 
@@ -498,7 +506,7 @@ class EventStore:
 
     def quiz_add_question(
         self, text: str, options: list[str], correct: int, scored: bool,
-        seconds: int | None = None,
+        seconds: int | None = None, image: str | None = None,
     ) -> dict:
         """Новый вопрос встаёт в конец очереди вопросов."""
         now = time.time()
@@ -508,10 +516,11 @@ class EventStore:
             ).fetchone()[0]
             cur = conn.execute(
                 "INSERT INTO quiz_questions "
-                "(text, options, correct, scored, position, seconds, created_at) "
-                "VALUES (?,?,?,?,?,?,?)",
+                "(text, options, correct, scored, position, seconds, image, created_at) "
+                "VALUES (?,?,?,?,?,?,?,?)",
                 (text, json.dumps(options, ensure_ascii=False),
-                 correct if scored else -1, 1 if scored else 0, nxt, seconds, now),
+                 correct if scored else -1, 1 if scored else 0, nxt, seconds,
+                 image, now),
             )
             row = conn.execute(
                 "SELECT * FROM quiz_questions WHERE id = ?", (cur.lastrowid,)
@@ -526,6 +535,7 @@ class EventStore:
         correct: int | None = None,
         scored: bool | None = None,
         seconds: Any = _UNSET,
+        image: Any = _UNSET,
     ) -> dict | None:
         """Правка вопроса. Ответы не трогаем: кто отвечал на прежнюю
         редакцию — того ведущий оценивает сам (сбросом или принятием).
@@ -550,6 +560,11 @@ class EventStore:
         if seconds is not _UNSET:
             sets.append("seconds = ?")
             params.append(seconds)
+        # image — как seconds: None значит «убрать картинку», а «не трогать»
+        # отличается только тем, что параметр не пришёл (_UNSET)
+        if image is not _UNSET:
+            sets.append("image = ?")
+            params.append(image)
         if not sets:
             return self.quiz_get_question(question_id)
         params.append(question_id)
@@ -619,10 +634,10 @@ class EventStore:
                 return None
             cur = conn.execute(
                 "INSERT INTO quiz_questions "
-                "(text, options, correct, scored, position, seconds, created_at) "
-                "VALUES (?,?,?,?,?,?,?)",
+                "(text, options, correct, scored, position, seconds, image, created_at) "
+                "VALUES (?,?,?,?,?,?,?,?)",
                 (row["text"], row["options"], row["correct"], row["scored"],
-                 row["position"] + 0.5, row["seconds"], time.time()),
+                 row["position"] + 0.5, row["seconds"], row["image"], time.time()),
             )
             new = conn.execute(
                 "SELECT * FROM quiz_questions WHERE id = ?", (cur.lastrowid,)

@@ -252,33 +252,61 @@
 /* что именно занимает слой — холл, вопрос или таблица; при смене блок
    въезжает сверху, а градиент под ним остаётся на месте.
 
-   Ширина: доля экрана минус сэйфзона, но не шире 1600. Сэйфзона — поля,
+   Ширина: доля экрана минус сэйфзона, но не шире 1700. Сэйфзона — поля,
    которые остаются пустыми с каждой стороны: проекторы с обрезкой краёв
-   (overscan) и кривой геометрией срезают именно край, и заголовок,
-   прижатый к кромке, терял бы первую букву. 9% с каждой стороны — это
-   173 px на 1920 и 115 px на 1280: запас с большим перебором, зато
-   вопрос перестаёт складываться в узкий столбик.
+   (overscan) и кривой геометрией срезают именно край. 4% с каждой стороны
+   — это 77 px на 1920 и 51 px на 1280: запас перекрывает обрезку обычного
+   проектора, но не съедает кадр.
 
    Доля, а не фиксированные пиксели: на 1280 поле ужимается само, и
-   блок остаётся читаемым на слабом проекторе. Верхняя граница 1600 —
-   чтобы на 4K строка не растягивалась на всю стену: длинную строку
-   глаз теряет при переходе на новую.
+   блок остаётся читаемым на слабом проекторе. Верхняя граница 1700 —
+   чтобы на 4K строка не растягивалась на всю стену.
 
    --quiz-safe можно переопределить в одном месте, если проектор
    окажется с особенно широкой обрезкой. */
 .quiz-screen {
-  --quiz-safe: 9%;
-  --quiz-max: 1600px;
+  --quiz-safe: 4%;
+  --quiz-max: 1700px;
 }
 .quiz-block {
   width: min(calc(100% - 2 * var(--quiz-safe)), var(--quiz-max));
   margin: 0 auto;
-  padding: clamp(1rem, 3vh, 2.5rem) clamp(1.5rem, 3vw, 3rem);
+  padding: clamp(.6rem, 1.6vh, 1.4rem) clamp(.8rem, 1.6vw, 1.6rem);
   text-align: center;
   color: var(--text);
+  /* блок — колонка: шапка сверху фиксированной высоты, остальное отдано
+     телу вопроса. Так «Вопрос 3 из 9» и отсчёт всегда на одном месте */
+  display: flex;
+  flex-direction: column;
+  gap: clamp(.2rem, 1vh, .7rem);
   /* проектор не прокручивается: всё, что не влезло, зал не увидит.
      Поэтому блок не растягивает экран, а сжимает внутренность (fitQuiz) */
   max-height: 100%;
+  height: 100%;
+  justify-content: center;
+}
+
+/* Шапка вопроса: номер вопроса слева вверху, отсчёт — по центру. Оба
+   стоят на своих местах всегда, в одном и том же месте кадра, и не
+   отбирают высоту у вопроса с ответами — весь остаток кадра отдан телу
+   вопроса. Шапка лежит вне .quiz-fit, поэтому не сжимается вместе с
+   текстом: на длинном вопросе номер и цифра остаются крупными. */
+.quiz-head {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: start;
+  gap: .5rem;
+  flex: none;
+}
+.quiz-head .quiz-tag {
+  grid-column: 1;
+  justify-self: start;
+  margin: 0;
+}
+.quiz-head .quiz-s-timer {
+  grid-column: 2;
+  margin: 0;
+  line-height: 1;
 }
 
 /* Внутренность блока — то, что экран масштабирует, когда текста много.
@@ -288,7 +316,18 @@
 .quiz-fit {
   transform-origin: center top;
   will-change: transform;
+  min-height: 0;
+  /* свободную высоту блока забирает тело вопроса: картинке и ответам
+     достаётся весь остаток кадра под шапкой */
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
+.quiz-fit > .quiz-body { flex: 1 1 auto; }
+/* тело вопроса тянется на всю высоту, отданную .quiz-fit */
+.quiz-body { min-height: 0; }
+.quiz-ask { min-height: 0; }
 .quiz-block.is-swap { animation: quizSwap .45s ease-out; }
 @keyframes quizSwap {
   from { opacity: 0; transform: translateY(1.4rem) scale(.99); }
@@ -372,45 +411,111 @@
   gap: clamp(.5rem, 1.4vh, 1rem);
 }
 
-/* Вопрос с картинкой: фото слева, вопрос и ответы справа. Ответы сеткой
-   2x2 (1 2 сверху, 3 4 снизу): с картинкой сервер пускает варианты не
-   длиннее 40 знаков, и в два столбца они читаются быстрее, чем столбиком,
-   а высота тратится вдвое меньше — как раз то, что нужно рядом с фото. */
+/* Вопрос с картинкой. Вопрос всегда сверху во всю ширину: он не отбирает
+   место у ответов и не вынуждает жать фото.
+
+   Дальше раскладка зависит от пропорций снимка, потому что они требуют
+   разного:
+     - панорама и 4:3 (on-shot-wide): фото во всю ширину под вопросом,
+       ответы сеткой 2x2 под фото. Широкая картинка упирается в ширину
+       кадра, и в колонке она была бы маленькой полоской;
+     - квадрат и вертикаль (on-shot-square / on-shot-tall): фото крупно
+       справа во всю высоту, ответы слева. Высокому снимку ширина не нужна,
+       а высота нужна вся.
+
+   Ответы — сеткой 2x2 (1 2 сверху, 3 4 снизу): с картинкой сервер пускает
+   варианты не длиннее 40 знаков, и в два столбца они читаются быстрее.
+
+   .quiz-ask раскрывается через display: contents, чтобы его дети (вопрос,
+   ответы, подпись) стали ячейками этой же сетки: иначе вопрос не вынести
+   наверх, не перестраивая разметку. */
 .quiz-body.has-image {
   display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
-  gap: clamp(1rem, 3vw, 2.4rem);
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    "q"
+    "shot"
+    "opts"
+    "count";
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  gap: clamp(.35rem, 1vh, .8rem);
   align-items: center;
+  justify-items: center;
   text-align: left;
+  height: 100%;
 }
-.quiz-shot { min-width: 0; display: flex; justify-content: center; }
+.quiz-body.has-image .quiz-ask { display: contents; }
+.quiz-body.has-image .quiz-q {
+  grid-area: q;
+  text-align: center;
+  width: 100%;
+}
+.quiz-body.has-image .quiz-opts {
+  grid-area: opts;
+  width: 100%;
+}
+.quiz-body.has-image .quiz-count {
+  grid-area: count;
+  margin-top: 0;
+  text-align: center;
+}
+.quiz-shot {
+  grid-area: shot;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+  width: 100%;
+}
 .quiz-shot img {
   display: block;
   max-width: 100%;
-  max-height: min(58vh, 520px);
+  max-height: 100%;
   width: auto;
   height: auto;
   object-fit: contain;
-  border-radius: 16px;
+  border-radius: 14px;
   background: rgba(255, 255, 255, .03);
 }
+
+/* Квадрат и вертикаль: фото крупно справа во всю высоту, ответы слева.
+   Колонка фото сжимается по содержимому (auto), поэтому высокий снимок
+   получает почти всю высоту кадра, а не половину ширины. */
+.quiz-body.on-shot-square,
+.quiz-body.on-shot-tall {
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "q     q"
+    "opts  shot"
+    "count shot";
+  grid-template-rows: auto 1fr auto;
+  justify-items: stretch;
+}
+.quiz-body.on-shot-square .quiz-shot img { max-height: min(72vh, 760px); }
+.quiz-body.on-shot-tall .quiz-shot img { max-height: min(78vh, 830px); }
+
 /* сетка ответов: 1 2 сверху, 3 4 снизу */
 .quiz-body.has-image .quiz-opts {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: clamp(.5rem, 1.2vh, .9rem);
-  margin-top: .55em;
+  gap: clamp(.4rem, 1vh, .8rem);
+  margin-top: 0;
+  align-self: start;
 }
-/* с картинкой вопрос и ответы делят высоту с фото: заголовок помельче,
-   чтобы 2x2 влезли целиком */
+/* с картинкой заголовок и варианты покрупнее: по высоте место есть, а
+   читать с дальних рядов должно быть так же легко, как без фото */
 .quiz-body.has-image .quiz-q {
-  font-size: clamp(1.2rem, 2.6vw, 2.3rem);
+  font-size: clamp(1.3rem, 2.6vw, 2.5rem);
+  line-height: 1.2;
   margin-bottom: 0;
 }
 .quiz-body.has-image .quiz-s-opt {
-  font-size: clamp(.85rem, 1.5vw, 1.35rem);
-  padding: clamp(.5rem, 1.3vh, .9rem) clamp(.7rem, 1.5vw, 1.1rem);
+  font-size: clamp(.95rem, 1.7vw, 1.6rem);
+  padding: clamp(.45rem, 1.1vh, .85rem) clamp(.6rem, 1.3vw, 1rem);
 }
+
 /* В режиме с картинкой ячейка узкая: номер, текст и проценты в одну строку
    не помещаются, и слова рвались посередине («Квадр/ат»). Поэтому процент
    уходит под текст, а сам текст переносится только по словам. */

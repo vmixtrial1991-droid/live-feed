@@ -715,6 +715,14 @@ check("screen.css: с картинкой ответы встают сеткой,
       is not None
       and re.search(r"\.quiz-body\.has-image \.quiz-opts\s*\{[^}]*grid-template-columns:\s*1fr 1fr",
                     screen_css, re.S) is not None)
+check("screen.css: раскладка учитывает пропорции фото, а не только «фото слева»",
+      "on-shot-wide" in screen_css and "on-shot-tall" in screen_css
+      and "on-shot-square" in screen_css,
+      "панорама и вертикаль требуют разного: ширина против высоты")
+check("screen.js: пропорции фото определяются по натуральному размеру",
+      "function markShotShape" in screen_js and "on-shot-wide" in screen_js)
+check("screen.css: номер вопроса вынесен из сжимаемого блока",
+      ".quiz-head" in screen_css and 'class="quiz-head"' in screen_html)
 check("quiz-panel.js: с картинкой лимиты текста жёстче",
       "imgText: 90" in quiz_panel_js and "imgOption: 40" in quiz_panel_js)
 check("moderator.html: поле названия игры на вкладке «Квиз»",

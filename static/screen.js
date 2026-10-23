@@ -278,7 +278,12 @@ function fitQuiz(block) {
 
   const cs = getComputedStyle(block);
   const padY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
-  const roomH = host.clientHeight - padY;
+  // шапка вопроса не сжимается вместе с текстом: место под неё вычитаем
+  // из доступной высоты, иначе номера вопроса и отсчёта наезжали на текст
+  const head = block.querySelector('.quiz-head');
+  const headH = head ? head.getBoundingClientRect().height : 0;
+  const gap = parseFloat(cs.rowGap) || 0;
+  const roomH = host.clientHeight - padY - headH - gap;
   const roomW = block.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
   if (!roomH || !roomW) return;
 
@@ -383,16 +388,40 @@ function setQuizImage(src) {
   const has = !!src;
   quizBody.classList.toggle('has-image', has);
   quizShot.hidden = !has;
-  if (has) {
-    if (quizShotImg.getAttribute('src') !== src) {
-      // адрес приходит с ключом экрана и без кэша на сервере; грузим сразу,
-      // а не после первого кадра, чтобы фото успело появиться к вопросу
-      quizShotImg.src = src;
-    }
-  } else if (quizShotImg.getAttribute('src')) {
-    quizShotImg.removeAttribute('src');
+  if (!has) {
+    quizBody.classList.remove('on-shot-wide', 'on-shot-tall', 'on-shot-square');
+    if (quizShotImg.getAttribute('src')) quizShotImg.removeAttribute('src');
+    return;
   }
+  if (quizShotImg.getAttribute('src') !== src) {
+    // адрес приходит с ключом экрана и без кэша на сервере; грузим сразу,
+    // а не после первого кадра, чтобы фото успело появиться к вопросу
+    quizShotImg.src = src;
+  }
+  markShotShape();
 }
+
+/* Какое фото по пропорциям: широкое, вертикальное или квадратное.
+   От этого зависит, сколько места отдать картинке и как её вписать —
+   панорама 16:9 и вертикальный снимок с телефона не могут жить по одним
+   правилам: первый просит ширины, второй — высоты. */
+function markShotShape() {
+  quizBody.classList.remove('on-shot-wide', 'on-shot-tall', 'on-shot-square');
+  const w = quizShotImg.naturalWidth;
+  const h = quizShotImg.naturalHeight;
+  if (!w || !h) return;
+  const ratio = w / h;
+  if (ratio >= 1.2) quizBody.classList.add('on-shot-wide');
+  else if (ratio <= 0.85) quizBody.classList.add('on-shot-tall');
+  else quizBody.classList.add('on-shot-square');
+}
+
+/* Размеры картинки приходят асинхронно: до загрузки naturalWidth = 0,
+   поэтому раскладываем ещё раз, когда файл догрузился */
+quizShotImg.addEventListener('load', () => {
+  markShotShape();
+  fitQuizActive();
+});
 
 function renderQuiz() {
   const f = quizFrame;

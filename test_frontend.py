@@ -678,6 +678,14 @@ check("moderator.html: справа остались лидеры, сброс и
       all(i in mod_html for i in ("quizBoardBtn", "quizResetBtn", "quizStopBtn"))
       and not any(i in mod_html for i in ("quizShowBtn", "quizFeedBtn")))
 check("moderator.html: поле времени ответа в редакторе вопроса", 'id="qSeconds"' in mod_html)
+check("moderator.html: в подсказке редактора сказано про два-четыре варианта",
+      "от двух до четырёх" in mod_html)
+check("quiz-panel.js: вариантов в редакторе максимум четыре",
+      "MAX_OPTIONS = 4" in quiz_panel_js and "syncOptionButtons" in quiz_panel_js,
+      "сервер держит тот же предел; разойдясь, кнопка обещала бы лишнее")
+check("quiz-panel.js: новый вопрос начинается с одной строки варианта",
+      "question ? question.options : ['']" in quiz_panel_js,
+      "две пустые строки — это уже не «по умолчанию один вариант»")
 check("quiz-panel.js: цепочку шагов задаёт стадия, а не ведущий",
       all(a in quiz_panel_js for a in ("STEP", "quizStepBtn", "quizStep()")))
 check("quiz-panel.js: копия вопроса делается на месте, сразу за оригиналом",

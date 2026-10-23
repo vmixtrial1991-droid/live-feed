@@ -164,10 +164,19 @@ check("вопрос с одним вариантом отклонён", True)
 st, _ = call("POST", "/api/moderator/quiz/add",
              {"text": "   ", "options": '["a", "b"]', "scored": "0"}, expect=400)
 check("пустой вопрос отклонён", True)
-many = json.dumps([f"в{i}" for i in range(7)])
+many = json.dumps([f"в{i}" for i in range(5)])
 st, _ = call("POST", "/api/moderator/quiz/add",
-             {"text": "Семь вариантов", "options": many, "scored": "0"}, expect=400)
-check("больше шести вариантов нельзя", True)
+             {"text": "Пять вариантов", "options": many, "scored": "0"}, expect=400)
+check("больше четырёх вариантов нельзя", True)
+ok = json.dumps(["а", "б", "в", "г"])
+st, r = call("POST", "/api/moderator/quiz/add",
+             {"text": "Ровно четыре варианта", "options": ok,
+              "correct": "3", "scored": "1"})
+check("четыре варианта — верхняя граница, принимается",
+      st == 200 and len(r["question"]["options"]) == 4, str(r)[:120])
+four_id = r.get("question", {}).get("id")
+if four_id:
+    call("POST", "/api/moderator/quiz/delete", {"question_id": four_id})
 
 _, h = call("GET", "/api/moderator/quiz")
 check("в колоде ровно два вопроса", len(h["questions"]) == 2, str(len(h["questions"])))

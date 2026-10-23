@@ -296,6 +296,12 @@ quizList.addEventListener('click', async (e) => {
 });
 
 /* ---------------- Редактор ---------------- */
+/* Потолок вариантов один на всю игру: четыре. Больше строк — мельче шрифт
+   на проекторе, и зал перестаёт различать ответы; сервер держит тот же
+   предел и отвечает 400, поэтому число здесь не «на глаз», а подпись того,
+   что всё равно не примут. */
+const MAX_OPTIONS = 4;
+
 function addOptionRow(text = '') {
   const row = document.createElement('div');
   row.className = 'quiz-opt-row';
@@ -310,8 +316,27 @@ function addOptionRow(text = '') {
       return;
     }
     row.remove();
+    syncOptionButtons();
   });
   qOptions.appendChild(row);
+  syncOptionButtons();
+  return row;
+}
+
+/* «+ вариант» гаснет на потолке: кнопка, которая молча ругается тостом,
+   читается как поломка. Заодно крестики гаснут, когда ниже двух вариантов
+   уже не опуститься, — это видно до нажатия, а не после отказа. */
+function syncOptionButtons() {
+  const count = qOptions.children.length;
+  const full = count >= MAX_OPTIONS;
+  qAddOption.disabled = full;
+  qAddOption.title = full ? `Максимум ${MAX_OPTIONS} варианта` : 'Добавить вариант';
+  [...qOptions.children].forEach((row) => {
+    const del = row.querySelector('button');
+    if (!del) return;
+    del.disabled = count <= 2;
+    del.title = count <= 2 ? 'Нужно хотя бы два варианта' : 'Убрать вариант';
+  });
 }
 
 function openEditor(question) {
@@ -322,13 +347,17 @@ function openEditor(question) {
   qNoPoints.checked = question ? !question.scored : false;
   qSeconds.value = question && question.seconds ? String(question.seconds) : '';
   qOptions.replaceChildren();
-  const opts = question ? question.options : ['', ''];
+  // новый вопрос начинается с одной строки: остальные добавляются кнопкой.
+  // Пустой список выглядел бы как «вопрос без вариантов», хотя сервер
+  // требует минимум два, и ведущий узнавал бы об этом только на сохранении
+  const opts = question ? question.options : [''];
   opts.forEach((o) => addOptionRow(o));
   if (question && question.scored && question.correct >= 0) {
     const radios = qOptions.querySelectorAll('input[type=radio]');
     if (radios[question.correct]) radios[question.correct].checked = true;
   }
   updateQTextCount();
+  syncOptionButtons();
   qText.focus();
 }
 
@@ -340,26 +369,43 @@ function closeEditor() {
 function updateQTextCount() { qTextCount.textContent = String(qText.value.length); }
 qText.addEventListener('input', updateQTextCount);
 qAddOption.addEventListener('click', () => {
-  if (qOptions.children.length >= 6) {
-    showToast('Больше шести вариантов экран не покажет', 'warn', 2500);
-    return;
-  }
-  addOptionRow();
+  if (qOptions.children.length >= MAX_OPTIONS) return;   // кнопка и так погашена
+  addOptionRow().querySelector('input[type=text]').focus();
 });
 
 qSave.addEventListener('click', async () => {
   qStatus.textContent = '';
-  const texts = [...qOptions.querySelectorAll('.q-opt-input')].map((i) => i.value.trim());
-  const checked = qOptions.querySelector('input[type=radio]:checked');
+  const rows = [...qOptions.children].map((row) => ({
+    text: row.querySelector('.q-opt-input').value.trim(),
+    checked: row.querySelector('input[type=radio]').checked,
+  }));
+  // пустые строки сервер отбросит сам — значит, и номер правильного надо
+  // считать по заполненным: иначе галочка на третьей строке при пустой
+  // второй уехала бы на чужой вариант или за пределы списка
+  const kept = rows.filter((r) => r.text);
+  const correct = kept.findIndex((r) => r.checked);
+  if (!qText.value.trim()) {
+    qStatus.textContent = 'Напишите текст вопроса';
+    qText.focus();
+    return;
+  }
+  if (kept.length < 2) {
+    qStatus.textContent = 'Нужно хотя бы два варианта — добавьте второй';
+    (qOptions.querySelector('.q-opt-input') || qText).focus();
+    return;
+  }
+  if (!qNoPoints.checked && correct < 0) {
+    qStatus.textContent = 'Отметьте правильный вариант кружком слева';
+    return;
+  }
   const fields = {
     text: qText.value.trim(),
-    options: JSON.stringify(texts),
+    options: JSON.stringify(kept.map((r) => r.text)),
     scored: qNoPoints.checked ? '0' : '1',
     // поле всегда прилетает: 0 для сервера значит «отсчёта нет», поэтому
     // стереть таймер можно тем же способом, каким он ставится
     seconds: qSeconds.value.trim() || '0',
-    correct: qNoPoints.checked || !checked
-      ? -1 : [...qOptions.querySelectorAll('input[type=radio]')].indexOf(checked),
+    correct: qNoPoints.checked ? -1 : correct,
   };
   try {
     if (editingId) {

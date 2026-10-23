@@ -787,6 +787,20 @@ check("moderator.css: полоса зала рисуется шириной по
       re.search(r"\.qt-item::before[^}]*var\(--w", mod_css, re.S) is not None)
 check("slideshow-panel.js: переключатель вкладок знает про третью",
       "tabQuiz" in slide_js and "'quiz'" in slide_js)
+check("screen.html: в заголовке QR-окна законченное предложение",
+      "Отсканируйте этот код телефоном" in screen_html,
+      "обрезанное «чтобы отправить своё» читается как недописанное")
+check("screen.html: у холла нет подзаголовка события",
+      'id="lobbySub"' not in screen_html and "quiz-lobby-sub" not in screen_css,
+      "строка «вечер · 19:00 · зал» на проекторе ничего не добавляет")
+check("screen.css: карточка QR квадратная, а не растянутая",
+      re.search(r"\.quiz-lobby-qr\s*\{[^}]*align-self:\s*center", screen_css, re.S) is not None
+      and re.search(r"\.quiz-lobby-qr img\s*\{[^}]*height:\s*clamp", screen_css, re.S) is not None,
+      "во флекс-колонке карточка тянулась по ширине текста")
+check("screen.css: шапка вопроса не меняет высоту, когда время вышло",
+      "min-height: clamp(2rem, 7vw, 5.5rem)" in screen_css
+      and ".quiz-s-timer.is-over" in screen_css,
+      "иначе надпись «Время вышло!» сдвигала весь кадр")
 check("screen.html: слой квиза есть", 'id="quizScreen"' in screen_html)
 check("screen.html: содержимое слоя завёрнуто в масштабируемый блок",
       screen_html.count('class="quiz-fit"') == 2,

@@ -291,22 +291,42 @@
    отбирают высоту у вопроса с ответами — весь остаток кадра отдан телу
    вопроса. Шапка лежит вне .quiz-fit, поэтому не сжимается вместе с
    текстом: на длинном вопросе номер и цифра остаются крупными. */
+/* Шапка фиксированной высоты: цифра отсчёта и надпись «Время вышло!»
+   разного кегля, и без этого шапка сжималась в момент истечения — всё
+   содержимое под ней съезжало вверх. Высота равна кеглю самой крупной
+   цифры (clamp(2rem, 7vw, 5.5rem)), поэтому подмена цифры на надпись
+   кадр не двигает. */
 .quiz-head {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
-  align-items: start;
+  align-items: center;
   gap: .5rem;
   flex: none;
+  min-height: clamp(2rem, 7vw, 5.5rem);
 }
 .quiz-head .quiz-tag {
   grid-column: 1;
   justify-self: start;
+  align-self: center;
   margin: 0;
 }
 .quiz-head .quiz-s-timer {
   grid-column: 2;
+  justify-self: center;
   margin: 0;
   line-height: 1;
+  /* надпись вместо цифры не должна менять высоту шапки */
+  display: flex;
+  align-items: center;
+  min-height: clamp(2rem, 7vw, 5.5rem);
+}
+/* «Время вышло!» — та же строка шапки, тем же кеглем по высоте, только
+   помельче и жёлтым: раньше она была вдвое ниже цифры, шапка сжималась,
+   и весь кадр прыгал вверх. */
+.quiz-s-timer.is-over {
+  font-size: clamp(1.1rem, 2.6vw, 2rem);
+  color: var(--warn);
+  white-space: nowrap;
 }
 
 /* Внутренность блока — то, что экран масштабирует, когда текста много.
@@ -339,24 +359,26 @@
 .quiz-lobby-title {
   font-size: clamp(2rem, 6vw, 4.6rem);
   line-height: 1.1;
-  margin: 0 0 .25em;
+  margin: 0 0 .35em;
 }
-.quiz-lobby-sub {
-  color: var(--muted);
-  font-size: clamp(1rem, 2.4vw, 1.6rem);
-  margin: 0 0 1.1em;
-}
+/* Квадрат задан жёстко: у QR-кода стороны равны, а белая карточка вокруг
+   него тянулась по ширине текста и выглядела вытянутым прямоугольником.
+   align-self: center — потому что .quiz-fit это флекс-колонка, и без него
+   карточка растягивалась на всю ширину блока. */
 .quiz-lobby-qr {
-  display: inline-block;
+  display: block;
+  align-self: center;
   padding: clamp(.6rem, 1.6vw, 1.2rem);
   background: #fff;
   border-radius: 18px;
   box-shadow: var(--shadow);
+  line-height: 0;
 }
 .quiz-lobby-qr img {
   display: block;
   width: clamp(180px, 34vh, 420px);
-  height: auto;
+  height: clamp(180px, 34vh, 420px);
+  object-fit: contain;
 }
 
 /* .quiz-screen-inner — старый класс блока вопроса. Ширину он больше не
@@ -396,16 +418,6 @@
   color: var(--accent);
   font-variant-numeric: tabular-nums;
 }
-.quiz-s-timer.is-over {
-  font-size: clamp(1.3rem, 4vw, 3rem);
-  color: var(--warn);
-}
-.quiz-free {
-  color: var(--warn);
-  font-size: clamp(.9rem, 1.8vw, 1.3rem);
-  margin: 0 0 .8em;
-}
-
 .quiz-opts {
   display: flex; flex-direction: column;
   gap: clamp(.5rem, 1.4vh, 1rem);

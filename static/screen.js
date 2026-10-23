@@ -27,7 +27,6 @@ const quizScreen = document.getElementById('quizScreen');
 const quizPlay = document.getElementById('quizPlay');
 const quizLobby = document.getElementById('quizLobby');
 const lobbyTitle = document.getElementById('lobbyTitle');
-const lobbySub = document.getElementById('lobbySub');
 const lobbyQr = document.getElementById('lobbyQr');
 const lobbyHint = document.getElementById('lobbyHint');
 const quizTag = document.getElementById('quizTag');
@@ -348,8 +347,6 @@ function renderLobby(f) {
   setQuizLayer(true);
   const fresh = showQuizBlock(quizLobby, 'lobby');
   lobbyTitle.textContent = f.title || 'Квиз';
-  lobbySub.textContent = f.subtitle || '';
-  lobbySub.hidden = !f.subtitle;
   if (fresh) {
     // адрес QR отдаёт сервер, ключ экрана подставляет экран: картинка
     // генерируется на лету и не лежит в кэше

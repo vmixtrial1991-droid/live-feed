@@ -43,7 +43,7 @@
 <!-- Окно с QR-кодом: показ при этом стоит на паузе -->
 <div class="qr-window" id="qrWindow" hidden>
   <div class="qr-window-inner">
-    <h2 class="qr-window-title">Отсканируйте, чтобы отправить своё</h2>
+    <h2 class="qr-window-title">Отсканируйте этот код телефоном, чтобы отправить своё фото или сообщение в ленту</h2>
     <div class="qr-window-code"><img id="screenQr" alt="QR-код для отправки" width="440" height="440"></div>
     <p class="qr-window-link" id="screenQrLink"></p>
     <p class="qr-window-hint">Показ сообщений остановлен. QR-код уберётся, когда нажмёте «QR на экране» в кабинете.</p>
@@ -55,8 +55,10 @@
      его должно быть видно при любом фоне. Сам слой не прячется через
      hidden — он накладывается на ленту градиентом и гаснет плавно. -->
 <div class="quiz-screen" id="quizScreen">
-  <!-- Холл игры: зал только подключается. Название события и QR, чтобы
-     зрители попали в игру со своих телефонов, а вопроса ещё нет -->
+  <!-- Холл игры: зал только подключается. Название игры и QR, чтобы
+     зрители попали в игру со своих телефонов, а вопроса ещё нет.
+     Подзаголовок события сюда не выводим: залу нужны название игры и код,
+     а строка «вечер · 19:00 · зал» на проекторе ничего не добавляет. -->
   <div class="quiz-block quiz-lobby" id="quizLobby" hidden>
     <!-- .quiz-fit — то, что экран масштабирует целиком: длинный вопрос и
          четыре длинных варианта или таблица на десять человек в кадр не
@@ -64,7 +66,6 @@
     <div class="quiz-fit">
       <p class="quiz-tag">Квиз</p>
       <h1 class="quiz-lobby-title" id="lobbyTitle"></h1>
-      <p class="quiz-lobby-sub" id="lobbySub" hidden></p>
       <div class="quiz-lobby-qr"><img id="lobbyQr" alt="QR-код квиза" width="420" height="420"></div>
       <p class="quiz-count" id="lobbyHint"></p>
     </div>

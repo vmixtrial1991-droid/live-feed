@@ -266,48 +266,70 @@ function showQuizBlock(block, key) {
 const QUIZ_FIT_MIN = 0.35;
 
 function unfixQuiz(inner) {
-  inner.style.transform = '';
-  inner.style.width = '';
-  inner.style.marginLeft = '';
+  inner.style.transform = "";
+  inner.style.width = "";
+  inner.style.marginLeft = "";
+}
+
+/* Высота, которую содержимое реально хочет занять.
+
+   scrollHeight, а не offsetHeight: .quiz-fit растянут флексом на всю
+   свободную высоту кадра, и offsetHeight показывает выданное место, а не
+   нужное. С ним длинный вопрос считался «влезает» и обрезался снизу. */
+function contentHeight(inner) {
+  return Math.max(inner.scrollHeight, inner.offsetHeight);
 }
 
 function fitQuiz(block) {
-  const inner = block.querySelector('.quiz-fit');
+  const inner = block.querySelector(".quiz-fit");
   const host = block.parentElement;   // .quiz-screen — он и есть весь экран
   if (!inner || !host) return;
 
   const cs = getComputedStyle(block);
   const padY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
   // шапка вопроса не сжимается вместе с текстом: место под неё вычитаем
-  // из доступной высоты, иначе номера вопроса и отсчёта наезжали на текст
-  const head = block.querySelector('.quiz-head');
+  // из доступной высоты, иначе номер вопроса и отсчёт наезжали на текст
+  const head = block.querySelector(".quiz-head");
   const headH = head ? head.getBoundingClientRect().height : 0;
   const gap = parseFloat(cs.rowGap) || 0;
   const roomH = host.clientHeight - padY - headH - gap;
   const roomW = block.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
-  if (!roomH || !roomW) return;
+  if (!roomH || !roomW) { unfixQuiz(inner); return; }
 
   unfixQuiz(inner);
-  let scale = 1;
+  const natural = contentHeight(inner);
+  if (!natural) return;
+  if (natural <= roomH + 1) return;   // влезает как есть
 
-  // до трёх проходов: расширили — текст переложился — высота изменилась
-  for (let step = 0; step < 3; step++) {
-    const h = inner.offsetHeight;
-    if (!h) return;
+  /* Не влезает. Сначала пробуем один и тот же кегль, но шире: строки
+     переложатся, и высота упадёт без уменьшения букв. Шире, чем позволяет
+     масштаб, раздвигать бессмысленно — после scale() это вернётся к ширине
+     кадра, поэтому ширину и масштаб подбираем вместе.
+
+     width = roomW / scale — ровно та ширина, которая после scale даёт
+     ширину кадра. Высоту меряем на этой ширине; если её всё ещё много,
+     масштаб уменьшается, а ширина растёт соответственно. */
+  let scale = 1;
+  for (let step = 0; step < 4; step++) {
+    const wide = Math.round(roomW / scale);
+    inner.style.width = wide + "px";
+    inner.style.marginLeft = "calc(50% - " + Math.round(wide / 2) + "px)";
+    const h = contentHeight(inner);
+    if (!h) break;
     const need = roomH / h;
     if (need >= 0.999) { scale = 1; break; }
-    scale = Math.max(QUIZ_FIT_MIN, need);
-    const wide = Math.round(roomW / scale);
-    inner.style.width = `${wide}px`;
-    inner.style.marginLeft = `calc(50% - ${Math.round(wide / 2)}px)`;
+    const next = Math.max(QUIZ_FIT_MIN, need);
+    // сошлось: дальше ширина почти не изменится
+    if (Math.abs(next - scale) < 0.01) { scale = next; break; }
+    scale = next;
   }
 
-  if (scale >= 0.999) { unfixQuiz(inner); return; }
-  // после расширения текст мог стать низким настолько, что сжатие уже не
-  // нужно: тогда оставляем его крупным во всю ширину блока
-  const hFinal = inner.offsetHeight;
-  if (hFinal && roomH / hFinal >= 0.999) { unfixQuiz(inner); return; }
-  inner.style.transform = `scale(${scale.toFixed(3)})`;
+  if (scale >= 0.999) {
+    // текст уложился в кадр без уменьшения кегля — только за счёт ширины
+    inner.style.transform = "";
+    return;
+  }
+  inner.style.transform = "scale(" + scale.toFixed(3) + ")";
 }
 
 /* Подогнать тот блок, который сейчас на экране: содержимое меняется и без

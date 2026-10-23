@@ -33,7 +33,6 @@ const lobbyHint = document.getElementById('lobbyHint');
 const quizTag = document.getElementById('quizTag');
 const quizTimer = document.getElementById('quizTimer');
 const quizQText = document.getElementById('quizQText');
-const quizFree = document.getElementById('quizFree');
 const quizOpts = document.getElementById('quizOpts');
 const quizCount = document.getElementById('quizCount');
 
@@ -303,7 +302,6 @@ function renderBoard(f) {
   setQuizLayer(true);
   showQuizBlock(quizPlay, 'board');
   quizTag.textContent = 'Квиз';
-  quizFree.hidden = true;
 
   // новый кадр прилетает с каждым ответом в зале, поэтому перематывать
   // страницу назад нельзя — при активном зале нулевая страница никогда бы
@@ -361,7 +359,6 @@ function renderQuiz() {
   quizTag.textContent = f.questions_total
     ? `Вопрос ${f.question_no} из ${f.questions_total}` : `Вопрос ${f.question_no}`;
   quizQText.textContent = q.text;
-  quizFree.hidden = !!q.scored;
 
   if (f.phase === 'open') {
     if (f.seconds_left != null) {

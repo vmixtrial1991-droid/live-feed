@@ -30,7 +30,6 @@ const waitHint = document.getElementById('waitHint');
 const questionBox = document.getElementById('questionBox');
 const qnLabel = document.getElementById('qnLabel');
 const questionText = document.getElementById('questionText');
-const noPointsTag = document.getElementById('noPointsTag');
 const optionsBox = document.getElementById('optionsBox');
 const answerHint = document.getElementById('answerHint');
 
@@ -112,7 +111,6 @@ function renderQuiz(data) {
     ? `Вопрос ${data.question_no} из ${data.questions_total}`
     : `Вопрос ${data.question_no}`;
   questionText.textContent = q.text;
-  noPointsTag.hidden = !!q.scored;
 
   // перерисовываем варианты только когда сменился вопрос или стадия:
   // на каждом сигнале перерисовывать кнопку под пальцем гостя — зло

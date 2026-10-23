@@ -77,12 +77,6 @@
   margin: 0 0 .4rem;
   overflow-wrap: anywhere;
 }
-.quiz-nopoints {
-  color: var(--warn);
-  font-size: .85rem;
-  margin: 0 0 .6rem;
-}
-
 .quiz-options {
   display: flex;
   flex-direction: column;

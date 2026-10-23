@@ -649,6 +649,12 @@ quiz_panel_js = (STATIC / "quiz-panel.js").read_text(encoding="utf-8")
 check("quiz.html: игра спрятана до входа", 'id="gameBox" hidden' in quiz_html)
 check("quiz.html: вход по тому же коду приглашения", 'id="codeInput"' in quiz_html)
 check("quiz.html: имя можно поменять", 'id="renameBtn"' in quiz_html)
+check("quiz.html: подписи «вопрос без очков» больше нет", "noPointsTag" not in quiz_html
+      and "без очков — просто интересно" not in quiz_html)
+check("quiz.js: подпись «без очков» не подмешивается к вопросу", "noPointsTag" not in quiz_js)
+check("screen.html: подписи «без очков» на проекторе больше нет",
+      "quizFree" not in screen_html and "здесь важно, как думает зал" not in screen_html)
+check("screen.js: экран не рисует подпись «без очков»", "quizFree" not in screen_js)
 check("quiz.js: состояние тянется из /api/quiz, канал — /ws/quiz",
       "ev('/api/quiz')" in quiz_js and "ev('/ws/quiz')" in quiz_js)
 check("quiz.js: код из QR-ссылки (?t=) подставляется", "params.get('t')" in quiz_js)

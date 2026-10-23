@@ -1180,6 +1180,8 @@ MIN_OPTIONS = 2
 MAX_OPTIONS = 4
 MIN_TIMER = 5
 MAX_TIMER = 600
+# название игры на холле: оно стоит крупно над QR, длинное не влезает
+MAX_QUIZ_TITLE_LEN = 60
 
 # метка «поле не трогать» для формы правки: пустая строка слишком нужна
 # для «стереть», а выдуманное слово никто случайно не пришлёт
@@ -1235,7 +1237,30 @@ async def api_mod_quiz(slug: str, request: Request):
     event = _prepare(_event_or_404(slug))
     _require_moderator(request, event)
     runtime = _runtime(event)
-    return quizmod.host_state(event.store, runtime.screen)
+    return quizmod.host_state(event, event.store, runtime.screen)
+
+
+@app.post("/e/{slug}/api/moderator/quiz/title")
+async def api_mod_quiz_title(slug: str, request: Request, title: str = Form("")):
+    """Название игры — то, что зал видит на холле над QR-кодом.
+
+    Пустая строка значит «как называется событие»: ключ тогда убираем из
+    конфига, а не храним пустым. Менять можно и посреди игры — следующий
+    кадр холла уйдёт на экран сразу.
+    """
+    event = _event_or_404(slug)
+    _require_moderator(request, event)
+    clean = " ".join((title or "").split())[:MAX_QUIZ_TITLE_LEN]
+    event.update(quiz_title=clean or None)
+
+    runtime = _runtime(event)
+    await _quiz_frame(event, runtime)
+    await runtime.hub.to_moderator({"type": "quiz_update"})
+    return {
+        "ok": True,
+        "quiz_title": clean,
+        "title": quizmod.quiz_title(event),
+    }
 
 
 @app.post("/e/{slug}/api/moderator/quiz/add")
@@ -1515,7 +1540,7 @@ async def api_mod_quiz_control(
     _quiz_persist(event, screen)
     await _quiz_frame(event, runtime)
     await runtime.hub.to_moderator({"type": "quiz_update"})
-    data = quizmod.host_state(store, screen)
+    data = quizmod.host_state(event, store, screen)
     if action == "reset":
         data["removed"] = removed
     return data

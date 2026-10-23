@@ -363,6 +363,16 @@
 /* ---------------- Квиз (5.0) ---------------- */
 .quiz-ctl-bar { align-items: flex-start; }
 .quiz-state { margin: 0; font-size: .88rem; flex: 1; min-width: 180px; }
+
+/* название игры: одна строка ввода и кнопка рядом */
+.quiz-title-row { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+.quiz-title-row input {
+  flex: 1 1 240px; min-width: 0;
+  background: var(--bg-soft); border: 1px solid var(--line);
+  border-radius: 10px; color: var(--text);
+  padding: .6rem .8rem; font: inherit;
+}
+.quiz-title-row input:focus { border-color: var(--accent); }
 /* шапка панели: на узком экране она переносится, и «прилипание» под ней
    считает moderator.js (--topbar-h), иначе верхняя кнопка уезжает под шапку */
 

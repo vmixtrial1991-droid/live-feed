@@ -234,6 +234,47 @@ st, page = call("GET", f"/screen?d={SCREEN_KEY}")
 check("на экране есть место под холл: название игры и QR для зала",
       st == 200 and b'id="lobbyTitle"' in page and b'id="lobbyQr"' in page
       and b'id="quizLobby"' in page, str(st))
+
+print("\n=== Название игры на холле ===")
+st, h = call("GET", "/api/moderator/quiz")
+check("без своего названия панель показывает пустое поле и название события",
+      h.get("quiz_title") == "" and h.get("event_title"),
+      f"{h.get('quiz_title')!r} / {h.get('event_title')!r}")
+st, r = call("POST", "/api/moderator/quiz/title", {"title": "  Новогодний   квиз  "})
+check("название игры сохраняется и чистится от лишних пробелов",
+      st == 200 and r.get("quiz_title") == "Новогодний квиз", str(r)[:120])
+check("своё название легло в конфиг",
+      config().get("quiz_title") == "Новогодний квиз", str(config().get("quiz_title")))
+if websockets is not None:
+    async def title_checks() -> None:
+        async with websockets.connect(f"{WS}/ws/display?d={SCREEN_KEY}") as dws:
+            init = await recv(dws)
+            frame = init.get("quiz") or {}
+            check("экран получает холл с названием игры, а не события",
+                  frame.get("phase") == "lobby"
+                  and frame.get("title") == "Новогодний квиз", str(frame)[:160])
+            # правим название на ходу: экран должен получить новый кадр сам
+            call("POST", "/api/moderator/quiz/title", {"title": "Квиз на закуску"})
+            msg = await recv(dws)
+            while msg.get("type") != "quiz":
+                msg = await recv(dws)
+            check("новое название доезжает до экрана без перезагрузки",
+                  (msg.get("quiz") or {}).get("title") == "Квиз на закуску",
+                  str(msg.get("quiz"))[:160])
+    asyncio.run(title_checks())
+else:
+    print("  OK   название на холле (websockets не установлен — пропущено)")
+
+st, r = call("POST", "/api/moderator/quiz/title", {"title": "я" * 80})
+check("слишком длинное название обрезается, а не ломает холл",
+      st == 200 and len(r.get("quiz_title", "")) == 60, str(len(r.get("quiz_title", ""))))
+st, r = call("POST", "/api/moderator/quiz/title", {"title": "   "})
+check("пустое название возвращает название события",
+      st == 200 and r.get("quiz_title") == "" and r.get("title") == h.get("event_title"),
+      str(r)[:120])
+check("пустое название убрано из конфига, а не лежит пустым",
+      "quiz_title" not in config(), str(config().get("quiz_title")))
+
 st, body = call("GET", "/api/qr.svg?kind=quiz")
 check("QR на страницу квиза отдаётся сервером", st == 200 and b"<svg" in body[:64], str(st))
 st, h = call("GET", "/api/moderator/quiz")

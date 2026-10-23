@@ -247,6 +247,22 @@
 
     <section class="panel">
       <div class="panel-head">
+        <h2>Название игры</h2>
+        <p class="muted quiz-hint">
+          Его увидит зал на стартовом экране квиза — крупно, над QR-кодом.
+          Пустое поле значит «как называется событие».
+        </p>
+      </div>
+      <div class="quiz-title-row">
+        <input id="quizTitleInput" type="text" maxlength="60"
+               placeholder="Например, Новогодний квиз" autocomplete="off">
+        <button class="btn small" id="quizTitleSave" type="button">Сохранить</button>
+      </div>
+      <p class="muted small" id="quizTitleStatus"></p>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
         <h2>Вопросы</h2>
         <p class="muted quiz-hint">
           Порядок — сверху вниз: шаговая кнопка ведёт игру «открыть →

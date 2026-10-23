@@ -686,6 +686,13 @@ check("moderator.html: справа остались лидеры, сброс и
 check("moderator.html: поле времени ответа в редакторе вопроса", 'id="qSeconds"' in mod_html)
 check("moderator.html: в подсказке редактора сказано про два-четыре варианта",
       "от двух до четырёх" in mod_html)
+check("moderator.html: поле названия игры на вкладке «Квиз»",
+      'id="quizTitleInput"' in mod_html and 'id="quizTitleSave"' in mod_html)
+check("quiz-panel.js: название игры уходит на сервер и подставляет событие подсказкой",
+      "/api/moderator/quiz/title" in quiz_panel_js
+      and "quizTitleInput.placeholder" in quiz_panel_js)
+check("quiz-panel.js: пока ведущий печатает, чужой кадр поле не перебивает",
+      "document.activeElement !== quizTitleInput" in quiz_panel_js)
 check("quiz-panel.js: вариантов в редакторе максимум четыре",
       "MAX_OPTIONS = 4" in quiz_panel_js and "syncOptionButtons" in quiz_panel_js,
       "сервер держит тот же предел; разойдясь, кнопка обещала бы лишнее")

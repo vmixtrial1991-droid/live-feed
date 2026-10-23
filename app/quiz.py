@@ -99,6 +99,17 @@ def _board_public(store: EventStore, limit: int = 100) -> list[dict]:
     return out
 
 
+def quiz_title(event: Event) -> str:
+    """Название игры для холла: своё, если ведущий его задал, иначе событие.
+
+    У события название общее — «Свадьба Маши и Саши» или «Новый год в
+    офисе», — а игра внутри вечера может называться иначе. Ведущий вводит
+    его на вкладке «Квиз»; пустое поле значит «как называется событие»,
+    чтобы не заставлять писать одно и то же дважды.
+    """
+    return str(event.get("quiz_title", "")).strip() or str(event.get("title", "")).strip()
+
+
 def _time_left(screen: ScreenController, q: dict) -> int | None:
     """Сколько секунд осталось по таймеру вопроса (экрану и панели).
 
@@ -127,7 +138,8 @@ def display_payload(event: Event, screen: ScreenController, store: EventStore) -
         # в это время может спокойно дописывать вопросы
         return {
             "phase": "lobby",
-            "title": event.get("title") or event.slug,
+            # название игры: своё, если ведущий его задал, иначе событие
+            "title": quiz_title(event) or event.slug,
             "subtitle": event.get("subtitle", ""),
             "participants": store.stats()["participants"],
             # путь до QR: экран подставит свой ключ и покажет картинку
@@ -198,7 +210,7 @@ def participant_view(store: EventStore, screen: ScreenController, participant_id
     return data
 
 
-def host_state(store: EventStore, screen: ScreenController) -> dict:
+def host_state(event: Event, store: EventStore, screen: ScreenController) -> dict:
     """Сводка для панели ведущего: вопросы, счётчики, живые полосы, стадия."""
     questions = store.quiz_list_questions()
     for q in questions:
@@ -219,6 +231,11 @@ def host_state(store: EventStore, screen: ScreenController) -> dict:
         "board": _board_public(store),
         "participants": store.stats()["participants"],
         "answers_total": store.quiz_total_answers(),
+        # своё название игры — как записано, без подстановки: пустое поле в
+        # панели значит «как называется событие», и подставлять туда название
+        # события значением нельзя, иначе ведущий не отличит своё от чужого
+        "quiz_title": str(event.get("quiz_title", "")).strip(),
+        "event_title": event.get("title", ""),
     }
     if screen.quiz_phase == "open" and screen.quiz_question:
         q = store.quiz_get_question(screen.quiz_question)

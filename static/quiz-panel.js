@@ -13,6 +13,9 @@
 const quizList = document.getElementById('quizList');
 const quizEmpty = document.getElementById('quizEmpty');
 const quizPhaseText = document.getElementById('quizPhaseText');
+const quizTitleInput = document.getElementById('quizTitleInput');
+const quizTitleSave = document.getElementById('quizTitleSave');
+const quizTitleStatus = document.getElementById('quizTitleStatus');
 const quizBoardHost = document.getElementById('quizBoardHost');
 const tabQuizBadge = document.getElementById('tabQuizBadge');
 
@@ -217,6 +220,38 @@ function renderBoard() {
   }
 }
 
+/* Название игры. Поле показывает своё название, а в placeholder — название
+   события: пустое поле значит «как называется событие», и ведущий видит,
+   что именно подставится. Пока он печатает, пришедший с сервера quiz_update
+   поле не перебивает — иначе каждая буква стиралась бы чужим ответом. */
+function renderQuizTitle() {
+  if (document.activeElement !== quizTitleInput) {
+    quizTitleInput.value = quizState.quiz_title || '';
+  }
+  quizTitleInput.placeholder = quizState.event_title
+    ? quizState.event_title : 'Например, Новогодний квиз';
+}
+
+quizTitleSave.addEventListener('click', async () => {
+  quizTitleSave.disabled = true;
+  quizTitleStatus.textContent = '';
+  try {
+    const res = await postForm(ev('/api/moderator/quiz/title'),
+      { title: quizTitleInput.value.trim() });
+    quizState.quiz_title = res.quiz_title || '';
+    quizTitleStatus.textContent = res.quiz_title
+      ? `На холле будет «${res.title}»` : `На холле будет «${res.title}» — как событие`;
+    showToast('Название игры сохранено', 'ok', 2200);
+  } catch (ex) {
+    quizTitleStatus.textContent = ex.message || 'Не сохранилось';
+  } finally {
+    quizTitleSave.disabled = false;
+  }
+});
+quizTitleInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); quizTitleSave.click(); }
+});
+
 async function reload() {
   // во время правки вопроса список не перерисовываем: ведущий печатает,
   // а сигналы об ответах гостей прилетают часто
@@ -225,6 +260,7 @@ async function reload() {
     armQuizDeadline();
     renderQuizControls();
     renderBoard();
+    renderQuizTitle();
     if (quizEditor.hidden) renderQuestions();
   } catch (ex) {
     /* панель не открыта или вход истёк — молчим */

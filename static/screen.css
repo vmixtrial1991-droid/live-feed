@@ -250,10 +250,30 @@
 }
 
 /* что именно занимает слой — холл, вопрос или таблица; при смене блок
-   въезжает сверху, а градиент под ним остаётся на месте */
+   въезжает сверху, а градиент под ним остаётся на месте.
+
+   Ширина: доля экрана минус сэйфзона, но не шире 1600. Сэйфзона — поля,
+   которые остаются пустыми с каждой стороны: проекторы с обрезкой краёв
+   (overscan) и кривой геометрией срезают именно край, и заголовок,
+   прижатый к кромке, терял бы первую букву. 9% с каждой стороны — это
+   173 px на 1920 и 115 px на 1280: запас с большим перебором, зато
+   вопрос перестаёт складываться в узкий столбик.
+
+   Доля, а не фиксированные пиксели: на 1280 поле ужимается само, и
+   блок остаётся читаемым на слабом проекторе. Верхняя граница 1600 —
+   чтобы на 4K строка не растягивалась на всю стену: длинную строку
+   глаз теряет при переходе на новую.
+
+   --quiz-safe можно переопределить в одном месте, если проектор
+   окажется с особенно широкой обрезкой. */
+.quiz-screen {
+  --quiz-safe: 9%;
+  --quiz-max: 1600px;
+}
 .quiz-block {
-  width: min(92vw, 1100px);
-  padding: clamp(1rem, 3vh, 2.5rem) clamp(1.5rem, 4vw, 3rem);
+  width: min(calc(100% - 2 * var(--quiz-safe)), var(--quiz-max));
+  margin: 0 auto;
+  padding: clamp(1rem, 3vh, 2.5rem) clamp(1.5rem, 3vw, 3rem);
   text-align: center;
   color: var(--text);
   /* проектор не прокручивается: всё, что не влезло, зал не увидит.
@@ -261,11 +281,10 @@
   max-height: 100%;
 }
 
-/* Внутренность блока — то, что экран масштабирует целиком, когда текста
-   много. Трансформация не пересчитывает вёрстку: вариант остаётся одной
-   строкой, просто мельче. Угол сверху по центру: сжатое содержимое
-   остаётся на месте верхней кромки и ровно занимает свой блок, а не
-   уезжает вниз половиной разницы высот. */
+/* Внутренность блока — то, что экран масштабирует, когда текста много.
+   Угол сверху по центру: сжатое содержимое остаётся на месте верхней
+   кромки и ровно занимает свой блок, а не уезжает вниз половиной разницы
+   высот. Ширину fitQuiz выставляет сам перед сжатием. */
 .quiz-fit {
   transform-origin: center top;
   will-change: transform;
@@ -301,8 +320,11 @@
   height: auto;
 }
 
+/* .quiz-screen-inner — старый класс блока вопроса. Ширину он больше не
+   задаёт: её считает .quiz-block выше из --quiz-safe, и второе правило
+   здесь молча перебивало новую ширину (оба класса висят на одном div).
+   Оставляем только то, что относится к содержимому. */
 .quiz-screen-inner {
-  width: min(92vw, 1100px);
   padding: clamp(1rem, 3vh, 2.5rem) clamp(1.5rem, 4vw, 3rem);
   text-align: center;
   color: var(--text);
@@ -357,15 +379,38 @@
   font-size: clamp(1rem, 2.6vw, 2rem);
   text-align: left;
   overflow-wrap: anywhere;
+  /* номер и текст в одну строку; в режиме полос (closed/reveal) к ним
+     добавляется процент, и это всё равно одна строка */
+  display: flex; align-items: center; gap: .7em;
 }
 .quiz-s-opt.is-right { border-color: var(--ok); }
-.quiz-s-opt.is-bar { display: flex; align-items: center; gap: 1em; }
+
+/* Номер варианта: цифра из того же ряда, что и кнопки на телефоне.
+   Кружок и табличные цифры — чтобы «1» и «4» были одной ширины и колонка
+   вариантов не дёргалась. Сам номер не часть текста ответа: он не
+   попадает ни в базу, ни в проверку правильного. */
+.quiz-s-idx {
+  position: relative; flex: none;
+  width: 1.5em; height: 1.5em;
+  display: grid; place-items: center;
+  border: 1px solid var(--line); border-radius: 50%;
+  background: rgba(255, 255, 255, .05);
+  color: var(--muted);
+  font-size: .78em; font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.quiz-s-opt.is-right .quiz-s-idx {
+  border-color: var(--ok); color: var(--ok);
+  background: rgba(51, 201, 138, .16);
+}
+
+.quiz-s-opt.is-bar { gap: 1em; }
 .quiz-s-fill {
   position: absolute; inset: 0 auto 0 0;
   background: rgba(91, 140, 255, .18);
 }
 .quiz-s-opt.is-bar.is-right .quiz-s-fill { background: rgba(51, 201, 138, .22); }
-.quiz-s-text { position: relative; flex: 1; }
+.quiz-s-text { position: relative; flex: 1; min-width: 0; }
 .quiz-s-num {
   position: relative; color: var(--muted);
   font-variant-numeric: tabular-nums; white-space: nowrap;

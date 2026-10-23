@@ -241,31 +241,62 @@ function showQuizBlock(block, key) {
    вышло за край, зал просто не увидит. А выйти оно может легко — двести
    символов вопроса, четыре варианта по восемьдесят символов или десять
    строк финальной таблицы на 16:9. Поэтому меряем натуральную высоту
-   внутренности (.quiz-fit) и, если она больше слоя, сжимаем её целиком
-   трансформацией: вёрстка остаётся прежней, текст просто мельче, а
-   варианты не разъезжаются на две строки.
+   внутренности (.quiz-fit) и, если она больше слоя, сжимаем её.
 
-   Порог 0.35 — только страховка от нуля: по-настоящему длинный вопрос
-   сожмётся так, что читать его с задних рядов будет нельзя, и это сигнал
-   ведущему сократить текст. Обрезать молча хуже: зал увидит половину
-   вопроса и не поймёт, что от него хотят. */
+   Сжимаем не «как есть»: обычный scale() уменьшил бы и ширину, и широкий
+   блок снова превратился бы в узкий столбик с пустотой по бокам. Поэтому
+   перед сжатием текст раздвигается на всю ширину блока, делённую на
+   масштаб: после scale он занимает ровно то место, которое ему дали.
+   Строки при этом перекладываются шире, высота падает, и нужный масштаб
+   выходит меньше — иногда сжатие не нужно вовсе.
+
+   Раздвинутый блок шире родителя, и обычные auto-поля его не центрируют
+   (при переполнении они схлопываются в ноль), поэтому центрируем
+   отрицательным отступом слева: 50% ширины родителя минус половина
+   собственной. Иначе сжатый текст уезжает за правый край кадра.
+
+   Ширину самого .quiz-block fitQuiz не трогает: её задаёт css через
+   --quiz-safe. Порог 0.35 — только страховка от нуля. */
 const QUIZ_FIT_MIN = 0.35;
+
+function unfixQuiz(inner) {
+  inner.style.transform = '';
+  inner.style.width = '';
+  inner.style.marginLeft = '';
+}
 
 function fitQuiz(block) {
   const inner = block.querySelector('.quiz-fit');
   const host = block.parentElement;   // .quiz-screen — он и есть весь экран
   if (!inner || !host) return;
-  inner.style.transform = '';
-  const box = inner.getBoundingClientRect();
+
   const cs = getComputedStyle(block);
-  // и по высоте, и по ширине: одного неразрывного слова (ссылка, капс без
-  // пробелов) хватает, чтобы строка уехала за правый край проектора
-  const roomH = host.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
-  const roomW = host.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
-  if (!box.height || !roomH || !roomW) return;
-  const scale = Math.min(1, roomH / box.height, roomW / box.width);
-  if (scale >= 0.999) return;
-  inner.style.transform = `scale(${Math.max(QUIZ_FIT_MIN, scale).toFixed(3)})`;
+  const padY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+  const roomH = host.clientHeight - padY;
+  const roomW = block.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+  if (!roomH || !roomW) return;
+
+  unfixQuiz(inner);
+  let scale = 1;
+
+  // до трёх проходов: расширили — текст переложился — высота изменилась
+  for (let step = 0; step < 3; step++) {
+    const h = inner.offsetHeight;
+    if (!h) return;
+    const need = roomH / h;
+    if (need >= 0.999) { scale = 1; break; }
+    scale = Math.max(QUIZ_FIT_MIN, need);
+    const wide = Math.round(roomW / scale);
+    inner.style.width = `${wide}px`;
+    inner.style.marginLeft = `calc(50% - ${Math.round(wide / 2)}px)`;
+  }
+
+  if (scale >= 0.999) { unfixQuiz(inner); return; }
+  // после расширения текст мог стать низким настолько, что сжатие уже не
+  // нужно: тогда оставляем его крупным во всю ширину блока
+  const hFinal = inner.offsetHeight;
+  if (hFinal && roomH / hFinal >= 0.999) { unfixQuiz(inner); return; }
+  inner.style.transform = `scale(${scale.toFixed(3)})`;
 }
 
 /* Подогнать тот блок, который сейчас на экране: содержимое меняется и без
@@ -368,10 +399,14 @@ function renderQuiz() {
     } else {
       stopQuizTicker();
     }
-    quizOpts.replaceChildren(...q.options.map((text) => {
+    quizOpts.replaceChildren(...q.options.map((text, i) => {
       const el = document.createElement('div');
       el.className = 'quiz-s-opt';
-      el.textContent = text;
+      // номер перед вариантом: зал видит «3» на проекторе и нажимает
+      // третью кнопку у себя — сверять текст с экрана больше не нужно.
+      // В сам текст варианта номер не попадает: он живёт только в вёрстке
+      el.innerHTML = `<span class="quiz-s-idx">${i + 1}</span>`
+        + `<span class="quiz-s-text">${escapeHTML(text)}</span>`;
       return el;
     }));
     quizCount.textContent = f.answered_total
@@ -390,6 +425,7 @@ function renderQuiz() {
     const el = document.createElement('div');
     el.className = 'quiz-s-opt is-bar' + (f.correct === i ? ' is-right' : '');
     el.innerHTML = `<span class="quiz-s-fill" style="width:${share}%"></span>
+      <span class="quiz-s-idx">${i + 1}</span>
       <span class="quiz-s-text">${escapeHTML(text)}${f.correct === i ? ' ✓' : ''}</span>
       <span class="quiz-s-num">${counts[i]} · ${share}%</span>`;
     return el;

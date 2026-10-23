@@ -96,6 +96,9 @@
   min-height: 52px;
   overflow-wrap: anywhere;
   transition: border-color .15s, background .15s;
+  /* номер и текст на одной строке, номер не сжимается */
+  display: flex; align-items: center; gap: .75rem;
+  width: 100%;
 }
 .quiz-option:active { transform: scale(.99); }
 .quiz-option.is-picked {
@@ -103,6 +106,24 @@
   background: rgba(91, 140, 255, .16);
   font-weight: 600;
 }
+
+/* Номер варианта — тот же, что на проекторе. Кружок, а не «1.» в тексте:
+   номер не часть ответа и не должен уезжать в базу или в проверку. */
+.qo-idx {
+  flex: none;
+  width: 1.7rem; height: 1.7rem;
+  display: grid; place-items: center;
+  border: 1px solid var(--line); border-radius: 50%;
+  background: rgba(255, 255, 255, .05);
+  color: var(--muted);
+  font-size: .85rem; font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.quiz-option.is-picked .qo-idx {
+  border-color: var(--accent); color: var(--accent);
+  background: rgba(91, 140, 255, .2);
+}
+.qo-label { flex: 1; min-width: 0; }
 
 /* --- распределение ответов --- */
 .quiz-bar {
@@ -123,6 +144,11 @@
   background: rgba(91, 140, 255, .18);
 }
 .quiz-bar.is-right { border-color: var(--ok); }
+.quiz-bar .qo-idx { width: 1.55rem; height: 1.55rem; font-size: .8rem; }
+.quiz-bar.is-right .qo-idx {
+  border-color: var(--ok); color: var(--ok);
+  background: rgba(51, 201, 138, .18);
+}
 .quiz-bar.is-right .quiz-bar-fill { background: rgba(51, 201, 138, .22); }
 .quiz-bar.is-mine::after {
   content: '';

@@ -400,6 +400,14 @@
      и включал горизонтальную прокрутку всей вкладки */
   max-width: 100%; overflow-wrap: anywhere;
 }
+/* номер варианта в чипе: те же 1–4, что на проекторе и на телефоне.
+   Тихо и слева, чтобы глаз находил вариант по номеру, а не по началу
+   текста — варианты часто начинаются одинаково */
+.quiz-chip-idx {
+  display: inline-block; min-width: 1.1em; margin-right: .35em;
+  color: var(--muted); font-weight: 700; font-variant-numeric: tabular-nums;
+}
+.quiz-chip.is-right .quiz-chip-idx { color: var(--ok); }
 .quiz-chip.is-right { border-color: var(--ok); color: var(--ok); }
 .quiz-chip-free { color: var(--warn); border-color: rgba(255, 182, 72, .45); }
 .quiz-chip-time { color: var(--muted); }
@@ -441,6 +449,20 @@
 .quiz-opt-rows { display: flex; flex-direction: column; gap: .45rem; }
 .quiz-opt-row { display: flex; align-items: center; gap: .5rem; }
 .quiz-opt-row input[type="radio"] { accent-color: var(--ok); width: 1.15rem; height: 1.15rem; flex: none; }
+/* номер строки в редакторе — тот же, что увидит зал. Фиксированная
+   ширина и табличные цифры: строки не дёргаются, когда вариантов 4 */
+.quiz-opt-idx {
+  flex: none; width: 1.5rem; height: 1.5rem;
+  display: grid; place-items: center;
+  border: 1px solid var(--line); border-radius: 50%;
+  background: rgba(255, 255, 255, .05);
+  color: var(--muted); font-size: .78rem; font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.quiz-opt-row:has(input[type="radio"]:checked) .quiz-opt-idx {
+  border-color: var(--ok); color: var(--ok);
+  background: rgba(51, 201, 138, .16);
+}
 .q-opt-input { flex: 1; }
 .quiz-nopoints-row {
   display: flex; align-items: center; gap: .4rem;

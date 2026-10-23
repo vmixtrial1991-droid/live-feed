@@ -655,6 +655,22 @@ check("quiz.js: подпись «без очков» не подмешивает
 check("screen.html: подписи «без очков» на проекторе больше нет",
       "quizFree" not in screen_html and "здесь важно, как думает зал" not in screen_html)
 check("screen.js: экран не рисует подпись «без очков»", "quizFree" not in screen_js)
+check("screen.css: ширина блока игры задана сэйфзоной, а не фиксом",
+      "--quiz-safe" in screen_css
+      and re.search(r"\.quiz-block\s*\{[^}]*calc\(100%\s*-\s*2\s*\*\s*var\(--quiz-safe\)",
+                    screen_css, re.S) is not None,
+      "фиксированные 1100px давали узкий столбик на широком экране")
+check("screen.js: сжатый блок расширяется и центрируется, а не сжимается в столбик",
+      "50% -" in screen_js and "roomW / scale" in screen_js,
+      "обычный scale() уменьшал и ширину — блок снова становился колонкой")
+check("screen.js: у вариантов на проекторе есть номера 1–4",
+      "quiz-s-idx" in screen_js and "${i + 1}" in screen_js,
+      "зал нажимает на телефоне ту же цифру, что видит на экране")
+check("quiz.js: на телефоне варианты тоже пронумерованы",
+      "qo-idx" in quiz_js and "${i + 1}" in quiz_js)
+check("quiz-panel.js: в списке вопросов и в редакторе варианты с номерами",
+      "quiz-chip-idx" in quiz_panel_js and "quiz-opt-idx" in quiz_panel_js
+      and "idx.textContent = String(i + 1)" in quiz_panel_js)
 check("quiz.js: состояние тянется из /api/quiz, канал — /ws/quiz",
       "ev('/api/quiz')" in quiz_js and "ev('/ws/quiz')" in quiz_js)
 check("quiz.js: код из QR-ссылки (?t=) подставляется", "params.get('t')" in quiz_js)

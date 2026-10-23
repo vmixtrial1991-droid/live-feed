@@ -179,7 +179,8 @@ function renderQuestions() {
     el.className = 'quiz-row' + (q.id === quizState.current ? ' is-current' : '');
     const opts = q.options.map((o, k) => {
       const right = q.scored && q.correct === k;
-      return `<span class="quiz-chip${right ? ' is-right' : ''}">${escapeHTML(o)}</span>`;
+      return `<span class="quiz-chip${right ? ' is-right' : ''}">`
+        + `<b class="quiz-chip-idx">${k + 1}</b>${escapeHTML(o)}</span>`;
     }).join('');
     el.innerHTML = `
       <div class="quiz-row-top">
@@ -343,6 +344,7 @@ function addOptionRow(text = '') {
   row.className = 'quiz-opt-row';
   row.innerHTML = `
     <input type="radio" name="qCorrect" title="Правильный вариант">
+    <span class="quiz-opt-idx"></span>
     <input type="text" class="q-opt-input" maxlength="80" placeholder="Вариант ответа">
     <button class="icon-btn danger" type="button" title="Убрать вариант">✕</button>`;
   row.querySelector('input[type=text]').value = text;
@@ -367,7 +369,11 @@ function syncOptionButtons() {
   const full = count >= MAX_OPTIONS;
   qAddOption.disabled = full;
   qAddOption.title = full ? `Максимум ${MAX_OPTIONS} варианта` : 'Добавить вариант';
-  [...qOptions.children].forEach((row) => {
+  [...qOptions.children].forEach((row, i) => {
+    // номер строки — тот же, что увидит зал на проекторе и на телефоне;
+    // после добавления и удаления перенумеровываем заново
+    const idx = row.querySelector('.quiz-opt-idx');
+    if (idx) idx.textContent = String(i + 1);
     const del = row.querySelector('button');
     if (!del) return;
     del.disabled = count <= 2;

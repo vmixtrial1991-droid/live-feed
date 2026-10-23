@@ -134,7 +134,10 @@ function renderOpen(q, myAnswer) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'quiz-option' + (myAnswer === i ? ' is-picked' : '');
-    btn.textContent = text;
+    // номер — тот же, что на проекторе: гость слышит «отвечайте третьим»
+    // и находит третью кнопку, не сверяя текст
+    btn.innerHTML = `<span class="qo-idx">${i + 1}</span>`
+      + `<span class="qo-label">${escapeHTML(text)}</span>`;
     btn.addEventListener('click', () => sendAnswer(q.id, i, btn));
     return btn;
   }));
@@ -174,6 +177,7 @@ function renderClosed(q, data) {
       + (revealed && data.correct === i ? ' is-right' : '')
       + (data.my_answer === i ? ' is-mine' : '');
     row.innerHTML = `<div class="quiz-bar-fill" style="width:${share}%"></div>
+      <span class="qo-idx">${i + 1}</span>
       <span class="qo-text">${escapeHTML(text)}</span>
       ${mark}
       <span class="qo-num">${counts[i]} · ${share}%</span>`;

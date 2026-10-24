@@ -660,9 +660,9 @@ check("screen.css: ширина блока игры задана сэйфзон�
       and re.search(r"\.quiz-block\s*\{[^}]*calc\(100%\s*-\s*2\s*\*\s*var\(--quiz-safe\)",
                     screen_css, re.S) is not None,
       "фиксированные 1100px давали узкий столбик на широком экране")
-check("screen.js: сжатый блок расширяется и центрируется, а не сжимается в столбик",
-      "50% -" in screen_js and "roomW / scale" in screen_js,
-      "обычный scale() уменьшал и ширину — блок снова становился колонкой")
+check("screen.js: ужатие идёт через zoom, а не через scale",
+      "inner.style.zoom" in screen_js and "inner.style.transform" not in screen_js,
+      "scale() уменьшал и ширину — блок вылезал за край окна")
 check("screen.js: у вариантов на проекторе есть номера 1–4",
       "quiz-s-idx" in screen_js and "${i + 1}" in screen_js,
       "зал нажимает на телефоне ту же цифру, что видит на экране")
@@ -815,10 +815,13 @@ check("screen.html: содержимое слоя завёрнуто в масш
       "длинный вопрос и таблица на десять человек иначе обрежутся краем экрана")
 check("screen.js: экран сжимает длинный вопрос, а не обрезает его",
       "function fitQuiz(" in screen_js and "function fitQuizActive(" in screen_js
-      and "QUIZ_FIT_MIN" in screen_js)
+      and "QUIZ_ZOOM_MIN" in screen_js)
 check("screen.js: при смене размера окна игра пересчитывает масштаб",
-      "fitQuizActive();" in screen_js.split("window.addEventListener('resize'")[1][:300]
-      if "window.addEventListener('resize'" in screen_js else False)
+      "fitQuizActive(true)" in screen_js,
+      "на другом экране старый zoom уже не подходит")
+check("screen.js: масштаб вопроса не пересчитывается при смене стадии",
+      "quizFitCache" in screen_js and "cached.key === key" in screen_js,
+      "иначе кнопки дёргались при закрытии приёма")
 check("screen.css: длинное слово не вылезает за край проектора",
       re.search(r"\.quiz-q\s*\{[^}]*overflow-wrap:\s*anywhere", screen_css, re.S) is not None)
 check("screen.js: экран рисует кадр игры и берёт его из init",

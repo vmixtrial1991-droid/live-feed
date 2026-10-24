@@ -340,6 +340,11 @@
    и содержимое вылезало за края окна. */
 .quiz-fit {
   min-height: 0;
+  /* дети не тянутся на всю высоту кадра: иначе фото и блок ответов
+     растягиваются до его размера, а текст остаётся мелким — получается
+     пустое место внутри блока вместо крупного содержимого. Высоту задаёт
+     содержимое, а влезает оно или нет, решает fitQuiz() */
+  align-items: center;
   /* свободную высоту блока забирает тело вопроса: картинке и ответам
      достаётся весь остаток кадра под шапкой */
   flex: 1 1 auto;
@@ -452,7 +457,10 @@
     "q"
     "opts"
     "count";
-  grid-template-rows: minmax(0, 1.25fr) auto auto auto;
+  /* Фото получает свободное место, но ответам гарантирована своя доля:
+     иначе крупная картинка забирала кадр целиком, и кнопки сжимались до
+     полосок. 1fr тексту — столько же фото, минимум под две строки. */
+  grid-template-rows: minmax(0, 1fr) auto minmax(min-content, 1fr) auto;
   gap: clamp(.35rem, 1vh, .8rem);
   align-items: center;
   justify-items: center;
@@ -496,7 +504,10 @@
   background: rgba(255, 255, 255, .03);
 }
 /* широкая: фото сверху на всю ширину, ответы под ним сеткой 2x2 */
-.quiz-body.on-shot-wide .quiz-shot img { max-height: min(52vh, 560px); }
+/* Фото занимает не больше половины кадра: остальное — вопросу и ответам.
+   Без этого крупная картинка съедала всю высоту, а текст сжимался под неё,
+   и ответы выходили мелкими при большом фото. */
+.quiz-body.on-shot-wide .quiz-shot img { max-height: min(46vh, 500px); }
 
 /* Квадрат и вертикаль: фото слева во всю высоту, ответы справа в столбик,
    обе колонки центрированы по вертикали. */
@@ -515,15 +526,23 @@
 .quiz-body.on-shot-tall .quiz-q { text-align: left; }
 .quiz-body.on-shot-square .quiz-count,
 .quiz-body.on-shot-tall .quiz-count { text-align: left; }
-.quiz-body.on-shot-square .quiz-shot img { max-height: min(70vh, 740px); }
-.quiz-body.on-shot-tall .quiz-shot img { max-height: min(76vh, 800px); }
+.quiz-body.on-shot-square .quiz-shot img { max-height: min(60vh, 640px); }
+.quiz-body.on-shot-tall .quiz-shot img { max-height: min(64vh, 680px); }
 
-/* сетка ответов: 1 2 сверху, 3 4 снизу */
+/* сетка ответов: 1 2 сверху, 3 4 снизу.
+
+   Строки тянутся на всю высоту, отданную ответам: короткий вариант — это
+   крупная кнопка, а не маленькая плашка, вокруг которой пусто. Высоту
+   задаёт не содержимое, а свободное место колонки, поэтому кнопки одного
+   вопроса всегда одинаковые и занимают кадр целиком. */
 .quiz-body.has-image .quiz-opts {
   display: grid;
   grid-template-columns: 1fr 1fr;
+  grid-auto-rows: minmax(0, 1fr);
   gap: clamp(.4rem, 1vh, .8rem);
   margin: 0;
+  height: 100%;
+  align-content: stretch;
 }
 /* столбик для высоких снимков: в две колонки рядом с вертикалью варианты
    становились слишком узкими, и текст рвался посреди слова */
@@ -531,6 +550,9 @@
 .quiz-body.on-shot-tall .quiz-opts {
   grid-template-columns: minmax(0, 1fr);
   gap: clamp(.3rem, .9vh, .6rem);
+  /* столбик занимает всю высоту, отданную ответам: кнопки одного размера,
+     а не сжатые по содержимому */
+  align-content: center;
 }
 
 /* Третий вариант при трёх: снизу по центру, а не в левой ячейке с дыркой
@@ -566,8 +588,9 @@
   gap: .1em .6em;
   font-size: clamp(.9rem, 1.5vw, 1.45rem);
   padding: clamp(.4rem, 1vh, .8rem) clamp(.6rem, 1.2vw, 1rem);
-  /* высота строки под цифры одинаковая в обеих стадиях */
-  min-height: calc(2.6em + 1.2rem);
+  /* высота строки под цифры одинаковая в обеих стадиях; тянуть по высоте
+     даёт сетка (grid-auto-rows), поэтому минимум только для запаса */
+  min-height: calc(2.4em + 1rem);
 }
 .quiz-body.has-image .quiz-s-opt .quiz-s-idx {
   grid-area: idx;

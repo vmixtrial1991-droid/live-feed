@@ -239,62 +239,37 @@ function showQuizBlock(block, key) {
   return swap;
 }
 
-/* Влезает ли блок в экран — и насколько его уменьшить, если нет.
+/* Сколько места на самом деле занято содержимым — в пикселях экрана.
 
-   Проектор не прокручивается и полос прокрутки не показывает: всё, что
-   вышло за край, зал не увидит. А выйти может легко — двести символов
-   вопроса, четыре варианта по восемьдесят символов, десять строк
-   финальной таблицы на 16:9.
+   Считаем по детям, а не по самому блоку. .quiz-fit растянут флексом на
+   всю свободную высоту кадра, поэтому его offsetHeight — это выделенное
+   место, а не нужное; а zoom меняет выделенную высоту обратно
+   пропорционально, и «высота × zoom» оставалась постоянной. Из-за этого
+   поиск масштаба уходил в пол: холл сжимался до 0.35, а при сплющенном
+   окне ответы становились мелкими, хотя места снизу хватало.
 
-   Уменьшаем через zoom, а не через transform: scale(). У scale есть
-   подвох — он сжимает и ширину тоже, поэтому широкий блок после сжатия
-   снова выглядел узкой колонкой, а раздвинутый вручную блок вылезал за
-   края окна. zoom пересчитывает размеры по-настоящему: ширина остаётся
-   полной (её держит --quiz-safe), а текст, отступы и промежутки
-   уменьшаются вместе. Ничего раздвигать и центрировать отрицательными
-   отступами не нужно.
-
-   Порог 0.35 — страховка от нуля: если вопрос не влезает даже так, его
-   надо сокращать, а не уменьшать до нечитаемого. */
-const QUIZ_ZOOM_MIN = 0.35;
-
-function unfixQuiz(inner) {
-  inner.style.zoom = "";
-}
-
-/* Высота, которую содержимое реально хочет занять.
-
-   scrollHeight, а не offsetHeight: .quiz-fit растянут флексом на всю
-   свободную высоту кадра, и offsetHeight показывает выданное место, а не
-   нужное. С ним длинный вопрос считался «влезает» и обрезался снизу. */
+   getBoundingClientRect уже учитывает zoom, поэтому получаем ровно то,
+   что видит зал. */
 function contentHeight(inner) {
-  const zoom = parseFloat(inner.style.zoom) || 1;
-  // scrollHeight считается в координатах без zoom, поэтому высоту на экране
-  // получаем умножением: иначе после уменьшения блок «не влезал» снова,
-  // и zoom уходил в пол
-  return Math.max(inner.scrollHeight, inner.offsetHeight) * zoom;
+  /* Меряем по детям, а не по scrollHeight/offsetHeight.
+
+     .quiz-fit — флекс-колонка на всю свободную высоту кадра, поэтому его
+     offsetHeight равен кадру, а не содержимому. scrollHeight при zoom
+     считается в координатах без масштаба и потому растёт при увеличении —
+     для сравнения с кадром он не годится.
+
+     getBoundingClientRect у детей уже учитывает zoom и даёт ровно то, что
+     видит зал: от верха первого ребёнка до низа последнего. */
+  const kids = [...inner.children].filter((el) => !el.hidden);
+  if (!kids.length) return 0;
+  const top = kids[0].getBoundingClientRect().top;
+  const bottom = kids[kids.length - 1].getBoundingClientRect().bottom;
+  return Math.max(0, bottom - top);
 }
 
-/* Масштаб подбирается на каждый кадр вопроса заново, но запоминается:
-   если содержимое не изменилось, повторно не считаем. Это важно, потому
-   что при закрытии приёма кадр перерисовывается и fitQuiz вызывается
-   снова — без кэша поиск масштаба каждый раз давал бы чуть другое
-   значение, и кадр дёргался. */
-let quizFitCache = new WeakMap();   // block -> {key, zoom}
-
-function quizFitSignature(block) {
-  const q = block.querySelector(".quiz-q");
-  const opts = block.querySelector(".quiz-opts");
-  const img = block.querySelector(".quiz-shot img");
-  return [
-    block.clientWidth, block.clientHeight,
-    q ? q.textContent : "",
-    // стадия не входит в подпись: в open и closed набор вариантов один,
-    // меняются только проценты, и масштаб должен остаться тем же
-    opts ? opts.children.length : 0,
-    img && img.naturalWidth ? img.naturalWidth + "x" + img.naturalHeight : "",
-  ].join("|");
-}
+// нижняя граница — страховка от нуля (вопрос надо сокращать, а не мельчить);
+// верхняя — чтобы «заполнить кадр» не превращалось в гигантские буквы
+const QUIZ_ZOOM_MAX = 1.6;
 
 function fitQuiz(block, force = false) {
   const inner = block.querySelector(".quiz-fit");
@@ -311,23 +286,23 @@ function fitQuiz(block, force = false) {
 
   const cs = getComputedStyle(block);
   const padY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
-  // шапка вопроса не уменьшается вместе с текстом: место под неё вычитаем
-  // из доступной высоты, иначе номер вопроса и отсчёт наезжали на текст
+  // шапка вопроса не масштабируется вместе с текстом: место под неё
+  // вычитаем из доступной высоты
   const head = block.querySelector(".quiz-head");
   const headH = head ? head.getBoundingClientRect().height : 0;
   const gap = parseFloat(cs.rowGap) || 0;
   const roomH = host.clientHeight - padY - headH - gap;
   if (!roomH) { unfixQuiz(inner); quizFitCache.set(block, {key, zoom: 0}); return; }
 
-  /* Ставим zoom и говорим, влезает ли содержимое в кадр по высоте.
+  /* Ищем не «насколько сжать», а «насколько можно увеличить, чтобы ещё
+     влезало»: пустое место в кадре — такая же ошибка, как обрезка.
+     Слишком мелкий QR на холле, короткие ответы рядом с большим фото,
+     сплющенное окно — всё это место, которое можно занять текстом.
 
-     zoom не только уменьшает текст — он расширяет блок в тех же
-     координатах, поэтому строки перекладываются шире и высота падает
-     быстрее, чем растёт масштаб. Из-за этого «пропорциональная» оценка
-     (roomH / высота при zoom 1) даёт слишком мелкий масштаб: при
-     уменьшении блок стал бы шире, а текст мог бы остаться крупнее.
-     Поэтому не считаем, а ищем: берём самый крупный zoom, при котором
-     содержимое ещё влезает. */
+     zoom не только меняет кегль — он пересчитывает ширину блока в тех же
+     координатах экрана, поэтому строки перекладываются, и высота меняется
+     не пропорционально масштабу. Поэтому не считаем формулой, а ищем
+     наибольший подходящий масштаб перебором (бинарный поиск). */
   const fitsAt = (zoom) => {
     inner.style.zoom = zoom === 1 ? "" : String(zoom);
     const h = contentHeight(inner);
@@ -336,19 +311,35 @@ function fitQuiz(block, force = false) {
 
   unfixQuiz(inner);
   if (fitsAt(1)) {
-    quizFitCache.set(block, {key, zoom: 0});   // масштаб не нужен
+    // влезает при натуральном размере — пробуем занять свободное место
+    let lo = 1;
+    let hi = QUIZ_ZOOM_MAX;
+    if (fitsAt(hi)) {
+      lo = hi;   // даже максимальный влезает — берём его
+    } else {
+      for (let step = 0; step < 6; step++) {
+        const mid = (lo + hi) / 2;
+        if (fitsAt(mid)) lo = mid; else hi = mid;
+      }
+    }
+    const zoom = Math.min(QUIZ_ZOOM_MAX, Math.floor(lo * 100) / 100);
+    if (zoom > 1) {
+      fitsAt(zoom);
+      quizFitCache.set(block, {key, zoom});
+      return;
+    }
+    unfixQuiz(inner);
+    quizFitCache.set(block, {key, zoom: 0});
     return;
   }
 
-  // бинарный поиск между полом и единицей: ищем максимальный подходящий
+  // не влезает даже натурально — уменьшаем до наибольшего подходящего
   let lo = QUIZ_ZOOM_MIN;
   let hi = 1;
   for (let step = 0; step < 7; step++) {
     const mid = (lo + hi) / 2;
     if (fitsAt(mid)) lo = mid; else hi = mid;
   }
-  // вниз до сотых — значение должно быть стабильным, а не зависеть от
-  // последнего шага поиска
   const zoom = Math.max(QUIZ_ZOOM_MIN, Math.floor(lo * 100) / 100);
   fitsAt(zoom);
   quizFitCache.set(block, {key, zoom});

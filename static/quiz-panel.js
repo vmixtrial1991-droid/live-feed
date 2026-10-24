@@ -20,6 +20,7 @@ const quizBoardHost = document.getElementById('quizBoardHost');
 const tabQuizBadge = document.getElementById('tabQuizBadge');
 
 const quizStartBtn = document.getElementById('quizStartBtn');
+const quizPrevBtn = document.getElementById('quizPrevBtn');
 const quizStepBtn = document.getElementById('quizStepBtn');
 const quizStepGlyph = document.getElementById('quizStepGlyph');
 const quizStepLabel = document.getElementById('quizStepLabel');
@@ -122,6 +123,11 @@ function renderQuizControls() {
   // у ведущего не бывает
   quizStartBtn.hidden = st.phase !== 'idle';
   quizStepBtn.hidden = st.phase === 'idle';
+  // «←» показываем только когда игра идёт: на idle возвращаться некуда
+  quizPrevBtn.hidden = st.phase === 'idle';
+  quizPrevBtn.disabled = !st.prev_phase;
+  quizPrevBtn.title = st.prev_phase
+    ? 'Шаг назад по игре' : 'Возвращаться некуда — это начало игры';
   quizStepBtn.disabled = !stepOn;
   quizStepGlyph.textContent = step.glyph;
   // почему шаг недоступен — три разные причины, и «добавьте вопросы» на
@@ -309,6 +315,7 @@ function quizStep() {
 }
 
 quizStepBtn.addEventListener('click', quizStep);
+quizPrevBtn.addEventListener('click', () => quizControl('prev'));
 quizStartBtn.addEventListener('click', () => quizControl('start'));
 quizBoardBtn.addEventListener('click', () => quizControl('board'));
 quizStopBtn.addEventListener('click', async () => {

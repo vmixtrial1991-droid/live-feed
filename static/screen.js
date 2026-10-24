@@ -479,9 +479,13 @@ function renderQuiz() {
       el.className = 'quiz-s-opt';
       // номер перед вариантом: зал видит «3» на проекторе и нажимает
       // третью кнопку у себя — сверять текст с экрана больше не нужно.
-      // В сам текст варианта номер не попадает: он живёт только в вёрстке
+      // В сам текст варианта номер не попадает: он живёт только в вёрстке.
+      // Пустой .quiz-s-num держит строку под проценты: в closed/reveal на
+      // её месте появятся цифры, и без резерва ячейки подрастали — ответы
+      // съезжали вниз при закрытии приёма
       el.innerHTML = `<span class="quiz-s-idx">${i + 1}</span>`
-        + `<span class="quiz-s-text">${escapeHTML(text)}</span>`;
+        + `<span class="quiz-s-text">${escapeHTML(text)}</span>`
+        + '<span class="quiz-s-num">&#160;</span>';
       return el;
     }));
     quizCount.textContent = f.answered_total

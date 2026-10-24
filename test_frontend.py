@@ -700,6 +700,15 @@ check("moderator.html: справа остались лидеры, сброс и
       all(i in mod_html for i in ("quizBoardBtn", "quizResetBtn", "quizStopBtn"))
       and not any(i in mod_html for i in ("quizShowBtn", "quizFeedBtn")))
 check("moderator.html: поле времени ответа в редакторе вопроса", 'id="qSeconds"' in mod_html)
+check("moderator.html: кнопка «←» слева от главной и квадратная",
+      'id="quizPrevBtn"' in mod_html
+      and mod_html.index('quizPrevBtn') < mod_html.index('quizStepBtn'),
+      "шаг назад стоит до шаговой кнопки в разметке")
+check("moderator.css: «←» не тянется и равна высоте главной",
+      re.search(r"\.ctl-back\s*\{[^}]*flex:\s*none[^}]*width:\s*64px", mod_css, re.S) is not None)
+check("quiz-panel.js: «←» гасится, когда возвращаться некуда",
+      "quizPrevBtn.disabled = !st.prev_phase" in quiz_panel_js
+      and "quizControl('prev')" in quiz_panel_js)
 check("moderator.html: в подсказке редактора сказано про два-четыре варианта",
       "от двух до четырёх" in mod_html)
 check("moderator.html: в редакторе есть загрузка картинки к вопросу",
@@ -716,8 +725,7 @@ check("screen.css: с картинкой ответы встают сеткой,
       and re.search(r"\.quiz-body\.has-image \.quiz-opts\s*\{[^}]*grid-template-columns:\s*1fr 1fr",
                     screen_css, re.S) is not None)
 check("screen.css: раскладка учитывает пропорции фото, а не только «фото слева»",
-      "on-shot-wide" in screen_css and "on-shot-tall" in screen_css
-      and "on-shot-square" in screen_css,
+      "on-shot-tall" in screen_css and "on-shot-square" in screen_css,
       "панорама и вертикаль требуют разного: ширина против высоты")
 check("screen.js: пропорции фото определяются по натуральному размеру",
       "function markShotShape" in screen_js and "on-shot-wide" in screen_js)

@@ -1499,6 +1499,9 @@ async def api_mod_quiz_control(
     next   — следующий по порядку, а после последнего вопроса — финал;
     board  — промежуточная таблица лидеров (листает всех);
     back   — вернуться с промежуточной таблицы к вопросу, где игра стояла;
+    prev   — шаг назад по цепочке стадий (кнопка «←»): с открытого вопроса
+             в холл или к прошлому вопросу, с закрытого приёма снова в
+             приём, с показанного ответа обратно к закрытому приёму;
     feed   — убрать квиз с экрана, оставив зал отвечать (фаза не трогается);
     show   — вернуть экран к текущей стадии;
     stop   — закончить квиз, экран снова показывает ленту;
@@ -1601,6 +1604,44 @@ async def api_mod_quiz_control(
             raise HTTPException(status_code=400, detail="Возвращаться некуда: вопрос уже прожит")
         screen.quiz_phase, screen.quiz_visible = target, True
         screen.quiz_prev_phase = None
+    elif action == "prev":
+        # Шаг назад по цепочке стадий. Нужен, когда ведущий промахнулся:
+        # закрыл приём не тому вопросу, показал ответ раньше времени,
+        # открыл не тот вопрос. Таблица лидеров — тоже пауза, с неё
+        # возвращаемся туда, где игра стояла (как action=back).
+        if screen.quiz_phase in ("idle", "lobby"):
+            raise HTTPException(status_code=400, detail="Квиз ещё не дошёл до вопросов")
+        if screen.quiz_phase == "board" and screen.quiz_final:
+            raise HTTPException(
+                status_code=400,
+                detail="Игра уже закончена — финальную таблицу не откатить",
+            )
+        target = quizmod.prev_phase(screen, store)
+        if target is None:
+            raise HTTPException(status_code=400, detail="Возвращаться некуда")
+        screen.quiz_visible = True
+        if target == "prev_question":
+            # с открытого вопроса назад — к прошлому вопросу в показе ответа:
+            # ведущий увидит, что было до промаха, и сможет идти дальше
+            order = [q["id"] for q in store.quiz_list_questions()]
+            idx = order.index(screen.quiz_question) if screen.quiz_question in order else -1
+            prev_id = order[idx - 1] if idx > 0 else None
+            if prev_id is None:
+                raise HTTPException(status_code=400, detail="Это первый вопрос — назад только в холл")
+            screen.quiz_phase, screen.quiz_question = "reveal", prev_id
+            screen.quiz_final, screen.quiz_prev_phase = False, None
+            screen.quiz_opened_at = None
+        elif target == "open":
+            # возвращаемся в приём ответов: отсчёт начинается заново, иначе
+            # зал получил бы остаток, которого уже не видел
+            screen.quiz_phase, screen.quiz_final = "open", False
+            screen.quiz_prev_phase = None
+            screen.quiz_opened_at = time.time()
+        else:
+            screen.quiz_phase = target
+            screen.quiz_final = False
+            screen.quiz_prev_phase = None
+            screen.quiz_opened_at = None
     elif action == "feed":
         screen.quiz_visible = False
     elif action == "show":

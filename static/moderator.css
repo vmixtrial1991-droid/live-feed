@@ -50,6 +50,21 @@
 .ctl-main .ctl-label { color: rgba(255, 255, 255, .85); }
 .ctl-main.is-paused { background: linear-gradient(135deg, #2fae78, #33c98a); }
 
+/* Кнопка «←» — квадрат слева от главной: шаг назад по игре. Не тянется
+   (flex: none), сторона равна высоте главной, чтобы стояла с ней вровень. */
+.ctl-back {
+  flex: none;
+  width: 64px;
+  min-height: 64px;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+}
+.ctl-back .ctl-glyph { font-size: 1.6rem; }
+.ctl-back:hover { color: var(--text); }
+.ctl-back:disabled { opacity: .4; cursor: default; }
+.ctl-back:disabled:hover { background: rgba(255, 255, 255, .06); }
+
 .control-slider { display: flex; flex-direction: column; gap: .3rem; }
 .slider-row { display: flex; flex-direction: column; gap: .3rem; cursor: pointer; }
 .slider-row > span { font-size: .88rem; color: var(--muted); }

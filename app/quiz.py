@@ -36,6 +36,40 @@ PHASES = ("idle", "lobby", "open", "closed", "reveal", "board")
 # стадии, к которым возвращается шаг «назад» с промежуточной таблицы
 BACK_PHASES = ("lobby", "open", "closed", "reveal")
 
+# Цепочка вперёд: «Открыть → Закрыть приём → Показать ответ → Дальше».
+# По ней же считается шаг назад для кнопки «←»: ведущий промахнулся
+# кнопкой и хочет вернуть предыдущую стадию того же вопроса.
+STEP_BACK = {"open": "lobby", "closed": "open", "reveal": "closed"}
+
+
+def prev_phase(screen: ScreenController, store: EventStore) -> str | None:
+    """Куда ведёт кнопка «←» — на один шаг назад, или None.
+
+    Отдельно от back_phase(): тот про возврат с таблицы лидеров, а этот —
+    про обычную цепочку стадий. Ведущий нажимает «Закрыть приём» случайно
+    и хочет вернуть приём; нажал «Дальше» не на тот вопрос — хочет
+    вернуться к прошлому.
+
+    Что можно:
+      open   → lobby (вопрос ещё не открывали) — если это первый вопрос,
+               иначе к прошлому вопросу в стадии reveal;
+      closed → open  (снова принимаем ответы, отсчёт идёт с начала);
+      reveal → closed (прячем правильный ответ);
+      board  → стадия, с которой ушли на таблицу (как back_phase);
+    Нельзя: из lobby (квиз только запущен) и из финальной таблицы.
+    """
+    phase = screen.quiz_phase
+    if phase == "board":
+        return back_phase(screen)
+    if phase == "lobby" or phase == "idle":
+        return None
+    if phase == "open":
+        order = [q["id"] for q in store.quiz_list_questions()]
+        if screen.quiz_question in order and order.index(screen.quiz_question) > 0:
+            return "prev_question"   # особый случай: предыдущий вопрос
+        return "lobby"
+    return STEP_BACK.get(phase)
+
 
 def back_phase(screen: ScreenController) -> str | None:
     """Куда ведёт возврат с таблицы лидеров, или None — если возврата нет.
@@ -239,6 +273,8 @@ def host_state(event: Event, store: EventStore, screen: ScreenController) -> dic
         # «вернуться к вопросу»: панель подписывает шаговую кнопку по этой
         # стадии; у финальной таблицы поля нет — возвращаться некуда
         "back_phase": back_phase(screen),
+        # куда ведёт кнопка «←» (на шаг назад по цепочке), или None
+        "prev_phase": prev_phase(screen, store),
         "questions": questions,
         "board": _board_public(store),
         "participants": store.stats()["participants"],

@@ -423,53 +423,56 @@
   gap: clamp(.5rem, 1.4vh, 1rem);
 }
 
-/* Вопрос с картинкой. Вопрос всегда сверху во всю ширину: он не отбирает
-   место у ответов и не вынуждает жать фото.
+/* Вопрос с картинкой. Картинка всегда слева, ответы справа и по центру
+   колонки. Так кадр читается в одном порядке на любом вопросе: слева
+   снимок, справа вопрос и варианты, ничего не перескакивает с вопроса на
+   вопрос.
 
-   Дальше раскладка зависит от пропорций снимка, потому что они требуют
-   разного:
-     - панорама и 4:3 (on-shot-wide): фото во всю ширину под вопросом,
-       ответы сеткой 2x2 под фото. Широкая картинка упирается в ширину
-       кадра, и в колонке она была бы маленькой полоской;
-     - квадрат и вертикаль (on-shot-square / on-shot-tall): фото крупно
-       справа во всю высоту, ответы слева. Высокому снимку ширина не нужна,
-       а высота нужна вся.
+   Раскладка зависит от пропорций снимка (класс on-shot-*):
+     - панорама и 4:3: слева фото, справа вопрос и ответы сеткой 2x2.
+       Вопрос стоит над ответами в своей колонке, а не во всю ширину:
+       так он не отнимает высоту у фото;
+     - квадрат и вертикаль: снимок высокий, и ответы в две колонки рядом с
+       ним становились узкими, а слова рвались. Поэтому ответы — в столбик,
+       а фото слева во всю высоту.
 
-   Ответы — сеткой 2x2 (1 2 сверху, 3 4 снизу): с картинкой сервер пускает
-   варианты не длиннее 40 знаков, и в два столбца они читаются быстрее.
+   Сетка ответов: 1 2 сверху, 3 4 снизу. Если вариантов три, третий встаёт
+   снизу по центру (grid-column: 1 / -1) — без дырки справа.
+
+   Резерв под проценты: в стадии open в ячейке нет цифр, а в closed/reveal
+   появляется строка «3 · 33%». Числа занимают то же место всегда
+   (min-height и колонка под цифры), поэтому кнопки не дёргаются при
+   закрытии приёма.
 
    .quiz-ask раскрывается через display: contents, чтобы его дети (вопрос,
-   ответы, подпись) стали ячейками этой же сетки: иначе вопрос не вынести
-   наверх, не перестраивая разметку. */
+   ответы, подпись) стали ячейками этой же сетки. */
 .quiz-body.has-image {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   grid-template-areas:
-    "q"
-    "shot"
-    "opts"
-    "count";
-  grid-template-rows: auto minmax(0, 1fr) auto auto;
-  gap: clamp(.35rem, 1vh, .8rem);
+    "shot q"
+    "shot opts"
+    "shot count";
+  grid-template-rows: auto 1fr auto;
+  gap: clamp(.3rem, .9vh, .7rem) clamp(.8rem, 2vw, 1.8rem);
   align-items: center;
-  justify-items: center;
   text-align: left;
   height: 100%;
 }
 .quiz-body.has-image .quiz-ask { display: contents; }
 .quiz-body.has-image .quiz-q {
   grid-area: q;
-  text-align: center;
-  width: 100%;
+  text-align: left;
+  align-self: end;
 }
 .quiz-body.has-image .quiz-opts {
   grid-area: opts;
-  width: 100%;
+  align-self: start;
 }
 .quiz-body.has-image .quiz-count {
   grid-area: count;
   margin-top: 0;
-  text-align: center;
+  text-align: left;
 }
 .quiz-shot {
   grid-area: shot;
@@ -479,7 +482,6 @@
   justify-content: center;
   align-items: center;
   height: 100%;
-  width: 100%;
 }
 .quiz-shot img {
   display: block;
@@ -492,45 +494,49 @@
   background: rgba(255, 255, 255, .03);
 }
 
-/* Квадрат и вертикаль: фото крупно справа во всю высоту, ответы слева.
-   Колонка фото сжимается по содержимому (auto), поэтому высокий снимок
-   получает почти всю высоту кадра, а не половину ширины. */
-.quiz-body.on-shot-square,
-.quiz-body.on-shot-tall {
-  grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-areas:
-    "q     q"
-    "opts  shot"
-    "count shot";
-  grid-template-rows: auto 1fr auto;
-  justify-items: stretch;
-}
-.quiz-body.on-shot-square .quiz-shot img { max-height: min(72vh, 760px); }
-.quiz-body.on-shot-tall .quiz-shot img { max-height: min(78vh, 830px); }
-
 /* сетка ответов: 1 2 сверху, 3 4 снизу */
 .quiz-body.has-image .quiz-opts {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: clamp(.4rem, 1vh, .8rem);
   margin-top: 0;
-  align-self: start;
-}
-/* с картинкой заголовок и варианты покрупнее: по высоте место есть, а
-   читать с дальних рядов должно быть так же легко, как без фото */
-.quiz-body.has-image .quiz-q {
-  font-size: clamp(1.3rem, 2.6vw, 2.5rem);
-  line-height: 1.2;
-  margin-bottom: 0;
-}
-.quiz-body.has-image .quiz-s-opt {
-  font-size: clamp(.95rem, 1.7vw, 1.6rem);
-  padding: clamp(.45rem, 1.1vh, .85rem) clamp(.6rem, 1.3vw, 1rem);
+  width: 100%;
 }
 
-/* В режиме с картинкой ячейка узкая: номер, текст и проценты в одну строку
-   не помещаются, и слова рвались посередине («Квадр/ат»). Поэтому процент
-   уходит под текст, а сам текст переносится только по словам. */
+/* Квадрат и вертикаль: ответы в столбик, фото слева во всю высоту.
+   В две колонки рядом с высоким снимком варианты становились слишком
+   узкими — по 40 знаков в каждой, и текст рвался посреди слова.
+   Идёт после общего правила про две колонки: специфичность у них
+   одинаковая, и порядок здесь и решает. */
+.quiz-body.on-shot-square .quiz-opts,
+.quiz-body.on-shot-tall .quiz-opts {
+  grid-template-columns: minmax(0, 1fr);
+  gap: clamp(.3rem, .9vh, .6rem);
+}
+.quiz-body.on-shot-square .quiz-shot img { max-height: min(70vh, 740px); }
+.quiz-body.on-shot-tall .quiz-shot img { max-height: min(76vh, 800px); }
+
+/* Третий вариант при трёх: снизу по центру, а не в левой ячейке с дыркой
+   справа. Работает и в сетке 2x2, и в столбике. */
+.quiz-body.has-image .quiz-opts > .quiz-s-opt:last-child:nth-child(3) {
+  grid-column: 1 / -1;
+  justify-self: center;
+  width: min(100%, calc(50% - clamp(.4rem, 1vh, .8rem) / 2));
+}
+.quiz-body.on-shot-square .quiz-opts > .quiz-s-opt:last-child:nth-child(3),
+.quiz-body.on-shot-tall .quiz-opts > .quiz-s-opt:last-child:nth-child(3) {
+  width: 100%;
+}
+
+/* Одна и та же сетка в приёме ответов и в распределении.
+
+   В open ячейка — номер и текст, в closed/reveal добавляется строка
+   «3 · 33%». Если верстать их по-разному (flex против grid), при закрытии
+   приёма ячейки подрастают и все ответы съезжают вниз, а вместе с ними
+   меняется и место под фото. Поэтому сетка общая: номер слева на две
+   строки, справа текст и под ним цифры. В open вместо цифр стоит
+   неразрывный пробел (его ставит screen.js), и высота строки та же. */
+.quiz-body.has-image .quiz-s-opt,
 .quiz-body.has-image .quiz-s-opt.is-bar {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -538,18 +544,32 @@
     "idx text"
     "idx num";
   align-items: center;
-  gap: .15em .6em;
+  gap: .1em .6em;
+  font-size: clamp(.9rem, 1.5vw, 1.45rem);
+  padding: clamp(.4rem, 1vh, .8rem) clamp(.6rem, 1.2vw, 1rem);
 }
-.quiz-body.has-image .quiz-s-opt.is-bar .quiz-s-idx { grid-area: idx; align-self: start; }
-.quiz-body.has-image .quiz-s-opt.is-bar .quiz-s-text {
+.quiz-body.has-image .quiz-s-opt .quiz-s-idx {
+  grid-area: idx;
+  align-self: start;
+}
+.quiz-body.has-image .quiz-s-opt .quiz-s-text {
   grid-area: text;
   overflow-wrap: break-word;   /* только по словам, а не посреди слова */
   word-break: normal;
   hyphens: none;
 }
-.quiz-body.has-image .quiz-s-opt.is-bar .quiz-s-num {
+.quiz-body.has-image .quiz-s-opt .quiz-s-num {
   grid-area: num;
   font-size: .85em;
+  min-height: 1.15em;
+}
+
+/* с картинкой заголовок и варианты покрупнее: по высоте место есть, а
+   читать с дальних рядов должно быть так же легко, как без фото */
+.quiz-body.has-image .quiz-q {
+  font-size: clamp(1.2rem, 2.3vw, 2.2rem);
+  line-height: 1.2;
+  margin-bottom: 0;
 }
 
 /* тег и подпись «ответили» — по центру всей карточки, как и без фото */

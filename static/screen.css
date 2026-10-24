@@ -577,42 +577,22 @@
    (его ставит screen.js), и высота строки та же. Ширина колонки под
    цифры (minmax) тоже фиксирована — иначе длинный текст в open занимал её
    всю, а с процентами отдавал часть, и строки прыгали. */
-.quiz-body.has-image .quiz-s-opt,
-.quiz-body.has-image .quiz-s-opt.is-bar {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  grid-template-areas:
-    "idx text"
-    "idx num";
-  align-items: center;
-  gap: .1em .6em;
-  font-size: clamp(.9rem, 1.5vw, 1.45rem);
-  padding: clamp(.4rem, 1vh, .8rem) clamp(.6rem, 1.2vw, 1rem);
-  /* высота строки под цифры одинаковая в обеих стадиях; тянуть по высоте
-     даёт сетка (grid-auto-rows), поэтому минимум только для запаса */
-  min-height: calc(2.4em + 1rem);
+/* Вопрос с картинкой: та же ячейка, что и без неё (номер, текст,
+   проценты справа поверх заливки), только крупнее кегль и меньше отступы —
+   рядом с фото места меньше, но текст должен читаться так же. */
+.quiz-body.has-image .quiz-s-opt {
+  /* Кегль привязан к высоте кадра, а не к ширине окна: кнопки растянуты
+     сеткой на треть кадра, и при широком окне «1.7vw» давал мелкий текст
+     в огромных плашках. vh держит пропорцию к самому ответу. */
+  font-size: clamp(1.05rem, 2.1vh, 2.1rem);
+  padding: clamp(.6rem, 1.4vh, 1.2rem) clamp(.8rem, 1.6vw, 1.4rem);
 }
-.quiz-body.has-image .quiz-s-opt .quiz-s-idx {
-  grid-area: idx;
-  align-self: start;
-}
-.quiz-body.has-image .quiz-s-opt .quiz-s-text {
-  grid-area: text;
-  overflow-wrap: break-word;   /* только по словам, а не посреди слова */
-  word-break: normal;
-  hyphens: none;
-}
-.quiz-s-num {
-  grid-area: num;
-  font-size: .85em;
-  min-height: 1.15em;
-  white-space: nowrap;
-}
+.quiz-body.has-image .quiz-s-opt .quiz-s-text { padding-right: 3.2em; }
 
 /* с картинкой заголовок покрупнее: по высоте место есть, а читать с
    дальних рядов должно быть так же легко, как без фото */
 .quiz-body.has-image .quiz-q {
-  font-size: clamp(1.2rem, 2.3vw, 2.2rem);
+  font-size: clamp(1.3rem, 2.8vh, 2.6rem);
   line-height: 1.2;
   margin-bottom: 0;
 }
@@ -624,27 +604,22 @@
   position: relative; overflow: hidden;
   border: 1px solid var(--line); border-radius: 14px;
   background: var(--bg-soft);
-  padding: clamp(.6rem, 1.8vh, 1.2rem) clamp(1rem, 2.5vw, 1.8rem);
+  padding: clamp(.7rem, 2vh, 1.4rem) clamp(1rem, 2.5vw, 1.8rem);
   font-size: clamp(1rem, 2.6vw, 2rem);
   text-align: left;
   overflow-wrap: anywhere;
-  /* Та же сетка, что и у вопроса с картинкой: номер слева на две строки,
-     справа текст и под ним цифры. В open на месте цифр стоит неразрывный
-     пробел (его ставит screen.js), поэтому при закрытии приёма ячейки не
-     подрастают и не меняют ширину — текст не уезжает вбок. */
+  /* Номер слева по центру строки, текст занимает всё остальное, а
+     проценты лежат справа поверх заливки: отдельной строки под них нет.
+     Раньше под цифры была своя строка, и кнопка росла вниз пустотой —
+     теперь высота уходит тексту, а проценты просто видны на полосе. */
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  grid-template-areas:
-    "idx text"
-    "idx num";
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: .1em .7em;
-  /* Место под строку с процентами занято всегда. Без этого блок в open
-     был ниже, чем в closed, и fitQuiz считал масштаб заново — ответы
-     менялись в размере и съезжали. */
-  min-height: calc(2.4em + 1.2rem);
+  gap: .5em .8em;
+  /* высоту задаёт текст: номер и проценты по центру, без резерва */
+  min-height: 0;
 }
-.quiz-s-opt.is-right { border-color: var(--ok); }
+.quiz-s-opt.is-right { border-color: var(--ok); }.quiz-s-opt.is-right { border-color: var(--ok); }
 
 /* Номер варианта: цифра из того же ряда, что и кнопки на телефоне.
    Кружок и табличные цифры — чтобы «1» и «4» были одной ширины и колонка
@@ -657,6 +632,8 @@
   border: 1px solid var(--line); border-radius: 50%;
   background: rgba(255, 255, 255, .05);
   color: var(--muted);
+  /* по центру строки ответа, а не над текстом */
+  align-self: center;
   font-size: .78em; font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
@@ -673,22 +650,34 @@
   background: rgba(91, 140, 255, .18);
 }
 .quiz-s-opt.is-bar.is-right .quiz-s-fill { background: rgba(51, 201, 138, .22); }
-.quiz-s-text { position: relative; min-width: 0; }
-/* Цифры ответов: та же ячейка «num», что и в режиме с картинкой, — одна
-   сетка на все случаи, поэтому проценты не сдвигают текст. */
-.quiz-s-num {
-  grid-area: num;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  font-size: .85em;
-  min-height: 1.15em;
+
+/* Текст ответа лежит поверх заливки и занимает всю середину ячейки.
+   Справа от него всегда оставлено место под проценты — 3.2em хватает на
+   «100%», поэтому длинный текст не заезжает на цифры. */
+.quiz-s-text {
+  position: relative;
+  min-width: 0;
+  padding-right: 3.2em;
 }
 
-/* Резерв под проценты в приёме ответов: цифры стоят на своём месте, но
-   прозрачные. Так строка занимает ровно ту же высоту, что и настоящая,
-   и при закрытии приёма кадр не пересчитывается. */
-.quiz-s-num.is-blank { visibility: hidden; }
+/* Проценты: справа по центру, полупрозрачные, поверх заливки.
+   Количество ответивших не показываем — залу важен процент, а не число.
+   absolute, а не колонка сетки: иначе цифры отнимали бы ширину у текста
+   и высоту у ответа. */
+.quiz-s-num {
+  position: absolute;
+  right: clamp(1rem, 2.5vw, 1.8rem);
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--muted);
+  opacity: .75;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  font-size: .9em;
+  pointer-events: none;
+}
+/* в приёме ответов процентов ещё нет: место под них занято, но пусто */
+.quiz-s-num.is-blank { display: none; }
 
 .quiz-count {
   margin: 1.2em 0 0; color: var(--muted);

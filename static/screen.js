@@ -271,6 +271,38 @@ function contentHeight(inner) {
 // верхняя — чтобы «заполнить кадр» не превращалось в гигантские буквы
 const QUIZ_ZOOM_MAX = 1.6;
 
+/* Подобранный масштаб: block -> {key, zoom}. Хранится между вызовами,
+   чтобы при перерисовке стадии (приём → распределение) не искать его
+   заново: иначе кнопки дёргались и меняли размер. */
+const quizFitCache = new WeakMap();
+
+/* Границы масштаба. Ниже 0.35 вопрос не читается с дальних рядов —
+   такой надо сокращать, а не мельчить; выше 1.6 «заполнить кадр»
+   превращается в гигантские буквы. */
+const QUIZ_ZOOM_MIN = 0.35;
+
+/* Снять подобранный масштаб: вернуть содержимому натуральный размер,
+   прежде чем искать новый. */
+function unfixQuiz(inner) {
+  inner.style.zoom = "";
+}
+
+/* Признак содержимого кадра: по нему решаем, надо ли пересчитывать
+   масштаб. Текст вопроса, число вариантов, размер фото и размер кадра —
+   если всё это не изменилось, масштаб остаётся прежним и кадр не
+   дёргается при перерисовке стадии. */
+function quizFitSignature(block) {
+  const q = block.querySelector(".quiz-q");
+  const opts = block.querySelector(".quiz-opts");
+  const img = block.querySelector(".quiz-shot img");
+  return [
+    block.clientWidth, block.clientHeight,
+    q ? q.textContent : "",
+    opts ? opts.children.length : 0,
+    img && img.naturalWidth ? img.naturalWidth + "x" + img.naturalHeight : "",
+  ].join("|");
+}
+
 function fitQuiz(block, force = false) {
   const inner = block.querySelector(".quiz-fit");
   const host = block.parentElement;   // .quiz-screen — он и есть весь экран
@@ -311,24 +343,10 @@ function fitQuiz(block, force = false) {
 
   unfixQuiz(inner);
   if (fitsAt(1)) {
-    // влезает при натуральном размере — пробуем занять свободное место
-    let lo = 1;
-    let hi = QUIZ_ZOOM_MAX;
-    if (fitsAt(hi)) {
-      lo = hi;   // даже максимальный влезает — берём его
-    } else {
-      for (let step = 0; step < 6; step++) {
-        const mid = (lo + hi) / 2;
-        if (fitsAt(mid)) lo = mid; else hi = mid;
-      }
-    }
-    const zoom = Math.min(QUIZ_ZOOM_MAX, Math.floor(lo * 100) / 100);
-    if (zoom > 1) {
-      fitsAt(zoom);
-      quizFitCache.set(block, {key, zoom});
-      return;
-    }
-    unfixQuiz(inner);
+    /* Влезает при натуральном размере — zoom не увеличиваем. Свободное
+       место в кадре заполняет подбор кегля ответов (growQuizOptions):
+       если раздувать весь блок, вопрос с ответами превращается в плакат
+       и вылезает за экран. */
     quizFitCache.set(block, {key, zoom: 0});
     return;
   }
@@ -345,12 +363,90 @@ function fitQuiz(block, force = false) {
   quizFitCache.set(block, {key, zoom});
 }
 
+/* Ответы растянуты сеткой на треть кадра: короткий текст в высокой
+   кнопке читался мелко, вокруг него оставалось пустое поле. Подбираем
+   кегль под высоту кнопки — но только вверх и с потолком, чтобы длинный
+   вариант не раздувался.
+
+   Считаем от самого длинного варианта: он задаёт предел, остальные
+   получают тот же кегль. Иначе «Одна» была бы вдвое крупнее
+   «Треугольника» в соседней строке. */
+/* Потолок кегля. По высоте кнопки можно разогнать и до 45 px, но тогда
+   ответ спорит с вопросом и кадр выглядит как список заголовков. 1.8 от
+   базового — это примерно 32–34 px на 1080p: крупно с дальних рядов и
+   всё ещё «вариант ответа», а не второй вопрос. */
+const QUIZ_OPT_FONT_MAX = 1.8;
+
+function growQuizOptions(block) {
+  const opts = block.querySelector(".quiz-opts");
+  if (!opts || opts.hidden) return;
+  const cells = [...opts.children].filter((el) => !el.hidden);
+  if (!cells.length) return;
+
+  // начинаем с базового кегля из css
+  for (const cell of cells) cell.style.fontSize = "";
+  const base = parseFloat(getComputedStyle(cells[0]).fontSize) || 16;
+
+  // насколько можно увеличить, чтобы самый длинный ответ ещё влезал в
+  // свою кнопку по высоте
+  let lo = 1;
+  let hi = QUIZ_OPT_FONT_MAX;
+  const fits = (k) => cells.every((cell) => {
+    cell.style.fontSize = (base * k).toFixed(1) + "px";
+    const text = cell.querySelector(".quiz-s-text");
+    if (!text) return true;
+    // внутренняя высота кнопки без отступов
+    const cs = getComputedStyle(cell);
+    const room = cell.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+    return text.scrollHeight <= room;
+  });
+
+  if (!fits(hi)) {
+    for (let step = 0; step < 5; step++) {
+      const mid = (lo + hi) / 2;
+      if (fits(mid)) lo = mid; else hi = mid;
+    }
+  } else {
+    lo = hi;
+  }
+  const k = Math.round(lo * 100) / 100;
+  const px = (base * Math.max(1, k)).toFixed(1) + "px";
+  for (const cell of cells) cell.style.fontSize = k > 1 ? px : "";
+
+  /* Кегль вырос — содержимое стало выше. Если кадр перестал влезать,
+     возвращаемся к базовому кеглю: пусть лучше ответы будут обычного
+     размера, чем часть кадра уедет за экран. Дальше fitQuiz подберёт
+     масштаб блока и ответы уменьшатся вместе с ним. */
+  const host = block.parentElement;
+  if (host) {
+    const head = block.querySelector(".quiz-head");
+    const csb = getComputedStyle(block);
+    const room = host.clientHeight
+      - parseFloat(csb.paddingTop) - parseFloat(csb.paddingBottom)
+      - (head ? head.getBoundingClientRect().height : 0)
+      - (parseFloat(csb.rowGap) || 0);
+    const kids = [...block.querySelectorAll(".quiz-fit > *")].filter((e) => !e.hidden);
+    const used = kids.length
+      ? kids[kids.length - 1].getBoundingClientRect().bottom
+        - kids[0].getBoundingClientRect().top
+      : 0;
+    if (used > room + 1) {
+      for (const cell of cells) cell.style.fontSize = "";
+    }
+  }
+}
+
 /* Подогнать тот блок, который сейчас на экране: содержимое меняется и без
    смены блока (распределение ответов, пачка таблицы), и после каждой такой
    правки масштаб надо пересчитать. */
 function fitQuizActive(force = false) {
   if (!quizLobby.hidden) fitQuiz(quizLobby, force);
-  if (!quizPlay.hidden) fitQuiz(quizPlay, force);
+  if (!quizPlay.hidden) {
+    // сначала кегль ответов: он меняет высоту содержимого, и только после
+    // этого есть смысл мерить, влезает ли кадр целиком
+    growQuizOptions(quizPlay);
+    fitQuiz(quizPlay, force);
+  }
 }
 
 /* Холл игры: ведущий запустил квиз, а вопроса ещё нет. Зал читает название
@@ -494,12 +590,10 @@ function renderQuiz() {
       // номер перед вариантом: зал видит «3» на проекторе и нажимает
       // третью кнопку у себя — сверять текст с экрана больше не нужно.
       // В сам текст варианта номер не попадает: он живёт только в вёрстке.
-      // Строка под проценты занята настоящими цифрами, только невидимыми:
-      // пустая строка и «0 · 0%» считались бы по-разному (разница в 1 px),
-      // и при закрытии приёма весь кадр пересчитывался заново
+      // Место под проценты справа уже оставлено отступом у текста, поэтому
+      // отдельной плашки в приёме ответов нет — ответам достаётся высота
       el.innerHTML = `<span class="quiz-s-idx">${i + 1}</span>`
-        + `<span class="quiz-s-text">${escapeHTML(text)}</span>`
-        + '<span class="quiz-s-num is-blank" aria-hidden="true">0 · 0%</span>';
+        + `<span class="quiz-s-text">${escapeHTML(text)}</span>`;
       return el;
     }));
     quizCount.textContent = f.answered_total
@@ -520,7 +614,7 @@ function renderQuiz() {
     el.innerHTML = `<span class="quiz-s-fill" style="width:${share}%"></span>
       <span class="quiz-s-idx">${i + 1}</span>
       <span class="quiz-s-text">${escapeHTML(text)}${f.correct === i ? ' ✓' : ''}</span>
-      <span class="quiz-s-num">${counts[i]} · ${share}%</span>`;
+      <span class="quiz-s-num">${share}%</span>`;
     return el;
   }));
   quizCount.textContent = f.phase === 'closed'

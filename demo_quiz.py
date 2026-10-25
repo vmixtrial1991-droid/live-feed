@@ -26,7 +26,6 @@ from testlib import ROOT, admin_get, admin_post, remove
 
 MOD_PASSWORD = "kviz-proba-1"
 TITLE = "Квиз на пример"
-SUBTITLE = "Новогодний вечер · 19:00 · конференц-зал"
 QUIZ_TITLE = "Новогодний квиз «Ёлка 2027»"
 
 # текст, варианты, верный, зачёт, секунды, (ширина, высота) картинки или None
@@ -122,8 +121,7 @@ def main() -> int:
             print(f"  убрано прежнее демо: {e['slug']}")
 
     st, created = admin_post("/api/admin/events",
-                             {"title": TITLE, "password": MOD_PASSWORD,
-                              "subtitle": SUBTITLE})
+                             {"title": TITLE, "password": MOD_PASSWORD})
     if st != 200 or not created.get("event"):
         print(f"событие не завелось: {st} {created}")
         return 1

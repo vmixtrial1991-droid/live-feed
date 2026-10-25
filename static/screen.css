@@ -459,13 +459,17 @@
     "count";
   /* Фото получает свободное место, но ответам гарантирована своя доля:
      иначе крупная картинка забирала кадр целиком, и кнопки сжимались до
-     полосок. 1fr тексту — столько же фото, минимум под две строки. */
+     полосок. */
   grid-template-rows: minmax(0, 1fr) auto minmax(min-content, 1fr) auto;
   gap: clamp(.35rem, 1vh, .8rem);
   align-items: center;
   justify-items: center;
   text-align: center;
-  height: 100%;
+  /* Высота ограничена кадром, но не задана жёстко: height:100% делал блок
+     всегда равным кадру, из-за чего зум не влиял на высоту содержимого и
+     поиск масштаба уходил в минимум (0.35 — мелко всё). */
+  max-height: 100%;
+  min-height: 0;
 }
 .quiz-body.has-image .quiz-ask { display: contents; }
 .quiz-body.has-image .quiz-q {
@@ -490,24 +494,29 @@
   display: flex;
   justify-content: center;
   align-items: center;
+  /* высоту задаёт строка сетки; картинка внутри не может её превысить —
+     иначе фото наезжало на текст вопроса под ним */
   height: 100%;
   width: 100%;
+  overflow: hidden;
 }
 .quiz-shot img {
   display: block;
+  /* Натуральные пропорции внутри ячейки: max-width/max-height не дают
+     вылезти за строку сетки (не наезжает на вопрос), а width/height auto
+     не оставляют пустых полос с фоном по бокам, как это делал
+     object-fit: contain при растянутой рамке. */
   max-width: 100%;
   max-height: 100%;
   width: auto;
   height: auto;
-  object-fit: contain;
   border-radius: 14px;
-  background: rgba(255, 255, 255, .03);
 }
 /* широкая: фото сверху на всю ширину, ответы под ним сеткой 2x2 */
 /* Фото занимает не больше половины кадра: остальное — вопросу и ответам.
    Без этого крупная картинка съедала всю высоту, а текст сжимался под неё,
    и ответы выходили мелкими при большом фото. */
-.quiz-body.on-shot-wide .quiz-shot img { max-height: min(46vh, 500px); }
+
 
 /* Квадрат и вертикаль: фото слева во всю высоту, ответы справа в столбик,
    обе колонки центрированы по вертикали. */
@@ -518,16 +527,24 @@
     "shot q"
     "shot opts"
     "shot count";
-  grid-template-rows: auto 1fr auto;
+  /* photo spans all three rows; rows sized by content, photo stretches to
+     them. align-items:center keeps each row's own content centred. */
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  align-items: center;
   justify-items: stretch;
   text-align: left;
+}
+/* фото в левой колонке занимает всю высоту блока, а не свою строку */
+.quiz-body.on-shot-square .quiz-shot,
+.quiz-body.on-shot-tall .quiz-shot {
+  align-self: stretch;
 }
 .quiz-body.on-shot-square .quiz-q,
 .quiz-body.on-shot-tall .quiz-q { text-align: left; }
 .quiz-body.on-shot-square .quiz-count,
 .quiz-body.on-shot-tall .quiz-count { text-align: left; }
-.quiz-body.on-shot-square .quiz-shot img { max-height: min(60vh, 640px); }
-.quiz-body.on-shot-tall .quiz-shot img { max-height: min(64vh, 680px); }
+
+
 
 /* сетка ответов: 1 2 сверху, 3 4 снизу.
 
@@ -584,7 +601,10 @@
   /* Кегль привязан к высоте кадра, а не к ширине окна: кнопки растянуты
      сеткой на треть кадра, и при широком окне «1.7vw» давал мелкий текст
      в огромных плашках. vh держит пропорцию к самому ответу. */
-  font-size: clamp(1.05rem, 2.1vh, 2.1rem);
+  /* Кегль сразу достаточно крупный: кнопки растянуты сеткой на треть
+     кадра, и 21px в плашке высотой 158 px читались плохо. vh держит
+     пропорцию к высоте кадра, а не к ширине окна. */
+  font-size: clamp(1.1rem, 3.1vh, 2.6rem);
   padding: clamp(.6rem, 1.4vh, 1.2rem) clamp(.8rem, 1.6vw, 1.4rem);
 }
 .quiz-body.has-image .quiz-s-opt .quiz-s-text { padding-right: 3.2em; }

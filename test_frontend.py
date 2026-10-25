@@ -819,9 +819,9 @@ check("screen.js: экран сжимает длинный вопрос, а не
 check("screen.js: при смене размера окна игра пересчитывает масштаб",
       "fitQuizActive(true)" in screen_js,
       "на другом экране старый zoom уже не подходит")
-check("screen.js: масштаб вопроса не пересчитывается при смене стадии",
-      "quizFitCache" in screen_js and "cached.key === key" in screen_js,
-      "иначе кнопки дёргались при закрытии приёма")
+check("screen.js: масштаб считается по габариту содержимого",
+      "Math.min(...nodes.map" in screen_js and "Math.max(...nodes.map" in screen_js,
+      "сумма высот фото и ответов в боковой раскладке давала двойной размер")
 check("screen.css: длинное слово не вылезает за край проектора",
       re.search(r"\.quiz-q\s*\{[^}]*overflow-wrap:\s*anywhere", screen_css, re.S) is not None)
 check("screen.js: экран рисует кадр игры и берёт его из init",

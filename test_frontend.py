@@ -822,6 +822,17 @@ check("screen.js: при смене размера окна игра перес�
 check("screen.js: масштаб считается по габариту содержимого",
       "Math.min(...nodes.map" in screen_js and "Math.max(...nodes.map" in screen_js,
       "сумма высот фото и ответов в боковой раскладке давала двойной размер")
+check("screen.css: у вопроса и ответов один размер и с фото, и без",
+      "--quiz-q-size" in screen_css and "--quiz-opt-h" in screen_css
+      and re.search(r"\.quiz-body\.has-image \.quiz-q\s*\{[^}]*font-size", screen_css, re.S) is None
+      and re.search(r"\.quiz-body:not\(\.has-image\) \.quiz-q\s*\{[^}]*font-size", screen_css, re.S) is None
+      and re.search(r"\.quiz-body\.has-image \.quiz-s-opt\s*\{[^}]*font-size", screen_css, re.S) is None
+      and re.search(r"\.quiz-body:not\(\.has-image\) \.quiz-s-opt\s*\{[^}]*font-size", screen_css, re.S) is None,
+      "вопрос с фото был 25 px, без фото 53 px — зал видел два разных экрана")
+check("screen.js: ровное попадание в кадр не считается переполнением",
+      "h <= roomH + 1" in screen_js,
+      "без допуска разница 0.004 px уводила масштаб в минимум 0.35")
+
 check("screen.css: длинное слово не вылезает за край проектора",
       re.search(r"\.quiz-q\s*\{[^}]*overflow-wrap:\s*anywhere", screen_css, re.S) is not None)
 check("screen.js: экран рисует кадр игры и берёт его из init",

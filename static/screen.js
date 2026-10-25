@@ -338,7 +338,11 @@ function fitQuiz(block, force = false) {
   const fitsAt = (zoom) => {
     inner.style.zoom = zoom === 1 ? "" : String(zoom);
     const h = contentHeight(inner);
-    return h > 0 && h <= roomH;
+    /* Допуск 1 px — на субпиксельное округление. Без него содержимое,
+       которое занимает кадр ровно (736.7656 px при доступных 736.7612),
+       считалось непоместившимся, и масштаб уходил в минимум 0.35: при
+       переходе «приём → закрыто» ответы схлопывались в полоски. */
+    return h > 0 && h <= roomH + 1;
   };
 
   unfixQuiz(inner);

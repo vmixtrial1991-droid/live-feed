@@ -273,18 +273,15 @@ function contentHeight(inner) {
   return Math.max(0, bottom - top);
 }
 
-// нижняя граница — страховка от нуля (вопрос надо сокращать, а не мельчить);
-// верхняя — чтобы «заполнить кадр» не превращалось в гигантские буквы
-const QUIZ_ZOOM_MAX = 1.6;
-
 /* Подобранный масштаб: block -> {key, zoom}. Хранится между вызовами,
    чтобы при перерисовке стадии (приём → распределение) не искать его
    заново: иначе кнопки дёргались и меняли размер. */
 const quizFitCache = new WeakMap();
 
-/* Границы масштаба. Ниже 0.35 вопрос не читается с дальних рядов —
-   такой надо сокращать, а не мельчить; выше 1.6 «заполнить кадр»
-   превращается в гигантские буквы. */
+/* Нижняя граница общего масштаба. Ниже 0.35 вопрос не читается с дальних
+   рядов — такой надо сокращать, а не мельчить. Вверх масштаб не растёт:
+   заполняет кадр подбор кеглей (QUIZ_TYPE_MAX), иначе текст расползается
+   по ширине за сэйфзону. */
 const QUIZ_ZOOM_MIN = 0.35;
 
 /* Снять подобранный масштаб: вернуть содержимому натуральный размер,
@@ -301,20 +298,85 @@ function quizFitSignature(block) {
   const q = block.querySelector(".quiz-q");
   const opts = block.querySelector(".quiz-opts");
   const img = block.querySelector(".quiz-shot img");
+  // таблица лидеров: строки живут в .quiz-opts и листаются страницами
+  const board = block.querySelector(".quiz-s-row, .quiz-s-note");
+  // Текст вариантов, а не весь узел: в распределении рядом с ним живут
+  // проценты, и они меняются после каждого ответа. По ним пересчитывать
+  // кегль нельзя — ответы дёргались бы на каждом голосе.
+  const optText = opts
+    ? [...opts.children].map((el) => {
+        const t = el.querySelector(".quiz-s-text");
+        return t ? t.textContent : "";
+      }).join("\u0001")
+    : "";
   return [
     block.clientWidth, block.clientHeight,
     q ? q.textContent : "",
-    opts ? opts.children.length : 0,
+    optText,
     img && img.naturalWidth ? img.naturalWidth + "x" + img.naturalHeight : "",
+    // таблица лидеров листается: у каждой страницы своя высота
+    board ? opts.textContent : "",
+    // холл: заголовок и подпись меняются, а кадра вопроса там нет
+    q ? "" : block.textContent,
   ].join("|");
 }
 
+/* Высота только текстовой части кадра: вопрос, ответы, подпись. Фото
+   считаем отдельно: в широкой раскладке оно стоит над текстом и делит с
+   ним кадр, а в боковой живёт в своей колонке и тексту не мешает. */
+function quizTextHeight(inner) {
+  const body = inner.querySelector(".quiz-body");
+  if (!body) return 0;
+  const nodes = [".quiz-q", ".quiz-opts", ".quiz-count"]
+    .map((s) => body.querySelector(s))
+    .filter((el) => el && !el.hidden && el.getBoundingClientRect().height > 0);
+  if (!nodes.length) return 0;
+  const top = Math.min(...nodes.map((el) => el.getBoundingClientRect().top));
+  const bottom = Math.max(...nodes.map((el) => el.getBoundingClientRect().bottom));
+  return Math.max(0, bottom - top);
+}
+
+/* Пределы типографики. Основной потолок — коэффициент шкалы: кегль растёт
+   вместе с экраном, а не упирается в один и тот же px и на 720p, и на 2K.
+   Абсолютные максимумы страхуют совсем большие экраны и проекторы 4K:
+   дальше текст превращается в плакат. */
+const QUIZ_Q_MAX = 150, QUIZ_Q_MIN = 24;
+const QUIZ_OPT_MAX = 78, QUIZ_OPT_MIN = 17;
+const QUIZ_PAD_MAX = 42, QUIZ_PAD_MIN = 8;
+const QUIZ_TYPE_MAX = 1.9;    // во сколько раз максимум растягиваем базу
+const QUIZ_TYPE_MIN = 0.5;
+
+/* Линейка для слов: длина самого длинного слова меряется без раскладки,
+   через canvas.measureText — это в разы дешевле, чем заставлять браузер
+   пересчитывать сетку на каждый пробный кегль. */
+const quizWordMeter = document.createElement('canvas').getContext('2d');
+
+/* Подбор кеглей под содержание кадра.
+
+   Раньше размеры были фиксированными: короткий вопрос занимал мало места,
+   а короткий ответ сидел в огромной пустой кнопке. Теперь кегль вопроса,
+   кегль ответа и отступ кнопки — одна величина k, которую мы ищем
+   перебором: от базовых размеров (vh) вверх до 1.9 или вниз до 0.5.
+
+   Критерий — текстовая часть кадра (вопрос + ответы + подпись) должна
+   влезть в отведённое место. В широкой раскладке фото занимает верх, ему
+   оставляем не меньше 44% кадра, поэтому тексту достаётся 56%.
+
+   Высота кнопки при этом не задаётся числом: её даёт текст плюс отступ,
+   который растёт вместе с кеглем. Короткий ответ — компактная кнопка,
+   длинный — выше; огромных пустых плашек не бывает. */
 function fitQuiz(block, force = false) {
   const inner = block.querySelector(".quiz-fit");
   const host = block.parentElement;   // .quiz-screen — он и есть весь экран
   if (!inner || !host) return;
 
   const key = quizFitSignature(block);
+
+  /* Содержимое не изменилось — оставляем подобранный кегль как есть.
+     Иначе каждый ответ в зале запускал бы перебор заново, а вместе с ним
+     и перерисовку: ответы моргали бы размером на ровном месте. */
+  const cached = quizFitCache.get(block);
+  if (!force && cached && cached.key === key) return;
 
   const cs = getComputedStyle(block);
   const padY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
@@ -324,17 +386,100 @@ function fitQuiz(block, force = false) {
   const headH = head ? head.getBoundingClientRect().height : 0;
   const gap = parseFloat(cs.rowGap) || 0;
   const roomH = host.clientHeight - padY - headH - gap;
-  if (!roomH) { unfixQuiz(inner); quizFitCache.set(block, {key, zoom: 0}); return; }
+  unfixQuiz(inner);
+  if (!roomH) { quizFitCache.set(block, {key, zoom: 0}); return; }
 
-  /* Ищем не «насколько сжать», а «насколько можно увеличить, чтобы ещё
-     влезало»: пустое место в кадре — такая же ошибка, как обрезка.
-     Слишком мелкий QR на холле, короткие ответы рядом с большим фото,
-     сплющенное окно — всё это место, которое можно занять текстом.
+  const body = inner.querySelector(".quiz-body");
+  const hasText = !!(body && body.querySelector(".quiz-q"));
 
-     zoom не только меняет кегль — он пересчитывает ширину блока в тех же
-     координатах экрана, поэтому строки перекладываются, и высота меняется
-     не пропорционально масштабу. Поэтому не считаем формулой, а ищем
-     наибольший подходящий масштаб перебором (бинарный поиск). */
+  if (hasText) {
+    const vh = window.innerHeight / 100;
+    const baseQ = 5.4 * vh;
+    const baseO = 3.5 * vh;
+    const baseP = 1.8 * vh;
+    // широкая картинка стоит сверху: ей нужна своя доля кадра, иначе
+    // алгоритм вырастит текст и раздавит фото в полоску
+    const budget = body.classList.contains("on-shot-wide") ? roomH * 0.56 : roomH;
+
+    /* Отношение «самое длинное слово / ширина строки» для вопроса и всех
+       ответов. 1.0 значит «ровно влезает», больше — где-то рвётся. */
+    const worstWordRatio = () => {
+      let worst = 0;
+      for (const el of inner.querySelectorAll('.quiz-q, .quiz-s-text')) {
+        const words = (el.textContent || '').trim().split(/\s+/);
+        if (!words[0]) continue;
+        /* Ссылки и пути исключаем из замера: перенести их посреди строки
+           придётся в любом случае, и никакой кегль этого не исправит —
+           а требовать, чтобы они «влезли», значит раздавить читабельность
+           всего кадра ради одного токена-файла. */
+        const sane = words.filter((word) => word.length <= 32 && !/[:/@?=]/.test(word));
+        if (!sane.length) continue;
+        const style = getComputedStyle(el);
+        quizWordMeter.font =
+          `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+        let w = 0;
+        for (const word of sane) w = Math.max(w, quizWordMeter.measureText(word).width);
+        const linew = el.clientWidth - parseFloat(style.paddingLeft)
+          - parseFloat(style.paddingRight);
+        if (linew > 0) worst = Math.max(worst, w / linew);
+      }
+      return worst;
+    };
+
+    const apply = (k) => {
+      const q = Math.min(QUIZ_Q_MAX, Math.max(QUIZ_Q_MIN, baseQ * k));
+      const o = Math.min(QUIZ_OPT_MAX, Math.max(QUIZ_OPT_MIN, baseO * k));
+      const p = Math.min(QUIZ_PAD_MAX, Math.max(QUIZ_PAD_MIN, baseP * k));
+      block.style.setProperty("--quiz-q-size", q.toFixed(1) + "px");
+      block.style.setProperty("--quiz-opt-size", o.toFixed(1) + "px");
+      block.style.setProperty("--quiz-opt-pad", p.toFixed(1) + "px");
+    };
+    const fitsType = (k) => {
+      apply(k);
+      const h = quizTextHeight(inner);
+      return h > 0 && h <= budget + 1;
+    };
+    let k;
+    if (fitsType(QUIZ_TYPE_MAX)) {
+      k = QUIZ_TYPE_MAX;
+    } else {
+      let lo = QUIZ_TYPE_MIN;
+      let hi = QUIZ_TYPE_MAX;
+      for (let step = 0; step < 9; step++) {
+        const mid = (lo + hi) / 2;
+        if (fitsType(mid)) lo = mid; else hi = mid;
+      }
+      k = lo;
+    }
+    apply(k);
+
+    /* Ширина строки тоже лимит. Слово, которое длиннее строки, рвётся
+       посреди («Треугольн-ик»), кнопка раздувается пустотой, а зал
+       дочитывает ответ по кусочку. Поэтому после поиска по высоте меряем
+       самое длинное слово вопроса и каждого ответа: если оно не влезает,
+       ужимаем k ещё немного. Дешевле это делать линейкой, чем раскладкой.
+       Патологические тексты (длинная ссылка) исключение не лечат: перенос
+       им нужен в любом случае, и жертвовать ради них читабельностью
+       нельзя — правило вступает в игру, только если стоит не дороже
+       четверти кегля. */
+    if (worstWordRatio() > 0.998) {
+      const fitsWidth = (kk) => {
+        apply(kk);
+        return worstWordRatio() <= 0.998 && quizTextHeight(inner) <= budget + 1;
+      };
+      let wLo = QUIZ_TYPE_MIN;
+      let wHi = k;
+      for (let step = 0; step < 8; step++) {
+        const mid = (wLo + wHi) / 2;
+        if (fitsWidth(mid)) wLo = mid; else wHi = mid;
+      }
+      if (wLo >= k * 0.75) k = wLo;
+      apply(k);
+    }
+  }
+
+  /* Страховка: если и на минимальных кеглях не влезло (совсем узкое окно
+     или неразрывное слово), добираем общим масштабом. */
   const fitsAt = (zoom) => {
     inner.style.zoom = zoom === 1 ? "" : String(zoom);
     const h = contentHeight(inner);
@@ -345,17 +490,10 @@ function fitQuiz(block, force = false) {
     return h > 0 && h <= roomH + 1;
   };
 
-  unfixQuiz(inner);
   if (fitsAt(1)) {
-    /* Влезает при натуральном размере — оставляем как есть. Кегли в css
-       уже подобраны под проектор; подгонка кегля под высоту кнопки
-       заводила в замкнутый круг (кнопка выше -> шрифт крупнее -> контент
-       выше -> переполнение). */
     quizFitCache.set(block, {key, zoom: 0});
     return;
   }
-
-  // не влезает даже натурально — уменьшаем до наибольшего подходящего
   let lo = QUIZ_ZOOM_MIN;
   let hi = 1;
   for (let step = 0; step < 7; step++) {
@@ -366,15 +504,6 @@ function fitQuiz(block, force = false) {
   fitsAt(zoom);
   quizFitCache.set(block, {key, zoom});
 }
-
-/* Ответы растянуты сеткой на треть кадра: короткий текст в высокой
-   кнопке читался мелко, вокруг него оставалось пустое поле. Подбираем
-   кегль под высоту кнопки — но только вверх и с потолком, чтобы длинный
-   вариант не раздувался.
-
-   Считаем от самого длинного варианта: он задаёт предел, остальные
-   получают тот же кегль. Иначе «Одна» была бы вдвое крупнее
-   «Треугольника» в соседней строке. */
 /* Подогнать тот блок, который сейчас на экране: содержимое меняется и без
    смены блока (распределение ответов, пачка таблицы), и после каждой такой
    правки масштаб надо пересчитать. */

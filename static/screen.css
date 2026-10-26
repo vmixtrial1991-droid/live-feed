@@ -478,7 +478,16 @@
      fitQuizCardWidth(); без неё остаётся прежнее поведение. */
   align-items: center;
 }
-.quiz-opts > .quiz-s-opt { width: var(--quiz-card-w, 100%); max-width: 100%; }
+.quiz-opts > .quiz-s-opt {
+  width: var(--quiz-card-w, 100%);
+  max-width: 100%;
+  /* Высота одна на все карточки — и без картинки тоже: здесь раскладка
+     flex-столбиком, и grid-правило до неё не достаёт. Без этого на 3:4
+     карточки вставали разной высоты (80 и 68 px).
+     height, а не min-height: min-height с содержимым давал разницу в
+     пиксель из-за округления (82 и 81). */
+  height: var(--quiz-card-h, auto);
+}
 /* в режиме с картинкой раскладку задаёт сетка */
 .quiz-body.has-image .quiz-opts { flex: none; align-items: stretch; }
 
@@ -522,6 +531,14 @@
      поиск масштаба уходил в минимум (0.35 — мелко всё). */
   max-height: 100%;
   min-height: 0;
+}
+/* Горизонтальное фото не должно быть мелким: ему гарантируется половина
+   кадра. Минимум задаёт fitQuiz() в --quiz-shot-min: точное число в
+   пикселях, потому что 50vh минус шапка и отступы в CSS не выразить.
+   Остальные строки (вопрос, ответы, подпись) ужимаются под это условие —
+   кегли подбирает тот же fitQuiz(). */
+.quiz-body.on-shot-wide {
+  grid-template-rows: minmax(var(--quiz-shot-min, 0), 1fr) auto auto auto;
 }
 .quiz-body.has-image .quiz-ask { display: contents; }
 .quiz-body.has-image .quiz-q {

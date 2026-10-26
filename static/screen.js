@@ -424,12 +424,26 @@ function fitQuiz(block, force = false) {
     const baseQ = 5.4 * vh;
     const baseO = 3.5 * vh;
     const baseP = 1.8 * vh;
-    // широкая картинка стоит сверху: ей нужна своя доля кадра, иначе
-    // алгоритм вырастит текст и раздавит фото в полоску.
-    // 0.53, а не 0.56: на 4:3 фото упиралось в текст и выходило мелким
-    // (572x430 при кадре 889x750). Каждые 3% бюджета дают снимку 20–25 px
-    // по высоте, а кегль ответов теряет 4–5 px — на этом ещё читаемо.
-    const budget = body.classList.contains("on-shot-wide") ? roomH * 0.53 : roomH;
+    /* Горизонтальное фото не должно быть мелким: ему гарантируется
+       половина высоты кадра. Сетка отдаёт снимку всё, что осталось от
+       текста, поэтому удерживаем два условия сразу: минимум строке фото
+       (--quiz-shot-min) и потолок бюджету текста. Иначе кегль вопроса и
+       ответов растёт и отбирает у снимка высоту.
+
+       Что уступает — кегль вопроса и ответов. Это осознанный размен:
+       мелкий снимок на проекторе бесполезен. */
+    const wideShot = body.classList.contains("on-shot-wide");
+    const rowGap = parseFloat(getComputedStyle(body).rowGap) || 0;
+    if (wideShot) {
+      const chromeH = host.clientHeight - roomH;
+      const shotMin = Math.max(0, Math.round(host.clientHeight * 0.5 - chromeH));
+      body.style.setProperty("--quiz-shot-min", `${shotMin}px`);
+    } else {
+      body.style.removeProperty("--quiz-shot-min");
+    }
+    const budget = wideShot
+      ? Math.max(0, host.clientHeight * 0.5 - (host.clientHeight - roomH) - rowGap * 2)
+      : roomH;
 
     /* Слово, разорванное посреди («Треугольн-ик»), видно прямо в кадре:
        диапазон одного слова получает прямоугольники на разных строках. */
@@ -612,9 +626,13 @@ function fitQuizCardWidth(block) {
 
    Ужимаем только те карточки, чей текст не влез в целевую высоту. Меряем
    не карточку, а сам текст: карточка растянута по ряду всегда, и по ней
-   переполнения не увидеть. Ограничения: не мельче QUIZ_OPT_MIN и не
-   меньше половины общего кегля — иначе одна карточка выглядела бы чужой. */
-function fitCardText(card, baseFontPx, rowH) {
+   переполнения не увидеть.
+
+   minRatio — нижняя граница кегля долей от общего. Обычно 0.62: мельче
+   карточка выглядела бы чужой. Но когда горизонтальному фото нужно
+   отстоять половину кадра, текст уступает сильнее — тогда вызывающий
+   передаёт меньшее значение. */
+function fitCardText(card, baseFontPx, rowH, minRatio = 0.62) {
   const text = card.querySelector(".quiz-s-text");
   if (!text) return null;
   const ccs = getComputedStyle(card);
@@ -627,7 +645,7 @@ function fitCardText(card, baseFontPx, rowH) {
     card.style.removeProperty("--quiz-card-font");
     return null;
   }
-  const floor = Math.max(QUIZ_OPT_MIN, baseFontPx * 0.62);
+  const floor = Math.max(QUIZ_OPT_MIN, baseFontPx * minRatio);
   let size = baseFontPx;
   let best = null;
   for (let step = 0; step < 10; step++) {
@@ -646,16 +664,25 @@ function fitCardText(card, baseFontPx, rowH) {
    Короткие карточки задают общую высоту ряда, длинные ужимаются под неё.
    Так все кнопки стоят одной высоты, а не «лесенкой» из 100 и 85 px.
    Вызывается после подбора кегля: fitQuiz на время поиска снимает
-   фиксацию высоты, иначе она мешает ему подбирать шрифт. */
-function fitCardsText(block) {
+   фиксацию высоты, иначе она мешает ему подбирать шрифт.
+
+   maxRowH — потолок высоты ряда. Нужен для горизонтального фото: ему
+   гарантирована половина кадра, и если ряд ответов растёт под длинный
+   текст, снимок получает меньше половины. Тогда ряд упирается в потолок
+   и кегль длинного ответа ужимается сильнее (до 45% общего). */
+function fitCardsText(block, maxRowH = 0) {
   const opts = block.querySelector(".quiz-opts");
   if (!opts) return;
   const cards = [...opts.children].filter((el) => el.classList.contains("quiz-s-opt"));
   if (!cards.length) return;
   /* Меряем натуральные высоты: снимаем прошлую фиксацию и ужатия, иначе
-     базовый кегль читается у уже ужатой карточки. */
+     базовый кегль читается у уже ужатой карточки, а высота — у уже
+     растянутой, и ряд нарастает с каждым проходом. */
   opts.style.removeProperty("--quiz-opt-row-h");
-  for (const card of cards) card.style.removeProperty("--quiz-card-font");
+  for (const card of cards) {
+    card.style.removeProperty("--quiz-card-font");
+    card.style.removeProperty("--quiz-card-h");
+  }
   const base = parseFloat(getComputedStyle(cards[0]).fontSize) || 0;
   if (!base) return;
 
@@ -671,10 +698,13 @@ function fitCardsText(block) {
   /* Фиксируем числом: иначе браузер растянет ряд по самой высокой
      карточке, и выравнивание не сработает. */
   opts.style.setProperty("--quiz-opt-row-h", `${rowH}px`);
-  for (const card of cards) fitCardText(card, base, rowH);
+  const minRatio = maxRowH && rowH > maxRowH ? 0.45 : 0.62;
+  for (const card of cards) fitCardText(card, base, rowH, minRatio);
 
   /* Если длинный ответ не влез даже на нижнем пределе кегля, поднимаем
-     ряд под него: обрезанный текст хуже, чем чуть меньшая картинка. */
+     ряд под него: обрезанный текст хуже, чем чуть меньшая картинка.
+     Но не выше потолка: при горизонтальном фото выше него начинается
+     места снимка, а он не должен становиться мелким. */
   let needH = rowH;
   for (const card of cards) {
     const text = card.querySelector(".quiz-s-text");
@@ -683,10 +713,86 @@ function fitCardsText(block) {
     needH = Math.max(needH, Math.ceil(text.getBoundingClientRect().height
       + parseFloat(ccs.paddingTop) + parseFloat(ccs.paddingBottom)));
   }
+  if (maxRowH && needH > maxRowH) needH = maxRowH;
   if (needH > rowH) {
     rowH = needH;
     opts.style.setProperty("--quiz-opt-row-h", `${rowH}px`);
   }
+  /* Высоту задаём ещё и карточкам напрямую: без картинки контейнер —
+     flex-столбик, и grid-строка до карточек не достаёт. Разница в 1 px
+     (82 и 81) выходила из округления min-height и высоты содержимого. */
+  for (const card of cards) card.style.setProperty("--quiz-card-h", `${rowH}px`);
+}
+
+/* Потолок высоты блока ответов для горизонтального фото.
+
+   Правило: снимок занимает не меньше половины кадра. Всё остальное —
+   шапка, вопрос, отступы и подпись — должно уместиться во вторую
+   половину. Возвращает 0, если ограничения нет (фото нет или оно не
+   горизонтальное). */
+function quizRowCap(block) {
+  const body = block.querySelector(".quiz-body");
+  if (!body || !body.classList.contains("on-shot-wide")) return 0;
+  const host = block.parentElement;
+  if (!host) return 0;
+  const frameH = host.clientHeight;
+  const head = block.querySelector(".quiz-head");
+  const cs = getComputedStyle(block);
+  const bodyCs = getComputedStyle(body);
+  const gap = parseFloat(bodyCs.rowGap) || 0;
+  const q = body.querySelector(".quiz-q");
+  const count = body.querySelector(".quiz-count");
+  const occupied = (head ? head.getBoundingClientRect().height : 0)
+    + parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom)
+    + (q ? q.getBoundingClientRect().height : 0)
+    + (count ? count.getBoundingClientRect().height : 0)
+    + gap * 3;                      // зазоры вокруг фото, вопроса, ответов
+  /* Половина кадра на фото, остальное — верх и низ блока. */
+  return Math.max(0, Math.floor(frameH - frameH * 0.5 - occupied));
+}
+
+/* Дожать долю горизонтального фото до половины кадра.
+
+   Правило: горизонтальный снимок не должен быть мелким — ему достаётся не
+   меньше 50% высоты кадра. Сетка отдаёт фото всё, что осталось от текста,
+   поэтому единственный рычаг — ужать текст. Делаем это итеративно: измерили
+   высоту снимка, если меньше половины — уменьшили кегли вопроса и ответов
+   на шаг и пересчитали. Точный расчёт «сколько именно» зависит от переносов
+   строк и пропорций снимка, поэтому проще дожать замерами.
+
+   Возвращает true, если кегли пришлось ужать. */
+function enforceShotShare(block) {
+  const body = block.querySelector(".quiz-body");
+  if (!body || !body.classList.contains("on-shot-wide")) return false;
+  const img = body.querySelector(".quiz-shot img");
+  const host = block.parentElement;
+  if (!img || !host || !img.naturalWidth) return false;
+
+  const needH = host.clientHeight * 0.5;
+  const shotH = () => img.getBoundingClientRect().height;
+  /* 3 px допуска: пропорции снимка не всегда дают ровно половину —
+     1600x1200 при кадре 720 просит ширину 480, и лишний пиксель высоты
+     уже не влезает. */
+  if (shotH() >= needH - 3) return false;
+
+  let shrunk = false;
+  for (let step = 0; step < 6; step++) {
+    if (shotH() >= needH - 3) break;
+    const cs = getComputedStyle(block);
+    const q = parseFloat(cs.getPropertyValue("--quiz-q-size")) || 0;
+    const o = parseFloat(cs.getPropertyValue("--quiz-opt-size")) || 0;
+    if (!q || !o) break;
+    if (o <= QUIZ_OPT_MIN + 0.5) break;   // мельче уже некуда
+    /* Вопрос ужимаем сильнее ответов: он и так крупнее, а зал читает его
+       с проектора один раз, ответы — пока выбирает. */
+    block.style.setProperty("--quiz-q-size", (q * 0.94).toFixed(1) + "px");
+    block.style.setProperty("--quiz-opt-size", (o * 0.97).toFixed(1) + "px");
+    block.style.setProperty("--quiz-opt-pad",
+      (parseFloat(cs.getPropertyValue("--quiz-opt-pad")) * 0.97).toFixed(1) + "px");
+    fitCardsText(block, quizRowCap(block));
+    shrunk = true;
+  }
+  return shrunk;
 }
 
 /* Подогнать тот блок, который сейчас на экране: содержимое меняется и без
@@ -701,14 +807,21 @@ function fitQuizActive(force = false) {
        2. общая ширина карточек по базовому кеглю;
        3. выравнивание высоты ряда и ужатие длинных ответов;
        4. пересчёт высоты кадра — карточки стали компактнее, и фото
-          достаётся освободившееся место. */
+          достаётся освободившееся место;
+       5. контроль доли горизонтального фото: если оно меньше половины
+          кадра, кегли дожимаются, и всё повторяется с шага 2. */
     fitQuiz(quizPlay, force);
     fitQuizCardWidth(quizPlay);
-    fitCardsText(quizPlay);
+    fitCardsText(quizPlay, quizRowCap(quizPlay));
     fitQuiz(quizPlay, true);
     /* fitQuiz снимает фиксацию высоты на время поиска — возвращаем её
        после последнего подбора. */
-    fitCardsText(quizPlay);
+    fitCardsText(quizPlay, quizRowCap(quizPlay));
+    if (enforceShotShare(quizPlay)) {
+      fitQuizCardWidth(quizPlay);
+      fitQuiz(quizPlay, true);
+      fitCardsText(quizPlay, quizRowCap(quizPlay));
+    }
     /* Выравнивание высоты кнопок могло подрасти по высоте: пересчитываем
        общий масштаб, иначе блок вылезает под шапку и таймер наезжает на
        первую строку вопроса. */

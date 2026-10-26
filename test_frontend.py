@@ -746,6 +746,14 @@ check("screen.css: широкая картинка отдаёт ответам �
 check("screen.css: номер ответа одного размера во всех карточках",
       re.search(r"\.quiz-s-idx\s*\{[^}]*font-size:\s*calc\(var\(--quiz-opt-size\)",
                 screen_css, re.S) is not None)
+check("screen.css: горизонтальному фото гарантирована половина кадра",
+      re.search(r"\.quiz-body\.on-shot-wide\s*\{[^}]*minmax\(var\(--quiz-shot-min",
+                screen_css, re.S) is not None
+      and "function enforceShotShare" in screen_js
+      and "function quizRowCap" in screen_js)
+check("screen.css: высота карточек одна и без картинки",
+      re.search(r"\.quiz-opts > \.quiz-s-opt\s*\{[^}]*height:\s*var\(--quiz-card-h",
+                screen_css, re.S) is not None)
 check("screen.js: распределение набирается плавно",
       "function playShares" in screen_js and "requestAnimationFrame(step)" in screen_js)
 check("screen.css: правильный ответ проявляется зеленью постепенно",

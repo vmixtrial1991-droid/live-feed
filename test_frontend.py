@@ -743,6 +743,9 @@ check("screen.css: кнопки ответов одной высоты",
 check("screen.css: широкая картинка отдаёт ответам меньше отступов",
       re.search(r"\.quiz-body\.on-shot-wide \.quiz-s-opt\s*\{[^}]*padding-top:\s*calc\(var\(--quiz-opt-pad\) \* \.5\)",
                 screen_css, re.S) is not None)
+check("screen.css: номер ответа одного размера во всех карточках",
+      re.search(r"\.quiz-s-idx\s*\{[^}]*font-size:\s*calc\(var\(--quiz-opt-size\)",
+                screen_css, re.S) is not None)
 check("screen.js: распределение набирается плавно",
       "function playShares" in screen_js and "requestAnimationFrame(step)" in screen_js)
 check("screen.css: правильный ответ проявляется зеленью постепенно",

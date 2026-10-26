@@ -85,6 +85,7 @@ CREATE TABLE IF NOT EXISTS quiz_questions (
     position   REAL NOT NULL DEFAULT 0,
     seconds    INTEGER,
     image      TEXT,
+    revealed_at REAL,
     created_at REAL NOT NULL
 );
 
@@ -152,6 +153,12 @@ def _migrate(conn: sqlite3.Connection) -> None:
     # 5.0: картинка к вопросу. NULL — вопрос текстовый, как раньше.
     if "image" not in _columns(conn, "quiz_questions"):
         conn.execute("ALTER TABLE quiz_questions ADD COLUMN image TEXT")
+
+    # 5.1: момент, когда правильный ответ огласили. До него очки гостю не
+    # начисляем: иначе прибавка в телефоне выдавала верный ответ раньше
+    # проектора. NULL — ответ ещё не показан.
+    if "revealed_at" not in _columns(conn, "quiz_questions"):
+        conn.execute("ALTER TABLE quiz_questions ADD COLUMN revealed_at REAL")
 
     # модерация убрана, но в старых базах остались её следы
     if "reject_reason" in have:
@@ -709,16 +716,31 @@ class EventStore:
             ).fetchall()
         return [dict(r) for r in rows]
 
-    def quiz_score(self, participant_id: int) -> int:
-        """Балл одного участника (для надписи «у вас N очков»)."""
+    def quiz_score(self, participant_id: int, revealed_ids: set[int] | None = None) -> int:
+        """Балл одного участника (для надписи «у вас N очков»).
+
+        revealed_ids — вопросы, чей правильный ответ уже оглашён. Если
+        список передан, считаем только их: иначе гость видел прибавку
+        очков сразу после своего ответа, ещё до «Показать ответ» на
+        проекторе, и правильный ответ угадывался по счётчику.
+
+        None значит «считать все» — так пользуется таблица лидеров, где
+        очки нужны целиком.
+        """
         with self.connect() as conn:
-            return conn.execute(
+            sql = (
                 "SELECT COALESCE(SUM(CASE WHEN qa.option_index = q.correct THEN 1 ELSE 0 END), 0) "
                 "FROM quiz_answers qa "
                 "JOIN quiz_questions q ON q.id = qa.question_id AND q.scored = 1 AND q.correct >= 0 "
-                "WHERE qa.participant_id = ?",
-                (participant_id,),
-            ).fetchone()[0]
+                "WHERE qa.participant_id = ?"
+            )
+            params: list = [participant_id]
+            if revealed_ids is not None:
+                if not revealed_ids:
+                    return 0
+                sql += f" AND q.id IN ({','.join('?' * len(revealed_ids))})"
+                params.extend(sorted(revealed_ids))
+            return conn.execute(sql, params).fetchone()[0]
 
     def quiz_scored_count(self) -> int:
         """Сколько зачётных вопросов уже задано — для подписей на экране."""
@@ -726,6 +748,35 @@ class EventStore:
             return conn.execute(
                 "SELECT COUNT(*) FROM quiz_questions WHERE scored = 1 AND correct >= 0"
             ).fetchone()[0]
+
+    def quiz_mark_revealed(self, question_id: int) -> None:
+        """Отметить, что правильный ответ этого вопроса огласили.
+
+        С этого момента его очки идут в личный счёт гостя. До оглашения
+        прибавка в телефоне выдавала верный ответ раньше проектора.
+        """
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE quiz_questions SET revealed_at = ? WHERE id = ? AND revealed_at IS NULL",
+                (time.time(), question_id),
+            )
+
+    def quiz_revealed_ids(self) -> set[int]:
+        """Вопросы, чей правильный ответ уже показан залу."""
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT id FROM quiz_questions WHERE revealed_at IS NOT NULL"
+            ).fetchall()
+        return {r[0] for r in rows}
+
+    def quiz_clear_revealed(self) -> None:
+        """Снять отметки об оглашении — при сбросе ответов.
+
+        Без этого на повторном прогоне очки зачлись бы сразу: отметка
+        осталась бы с прошлого раза.
+        """
+        with self.connect() as conn:
+            conn.execute("UPDATE quiz_questions SET revealed_at = NULL")
 
     def quiz_clear_answers(self) -> int:
         """Сбросить все ответы — провести тот же набор заново."""

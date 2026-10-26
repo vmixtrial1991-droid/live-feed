@@ -406,14 +406,7 @@ function fitQuiz(block, force = false) {
   const cached = quizFitCache.get(block);
   if (!force && cached && cached.key === key) return;
 
-  const cs = getComputedStyle(block);
-  const padY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
-  // шапка вопроса не масштабируется вместе с текстом: место под неё
-  // вычитаем из доступной высоты
-  const head = block.querySelector(".quiz-head");
-  const headH = head ? head.getBoundingClientRect().height : 0;
-  const gap = parseFloat(cs.rowGap) || 0;
-  const roomH = host.clientHeight - padY - headH - gap;
+  const roomH = quizRoomHeight(block);
   unfixQuiz(inner);
   /* Высоту ряда снимаем на время подбора кегля: фиксированное число делает
      высоту блока ответов независимой от шрифта, и поиск кегля уходил в
@@ -432,8 +425,11 @@ function fitQuiz(block, force = false) {
     const baseO = 3.5 * vh;
     const baseP = 1.8 * vh;
     // широкая картинка стоит сверху: ей нужна своя доля кадра, иначе
-    // алгоритм вырастит текст и раздавит фото в полоску
-    const budget = body.classList.contains("on-shot-wide") ? roomH * 0.56 : roomH;
+    // алгоритм вырастит текст и раздавит фото в полоску.
+    // 0.53, а не 0.56: на 4:3 фото упиралось в текст и выходило мелким
+    // (572x430 при кадре 889x750). Каждые 3% бюджета дают снимку 20–25 px
+    // по высоте, а кегль ответов теряет 4–5 px — на этом ещё читаемо.
+    const budget = body.classList.contains("on-shot-wide") ? roomH * 0.53 : roomH;
 
     /* Слово, разорванное посреди («Треугольн-ик»), видно прямо в кадре:
        диапазон одного слова получает прямоугольники на разных строках. */
@@ -499,6 +495,32 @@ function fitQuiz(block, force = false) {
 
   /* Страховка: если и на минимальных кеглях не влезло (совсем узкое окно
      или неразрывное слово), добираем общим масштабом. */
+  fitQuizZoom(block, inner, roomH);
+}
+
+/* Сколько высоты реально доступно содержимому кадра.
+
+   Шапка вопроса не масштабируется вместе с текстом, поэтому её высоту и
+   отступы вычитаем из кадра. Одна функция на два места: сам подбор кегля
+   и пересчёт масштаба после выравнивания высоты кнопок. */
+function quizRoomHeight(block) {
+  const host = block.parentElement;
+  if (!host) return 0;
+  const cs = getComputedStyle(block);
+  const head = block.querySelector(".quiz-head");
+  return host.clientHeight
+    - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom)
+    - (head ? head.getBoundingClientRect().height : 0)
+    - (parseFloat(cs.rowGap) || 0);
+}
+
+/* Добрать общий масштаб, если текст не влез по высоте.
+
+   Вынесено из fitQuiz(), потому что после выравнивания высоты кнопок
+   содержимое может подрасти, и масштаб нужно пересчитать ещё раз:
+   иначе блок вылезал под шапку, и таймер наезжал на первую строку
+   вопроса (вопрос 9: шапка кончалась на 101 px, вопрос начинался с 95). */
+function fitQuizZoom(block, inner, roomH) {
   const fitsAt = (zoom) => {
     inner.style.zoom = zoom === 1 ? "" : String(zoom);
     const h = contentHeight(inner);
@@ -510,7 +532,7 @@ function fitQuiz(block, force = false) {
   };
 
   if (fitsAt(1)) {
-    quizFitCache.set(block, {key, zoom: 0});
+    quizFitCache.set(block, {key: quizFitSignature(block), zoom: 0});
     return;
   }
   let lo = QUIZ_ZOOM_MIN;
@@ -521,7 +543,7 @@ function fitQuiz(block, force = false) {
   }
   const zoom = Math.max(QUIZ_ZOOM_MIN, Math.floor(lo * 100) / 100);
   fitsAt(zoom);
-  quizFitCache.set(block, {key, zoom});
+  quizFitCache.set(block, {key: quizFitSignature(block), zoom});
 }
 
 /* Единая ширина карточек ответов.
@@ -687,6 +709,11 @@ function fitQuizActive(force = false) {
     /* fitQuiz снимает фиксацию высоты на время поиска — возвращаем её
        после последнего подбора. */
     fitCardsText(quizPlay);
+    /* Выравнивание высоты кнопок могло подрасти по высоте: пересчитываем
+       общий масштаб, иначе блок вылезает под шапку и таймер наезжает на
+       первую строку вопроса. */
+    const inner = quizPlay.querySelector(".quiz-fit");
+    if (inner) fitQuizZoom(quizPlay, inner, quizRoomHeight(quizPlay));
   }
 }
 /* Холл игры: ведущий запустил квиз, а вопроса ещё нет. Зал читает название

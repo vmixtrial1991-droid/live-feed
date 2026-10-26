@@ -236,7 +236,10 @@ def participant_view(store: EventStore, screen: ScreenController, participant_id
     не приезжает — торопит зал только большая цифра на проекторе.
     """
     phase = screen.quiz_phase if screen.quiz_phase in PHASES else "idle"
-    data: dict = {"phase": phase, "my_score": store.quiz_score(participant_id)}
+    # Считаем очки только по оглашённым вопросам: до «Показать ответ»
+    # прибавка в телефоне выдавала верный ответ раньше проектора.
+    data: dict = {"phase": phase,
+                  "my_score": store.quiz_score(participant_id, store.quiz_revealed_ids())}
 
     if phase in ("open", "closed", "reveal") and screen.quiz_question:
         q = store.quiz_get_question(screen.quiz_question)

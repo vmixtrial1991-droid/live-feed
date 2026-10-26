@@ -1551,6 +1551,10 @@ async def api_mod_quiz_control(
         if screen.quiz_phase != "closed":
             raise HTTPException(status_code=400, detail="Сначала закройте приём ответов")
         screen.quiz_phase = "reveal"
+        # с этого момента очки вопроса идут в личный счёт гостя: до
+        # оглашения прибавка в телефоне выдавала верный ответ раньше экрана
+        if screen.quiz_question:
+            store.quiz_mark_revealed(screen.quiz_question)
     elif action == "next":
         # дальше идут только после закрытого приёма: иначе зал успевает
         # ответить на прошлый вопрос, пока на экране уже новый
@@ -1654,6 +1658,9 @@ async def api_mod_quiz_control(
         screen.quiz_prev_phase = None
     elif action == "reset":
         removed = store.quiz_clear_answers()
+        # ответы стёрли — вместе с ними снимаем и отметки об оглашении:
+        # иначе на повторном прогоне очки зачлись бы до «Показать ответ»
+        store.quiz_clear_revealed()
     else:
         raise HTTPException(status_code=400, detail="Неизвестное действие")
 

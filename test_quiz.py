@@ -472,7 +472,10 @@ check("после закрытия видно распределение", quiz.
       str(quiz.get("counts")))
 check("на закрытии верного варианта ещё нет", quiz.get("correct") is None,
       str(quiz.get("correct")))
-check("верный ответ принёс очко", quiz.get("my_score") == 1, str(quiz.get("my_score")))
+# Очко начисляется только после оглашения: иначе прибавка в телефоне
+# выдавала верный ответ раньше, чем «Показать ответ» на проекторе.
+check("до оглашения очко не начислено", quiz.get("my_score") == 0,
+      str(quiz.get("my_score")))
 _, quiz2 = call("GET", "/api/quiz", jar=GUEST2)
 check("неверный ответа очка не дал", quiz2.get("my_score") == 0)
 st, _ = call("POST", "/api/quiz/answer", {"question_id": q1, "option": 2}, expect=409)
@@ -483,6 +486,11 @@ check("шаг «показать ответ» принимается после 
 _, quiz = call("GET", "/api/quiz")
 check("верный вариант приезжает только на стадии reveal", quiz.get("correct") == 1,
       str(quiz.get("correct")))
+check("после оглашения верный ответ принёс очко", quiz.get("my_score") == 1,
+      str(quiz.get("my_score")))
+_, quiz2 = call("GET", "/api/quiz", jar=GUEST2)
+check("после оглашения неверный ответ очка не дал", quiz2.get("my_score") == 0,
+      str(quiz2.get("my_score")))
 st, _ = call("POST", "/api/moderator/quiz/control", {"action": "reveal"}, expect=400)
 check("второй раз показывать ответ не нужно", True)
 
@@ -503,6 +511,8 @@ call("POST", "/api/moderator/quiz/control", {"action": "reveal"})
 _, quiz = call("GET", "/api/quiz")
 check("на хитром вопросе верного нет даже на reveal",
       quiz.get("correct") is None, str(quiz.get("correct")))
+check("хитрый вопрос не добавил очков и после оглашения",
+      quiz.get("my_score") == 1, str(quiz.get("my_score")))
 
 print("\n=== Экран и стадии ===")
 st, h = call("POST", "/api/moderator/quiz/control", {"action": "board"})
@@ -580,6 +590,12 @@ check("после сброса у гостя снова ноль очков", qu
 st, h = call("POST", "/api/moderator/quiz/control",
              {"action": "open", "question_id": q1})
 check("вопрос снова открыт", h.get("phase") == "open" and h.get("current") == q1)
+# Сброс снимает и отметки об оглашении: иначе на повторном прогоне
+# очко зачлось бы сразу после ответа, ещё до «Показать ответ».
+call("POST", "/api/quiz/answer", {"question_id": q1, "option": 1})
+_, quiz = call("GET", "/api/quiz")
+check("на повторном прогоне до оглашения очка нет", quiz.get("my_score") == 0,
+      str(quiz.get("my_score")))
 st, _ = call("POST", "/api/moderator/quiz/delete", {"question_id": q1})
 _, h = call("GET", "/api/moderator/quiz")
 check("удаление открытого вопроса останавливает игру",

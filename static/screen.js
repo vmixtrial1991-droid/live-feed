@@ -346,10 +346,38 @@ const QUIZ_PAD_MAX = 42, QUIZ_PAD_MIN = 8;
 const QUIZ_TYPE_MAX = 1.9;    // во сколько раз максимум растягиваем базу
 const QUIZ_TYPE_MIN = 0.5;
 
-/* Линейка для слов: длина самого длинного слова меряется без раскладки,
-   через canvas.measureText — это в разы дешевле, чем заставлять браузер
-   пересчитывать сетку на каждый пробный кегль. */
-const quizWordMeter = document.createElement('canvas').getContext('2d');
+/* Сколько слов в блоке разорвано между строками.
+
+   Слово, разорванное посреди («Треугольн-ик»), видно прямо в кадре:
+   диапазон одного слова получает прямоугольники на разных строках.
+   Ссылки и пути не в счёт — их придётся рвать в любом случае, и никакой
+   кегль этого не исправит. Знаки на конце слова («симметрична?»)
+   ссылкой его не делают. Меряем слово целиком, со знаком: иначе браузер
+   переносит «симметрична» + «?» отдельной строкой, и висячий знак
+   выглядит как обрыв. */
+function brokenWordCount(el) {
+  let broken = 0;
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  let node;
+  while ((node = walker.nextNode())) {
+    const re = /\S+/g;
+    let m;
+    while ((m = re.exec(node.nodeValue || ""))) {
+      const word = m[0];
+      const bare = word.replace(/[.,;:!?)]+$/, "");
+      if (bare.length > 32 || /[:/@?=]/.test(bare)) continue;
+      const range = document.createRange();
+      range.setStart(node, m.index);
+      range.setEnd(node, m.index + word.length);
+      const tops = new Set();
+      for (const r of range.getClientRects()) {
+        if (r.width > 1 && r.height > 1) tops.add(Math.round(r.top));
+      }
+      if (tops.size > 1) broken += 1;
+    }
+  }
+  return broken;
+}
 
 /* Подбор кеглей под содержание кадра.
 
@@ -387,6 +415,12 @@ function fitQuiz(block, force = false) {
   const gap = parseFloat(cs.rowGap) || 0;
   const roomH = host.clientHeight - padY - headH - gap;
   unfixQuiz(inner);
+  /* Высоту ряда снимаем на время подбора кегля: фиксированное число делает
+     высоту блока ответов независимой от шрифта, и поиск кегля уходил в
+     минимум — в вертикальной раскладке текст падал с 55 до 42 px.
+     После подбора fitCardsText() снова её выставит. */
+  const optsBox = inner.querySelector(".quiz-opts");
+  if (optsBox) optsBox.style.removeProperty("--quiz-opt-row-h");
   if (!roomH) { quizFitCache.set(block, {key, zoom: 0}); return; }
 
   const body = inner.querySelector(".quiz-body");
@@ -401,29 +435,14 @@ function fitQuiz(block, force = false) {
     // алгоритм вырастит текст и раздавит фото в полоску
     const budget = body.classList.contains("on-shot-wide") ? roomH * 0.56 : roomH;
 
-    /* Отношение «самое длинное слово / ширина строки» для вопроса и всех
-       ответов. 1.0 значит «ровно влезает», больше — где-то рвётся. */
-    const worstWordRatio = () => {
-      let worst = 0;
-      for (const el of inner.querySelectorAll('.quiz-q, .quiz-s-text')) {
-        const words = (el.textContent || '').trim().split(/\s+/);
-        if (!words[0]) continue;
-        /* Ссылки и пути исключаем из замера: перенести их посреди строки
-           придётся в любом случае, и никакой кегль этого не исправит —
-           а требовать, чтобы они «влезли», значит раздавить читабельность
-           всего кадра ради одного токена-файла. */
-        const sane = words.filter((word) => word.length <= 32 && !/[:/@?=]/.test(word));
-        if (!sane.length) continue;
-        const style = getComputedStyle(el);
-        quizWordMeter.font =
-          `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
-        let w = 0;
-        for (const word of sane) w = Math.max(w, quizWordMeter.measureText(word).width);
-        const linew = el.clientWidth - parseFloat(style.paddingLeft)
-          - parseFloat(style.paddingRight);
-        if (linew > 0) worst = Math.max(worst, w / linew);
+    /* Слово, разорванное посреди («Треугольн-ик»), видно прямо в кадре:
+       диапазон одного слова получает прямоугольники на разных строках. */
+    const brokenWords = () => {
+      let broken = 0;
+      for (const el of inner.querySelectorAll(".quiz-q, .quiz-s-text")) {
+        broken += brokenWordCount(el);
       }
-      return worst;
+      return broken;
     };
 
     const apply = (k) => {
@@ -454,26 +473,26 @@ function fitQuiz(block, force = false) {
     apply(k);
 
     /* Ширина строки тоже лимит. Слово, которое длиннее строки, рвётся
-       посреди («Треугольн-ик»), кнопка раздувается пустотой, а зал
-       дочитывает ответ по кусочку. Поэтому после поиска по высоте меряем
-       самое длинное слово вопроса и каждого ответа: если оно не влезает,
-       ужимаем k ещё немного. Дешевле это делать линейкой, чем раскладкой.
-       Патологические тексты (длинная ссылка) исключение не лечат: перенос
-       им нужен в любом случае, и жертвовать ради них читабельностью
-       нельзя — правило вступает в игру, только если стоит не дороже
-       четверти кегля. */
-    if (worstWordRatio() > 0.998) {
+       посреди («Треугольн-ик»), и зал дочитывает ответ по кусочку. Поэтому
+       если такое слово есть, ищем наибольший кегль, при котором ни одно
+       слово не разорвано. Для кадра с фото опускаемся до общего минимума:
+       «симметрична?» иначе не влезает в половину экрана рядом с картинкой.
+       Без фото хватает ужатия на четверть — там строка шире. */
+    if (brokenWords() > 0) {
       const fitsWidth = (kk) => {
         apply(kk);
-        return worstWordRatio() <= 0.998 && quizTextHeight(inner) <= budget + 1;
+        return brokenWords() === 0 && quizTextHeight(inner) <= budget + 1;
       };
-      let wLo = QUIZ_TYPE_MIN;
-      let wHi = k;
-      for (let step = 0; step < 8; step++) {
-        const mid = (wLo + wHi) / 2;
-        if (fitsWidth(mid)) wLo = mid; else wHi = mid;
+      const minK = body.classList.contains("has-image") ? QUIZ_TYPE_MIN : k * 0.75;
+      if (fitsWidth(minK)) {
+        let lo = minK;
+        let hi = k;
+        for (let step = 0; step < 8; step++) {
+          const mid = (lo + hi) / 2;
+          if (fitsWidth(mid)) lo = mid; else hi = mid;
+        }
+        k = lo;
       }
-      if (wLo >= k * 0.75) k = wLo;
       apply(k);
     }
   }
@@ -504,14 +523,172 @@ function fitQuiz(block, force = false) {
   fitsAt(zoom);
   quizFitCache.set(block, {key, zoom});
 }
+
+/* Единая ширина карточек ответов.
+
+   Раньше каждая колонка сетки сжималась по своему содержимому: в столбце
+   «гошща» получалась 362 px, а соседи — 451 px, в сетке 2x2 колонки
+   расходились на 505 и 375 px. Теперь ширина одна на все карточки: берём
+   самый длинный ответ и отдаём ему столько места, сколько нужно, но не
+   больше доступного. Кегль длинных карточек потом ужимает fitQuiz() —
+   на ширину это уже не влияет, она зафиксирована в --quiz-card-w. */
+function fitQuizCardWidth(block) {
+  const body = block.querySelector(".quiz-body");
+  const opts = block.querySelector(".quiz-opts");
+  if (!body || !opts) return;
+  const cards = [...opts.children].filter((el) => el.classList.contains("quiz-s-opt"));
+  if (!cards.length) { opts.style.removeProperty("--quiz-card-w"); return; }
+
+  const withImage = body.classList.contains("has-image");
+  const cs = getComputedStyle(opts);
+  const gapX = parseFloat(cs.columnGap) || 0;
+  const wide = withImage
+    && !body.classList.contains("on-shot-square")
+    && !body.classList.contains("on-shot-tall");
+  /* В сетке 2x2 колонка не может быть шире половины ряда: иначе вторая
+     не влезет. В столбике и в текстовой раскладке ограничение — весь ряд. */
+  const maxW = wide ? (opts.clientWidth - gapX) / 2 : opts.clientWidth;
+
+  /* Сколько места нужно каждой карточке. Меряем карточку вне сетки:
+     внутри неё max-content считается циклически от той же ширины колонки,
+     которую мы и определяем, и выходит «ровно впритык» — последняя буква
+     переносится, карточка получает мельче кегль, чем соседняя. */
+  const restore = [];
+  for (const card of cards) {
+    card.style.removeProperty("--quiz-card-font");
+    restore.push([card, card.style.position, card.style.width, card.style.maxWidth]);
+    card.style.position = "absolute";
+    card.style.width = "max-content";
+    card.style.maxWidth = "none";
+  }
+  let needW = 0;
+  for (const card of cards) {
+    needW = Math.max(needW, card.getBoundingClientRect().width);
+  }
+  for (const [card, pos, w, maxW] of restore) {
+    card.style.position = pos;
+    card.style.width = w;
+    card.style.maxWidth = maxW;
+  }
+  /* 4 px запаса: округление ширины вниз иначе переносит последнюю букву
+     на вторую строку. */
+  needW += 4;
+  /* Не меньше трети ряда: совсем узкие кнопки вроде «да» выглядят
+     обрубками. Не больше maxW — иначе карточки не поместятся. */
+  const minW = Math.min(maxW, opts.clientWidth / 3);
+  const width = Math.min(Math.max(needW, minW), maxW);
+  const before = opts.style.getPropertyValue("--quiz-card-w");
+  opts.style.setProperty("--quiz-card-w", `${Math.round(width)}px`);
+  /* Ширина изменилась заметно — стоит пересчитать кегль под неё: от ширины
+     зависит перенос строк, а от него высота. */
+  return !before || Math.abs(parseFloat(before) - width) > 2;
+}
+
+/* Кегль отдельной карточки: длинный ответ получает шрифт мельче, короткие
+   остаются крупными. Нужно, когда карточки одной ширины и одинаковой
+   высоты: иначе длинная не влезает в общий ряд и вылезает за карточку.
+
+   Ужимаем только те карточки, чей текст не влез в целевую высоту. Меряем
+   не карточку, а сам текст: карточка растянута по ряду всегда, и по ней
+   переполнения не увидеть. Ограничения: не мельче QUIZ_OPT_MIN и не
+   меньше половины общего кегля — иначе одна карточка выглядела бы чужой. */
+function fitCardText(card, baseFontPx, rowH) {
+  const text = card.querySelector(".quiz-s-text");
+  if (!text) return null;
+  const ccs = getComputedStyle(card);
+  const inner = rowH
+    ? rowH - parseFloat(ccs.paddingTop) - parseFloat(ccs.paddingBottom)
+    : 0;
+  const fitsRow = () => !inner
+    || text.getBoundingClientRect().height <= inner + 1;
+  if (fitsRow() && brokenWordCount(text) === 0) {
+    card.style.removeProperty("--quiz-card-font");
+    return null;
+  }
+  const floor = Math.max(QUIZ_OPT_MIN, baseFontPx * 0.62);
+  let size = baseFontPx;
+  let best = null;
+  for (let step = 0; step < 10; step++) {
+    size = Math.max(floor, size * 0.93);
+    card.style.setProperty("--quiz-card-font", size.toFixed(1) + "px");
+    if (fitsRow() && brokenWordCount(text) === 0) { best = size; break; }
+    if (size <= floor) break;
+  }
+  if (best === null) best = floor;
+  card.style.setProperty("--quiz-card-font", best.toFixed(1) + "px");
+  return best;
+}
+
+/* Выровнять высоту кнопок и подобрать кегль длинным ответам.
+
+   Короткие карточки задают общую высоту ряда, длинные ужимаются под неё.
+   Так все кнопки стоят одной высоты, а не «лесенкой» из 100 и 85 px.
+   Вызывается после подбора кегля: fitQuiz на время поиска снимает
+   фиксацию высоты, иначе она мешает ему подбирать шрифт. */
+function fitCardsText(block) {
+  const opts = block.querySelector(".quiz-opts");
+  if (!opts) return;
+  const cards = [...opts.children].filter((el) => el.classList.contains("quiz-s-opt"));
+  if (!cards.length) return;
+  /* Меряем натуральные высоты: снимаем прошлую фиксацию и ужатия, иначе
+     базовый кегль читается у уже ужатой карточки. */
+  opts.style.removeProperty("--quiz-opt-row-h");
+  for (const card of cards) card.style.removeProperty("--quiz-card-font");
+  const base = parseFloat(getComputedStyle(cards[0]).fontSize) || 0;
+  if (!base) return;
+
+  /* Высота ряда — по самой низкой карточке плюс небольшой запас. Запас
+     нужен, чтобы короткие ответы не выглядели приплюснутыми рядом с
+     длинным, но и не раздували блок: от его высоты зависит размер фото. */
+  let lowH = 0;
+  for (const card of cards) {
+    const h = card.getBoundingClientRect().height;
+    lowH = lowH ? Math.min(lowH, h) : h;
+  }
+  let rowH = Math.round(lowH * 1.06);
+  /* Фиксируем числом: иначе браузер растянет ряд по самой высокой
+     карточке, и выравнивание не сработает. */
+  opts.style.setProperty("--quiz-opt-row-h", `${rowH}px`);
+  for (const card of cards) fitCardText(card, base, rowH);
+
+  /* Если длинный ответ не влез даже на нижнем пределе кегля, поднимаем
+     ряд под него: обрезанный текст хуже, чем чуть меньшая картинка. */
+  let needH = rowH;
+  for (const card of cards) {
+    const text = card.querySelector(".quiz-s-text");
+    if (!text) continue;
+    const ccs = getComputedStyle(card);
+    needH = Math.max(needH, Math.ceil(text.getBoundingClientRect().height
+      + parseFloat(ccs.paddingTop) + parseFloat(ccs.paddingBottom)));
+  }
+  if (needH > rowH) {
+    rowH = needH;
+    opts.style.setProperty("--quiz-opt-row-h", `${rowH}px`);
+  }
+}
+
 /* Подогнать тот блок, который сейчас на экране: содержимое меняется и без
    смены блока (распределение ответов, пачка таблицы), и после каждой такой
    правки масштаб надо пересчитать. */
 function fitQuizActive(force = false) {
   if (!quizLobby.hidden) fitQuiz(quizLobby, force);
-  if (!quizPlay.hidden) fitQuiz(quizPlay, force);
+  if (!quizPlay.hidden) {
+    /* Порядок важен:
+       1. кегль под высоту кадра (внутри он снимает фиксацию высоты ряда,
+          чтобы она не мешала подбору);
+       2. общая ширина карточек по базовому кеглю;
+       3. выравнивание высоты ряда и ужатие длинных ответов;
+       4. пересчёт высоты кадра — карточки стали компактнее, и фото
+          достаётся освободившееся место. */
+    fitQuiz(quizPlay, force);
+    fitQuizCardWidth(quizPlay);
+    fitCardsText(quizPlay);
+    fitQuiz(quizPlay, true);
+    /* fitQuiz снимает фиксацию высоты на время поиска — возвращаем её
+       после последнего подбора. */
+    fitCardsText(quizPlay);
+  }
 }
-
 /* Холл игры: ведущий запустил квиз, а вопроса ещё нет. Зал читает название
    и сканирует QR, а ведущий в это время спокойно дописывает вопросы. */
 function renderLobby(f) {
@@ -653,10 +830,12 @@ function renderQuiz() {
       // номер перед вариантом: зал видит «3» на проекторе и нажимает
       // третью кнопку у себя — сверять текст с экрана больше не нужно.
       // В сам текст варианта номер не попадает: он живёт только в вёрстке.
-      // Место под проценты справа уже оставлено отступом у текста, поэтому
-      // отдельной плашки в приёме ответов нет — ответам достаётся высота
+      // Невидимый «100%» держит место под проценты: без него при закрытии
+      // приёма колонка цифр появлялась, текст сжимался, и кадр «плыл».
       el.innerHTML = `<span class="quiz-s-idx">${i + 1}</span>`
-        + `<span class="quiz-s-text">${escapeHTML(text)}</span>`;
+        + `<span class="quiz-s-text">${escapeHTML(text)}</span>`
+        + `<span class="quiz-s-check" aria-hidden="true">✓</span>`
+        + `<span class="quiz-s-num is-blank">100%</span>`;
       return el;
     }));
     quizCount.textContent = f.answered_total
@@ -670,20 +849,84 @@ function renderQuiz() {
   stopQuizTicker();
   const counts = f.counts || q.options.map(() => 0);
   const total = counts.reduce((a, b) => a + b, 0) || 1;
+  /* Заливку и цифру рисуем с нуля и «набираем» до итога: зал видит, как
+     распределение растёт, а не получает готовые полосы щелчком. */
+  const animate = shouldAnimateShares(f, q);
   quizOpts.replaceChildren(...q.options.map((text, i) => {
     const share = Math.round((counts[i] / total) * 100);
     const el = document.createElement('div');
     el.className = 'quiz-s-opt is-bar' + (f.correct === i ? ' is-right' : '');
-    el.innerHTML = `<span class="quiz-s-fill" style="width:${share}%"></span>
+    el.innerHTML = `<span class="quiz-s-fill" style="width:${animate ? 0 : share}%"></span>
       <span class="quiz-s-idx">${i + 1}</span>
-      <span class="quiz-s-text">${escapeHTML(text)}${f.correct === i ? ' ✓' : ''}</span>
-      <span class="quiz-s-num">${share}%</span>`;
+      <span class="quiz-s-text">${escapeHTML(text)}</span>
+      <span class="quiz-s-check" aria-hidden="true">✓</span>
+      <span class="quiz-s-num">${animate ? 0 : share}%</span>`;
     return el;
   }));
   quizCount.textContent = f.phase === 'closed'
     ? `Ответили: ${f.answered_total ?? total} · приём закрыт`
     : `Ответили: ${f.answered_total ?? total}`;
   fitQuizActive();
+  if (animate) {
+    playShares(q.options.map((_, i) => Math.round((counts[i] / total) * 100)));
+  } else if (sharesTimer) {
+    /* Перешли в следующую стадию, пока полосы ещё набирались: доводим их
+       до итога сразу, иначе они застынут на промежуточном значении. */
+    cancelAnimationFrame(sharesTimer);
+    sharesTimer = null;
+    const cards = [...quizOpts.children].filter((el) => el.classList.contains('quiz-s-opt'));
+    cards.forEach((card, i) => {
+      const fill = card.querySelector('.quiz-s-fill');
+      const num = card.querySelector('.quiz-s-num');
+      const share = Math.round((counts[i] / total) * 100);
+      if (fill) fill.style.width = `${share}%`;
+      if (num) num.textContent = `${share}%`;
+    });
+  }
+}
+
+/* Анимация распределения: один раз на переход в «приём закрыт», а не на
+   каждую перерисовку кадра. Иначе полосы дёргались бы от любого сообщения
+   по сокету. */
+let sharesAnimatedKey = null;
+let sharesTimer = null;
+
+function shouldAnimateShares(f, q) {
+  if (f.phase !== 'closed' && f.phase !== 'reveal') return false;
+  /* Анимируем один раз — на входе в «приём закрыт». На reveal полосы уже
+     стоят на месте, и повторный набор выглядел бы как сброс. */
+  const key = `q${q.id}:closed`;
+  if (sharesAnimatedKey === key) return false;
+  sharesAnimatedKey = key;
+  return true;
+}
+
+/* Плавно довести полосу и число до итоговых значений. Длительность одна
+   на оба: если анимировать по отдельности, цифра и полоса разъезжаются. */
+function playShares(targets) {
+  if (sharesTimer) cancelAnimationFrame(sharesTimer);
+  const DURATION = 1000;
+  const cards = [...quizOpts.children].filter((el) => el.classList.contains('quiz-s-opt'));
+  const ease = (t) => 1 - Math.pow(1 - t, 3);   // быстро трогается, мягко встаёт
+  /* Стартуем от первого кадра: браузер может отдать timestamp меньше
+     performance.now(), и первый прогресс выходил отрицательным — цифра
+     успевала мигнуть «-5%». */
+  let start = null;
+  const step = (now) => {
+    if (start === null) start = now;
+    const t = Math.min(1, Math.max(0, (now - start) / DURATION));
+    const k = ease(t);
+    cards.forEach((card, i) => {
+      const fill = card.querySelector('.quiz-s-fill');
+      const num = card.querySelector('.quiz-s-num');
+      const value = Math.max(0, Math.round((targets[i] || 0) * k));
+      if (fill) fill.style.width = `${value}%`;
+      if (num) num.textContent = `${value}%`;
+    });
+    if (t < 1) sharesTimer = requestAnimationFrame(step);
+    else sharesTimer = null;
+  };
+  sharesTimer = requestAnimationFrame(step);
 }
 
 const messages = new Map();   // id -> сообщение ленты

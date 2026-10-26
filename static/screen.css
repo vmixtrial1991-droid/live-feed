@@ -473,9 +473,14 @@
      плюс отступ, а весь блок (вопрос + ответы + подпись) центрируется в
      кадре целиком. Растяжка делала кнопки то 50, то 230 px. */
   flex: 0 0 auto;
+  /* Карточки одной ширины по самому длинному ответу и по центру кадра:
+     короткое «да» иначе растягивалось на всю ширину. Ширину считает
+     fitQuizCardWidth(); без неё остаётся прежнее поведение. */
+  align-items: center;
 }
+.quiz-opts > .quiz-s-opt { width: var(--quiz-card-w, 100%); max-width: 100%; }
 /* в режиме с картинкой раскладку задаёт сетка */
-.quiz-body.has-image .quiz-opts { flex: none; }
+.quiz-body.has-image .quiz-opts { flex: none; align-items: stretch; }
 
 /* Вопрос с картинкой — две раскладки, и выбор между ними только по
    пропорциям снимка.
@@ -557,7 +562,9 @@
   max-height: 100%;
   width: auto;
   height: auto;
+  border: 1px solid rgba(170, 190, 255, .18);
   border-radius: 14px;
+  box-shadow: 0 16px 42px rgba(0, 0, 0, .32);
 }
 /* широкая: фото сверху на всю ширину, ответы под ним сеткой 2x2 */
 /* Фото занимает не больше половины кадра: остальное — вопросу и ответам.
@@ -596,32 +603,57 @@
 
 
 
-/* сетка ответов: 1 2 сверху, 3 4 снизу.
+/* Сетка ответов: 1 2 сверху, 3 4 снизу.
 
-   Строка растёт по содержанию, но не ниже --quiz-opt-h: короткий вариант
-   остаётся компактной кнопкой, а не растягивается на полкадра. Кегль и
-   отступ подбирает fitQuiz() — от них и зависит высота. */
+   Ширину всех карточек задаёт --quiz-card-w: её считает fitQuiz() по самому
+   длинному ответу, чтобы короткие не растягивались на полкадра, а карточки
+   в ряду и в столбце стояли одной ширины. Предел —
+   половина ряда за вычетом промежутка (в сетке 2x2) или весь ряд (столбик).
+   Кегль, отступ и ширину подбирает fitQuiz(). */
 .quiz-body.has-image .quiz-opts {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  grid-auto-rows: minmax(var(--quiz-opt-h), auto);
+  grid-template-columns: repeat(2, var(--quiz-card-w, minmax(0, max-content)));
+  /* Высота ряда общая для всех карточек: её считает fitCardsText() по
+     самой компактной карточке, а длинные ответы ужимаются под неё.
+     Тогда кнопки стоят одной высоты, а не «лесенкой». */
+  grid-auto-rows: var(--quiz-opt-row-h, minmax(var(--quiz-opt-h), auto));
   gap: clamp(.4rem, 1vh, .8rem);
   margin: 0;
   height: auto;
   align-content: center;
-  /* Ответы в ряду не растягиваются под соседа: если один вариант
-     перенёсся на две строки, короткий рядом остаётся компактной кнопкой,
-     а не пустой плашкой высотой с соседа. */
-  align-items: center;
+  justify-content: center;
+  align-items: stretch;
 }
 /* столбик для высоких снимков: в две колонки рядом с вертикалью варианты
    становились слишком узкими, и текст рвался посреди слова */
 .quiz-body.on-shot-square .quiz-opts,
 .quiz-body.on-shot-tall .quiz-opts {
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: var(--quiz-card-w, minmax(0, 1fr));
   gap: clamp(.3rem, .9vh, .6rem);
   /* столбик собирается по центру колонки; высота кнопок — по контенту */
   align-content: center;
+}
+.quiz-body.on-shot-square .quiz-opts,
+.quiz-body.on-shot-tall .quiz-opts { justify-content: stretch; }
+
+/* Карточка занимает всю ширину своей колонки. Колонок четыре и в приёме
+   ответов, и в распределении: номер, текст, галочка, проценты. Если
+   объявить меньше, лишние ячейки уезжают на новую строку и карточка
+   подрастает вдвое. */
+.quiz-body.has-image .quiz-s-opt {
+  max-width: 100%;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+}
+.quiz-body.on-shot-square .quiz-s-opt,
+.quiz-body.on-shot-tall .quiz-s-opt { justify-self: stretch; }
+
+/* Широкая картинка стоит сверху и делит высоту с ответами. Компактные
+   внутренние отступы карточек отдают лишние 20–30 px фотографии: блок
+   ответов становится ниже, а снимок крупнее. В столбике рядом с
+   вертикалью место не так дорого — там отступы обычные. */
+.quiz-body.on-shot-wide .quiz-s-opt {
+  padding-top: calc(var(--quiz-opt-pad) * .5);
+  padding-bottom: calc(var(--quiz-opt-pad) * .5);
 }
 
 /* Третий вариант при трёх: снизу по центру, а не в левой ячейке с дыркой
@@ -629,11 +661,13 @@
 .quiz-body.has-image .quiz-opts > .quiz-s-opt:last-child:nth-child(3) {
   grid-column: 1 / -1;
   justify-self: center;
-  width: min(100%, calc(50% - clamp(.4rem, 1vh, .8rem) / 2));
+  width: var(--quiz-card-w, auto);
+  max-width: 90%;
 }
 .quiz-body.on-shot-square .quiz-opts > .quiz-s-opt:last-child:nth-child(3),
 .quiz-body.on-shot-tall .quiz-opts > .quiz-s-opt:last-child:nth-child(3) {
-  width: 100%;
+  grid-column: auto;
+  max-width: 100%;
 }
 
 /* Одна и та же сетка в приёме ответов и в распределении.
@@ -646,36 +680,43 @@
    (его ставит screen.js), и высота строки та же. Ширина колонки под
    цифры (minmax) тоже фиксирована — иначе длинный текст в open занимал её
    всю, а с процентами отдавал часть, и строки прыгали. */
-/* Вопрос с картинкой использует те же кегли, что и без неё: различается
-   только наличие фото, а не типографика. */
-.quiz-body.has-image .quiz-s-opt .quiz-s-text { padding-right: 2.2em; }
 
 /* тег и подпись «ответили» — по центру всей карточки, как и без фото */
 .quiz-body.has-image .quiz-tag,
 .quiz-body.has-image .quiz-count { text-align: center; }
 .quiz-s-opt {
   position: relative; overflow: hidden;
-  border: 1px solid var(--line); border-radius: 14px;
-  background: var(--bg-soft);
+  border: 1px solid rgba(137, 158, 210, .2); border-radius: 16px;
+  background: linear-gradient(145deg, rgba(255, 255, 255, .035), transparent 72%), var(--bg-soft);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, .12), inset 0 1px rgba(255, 255, 255, .025);
   /* отступ растёт вместе с кеглем: короткий ответ даёт компактную кнопку,
      а не высокую плашку с мелким текстом внутри */
   padding: var(--quiz-opt-pad) clamp(1rem, 2.4vw, 1.8rem);
-  font-size: var(--quiz-opt-size);
+  /* Кегль общий на все карточки, но длинный ответ может получить свой,
+     мельче (--quiz-card-font ставит fitCardText). */
+  font-size: var(--quiz-card-font, var(--quiz-opt-size));
   /* высокая кнопка центрирует текст по вертикали, а не прижимает к верху */
   align-content: center;
   min-height: var(--quiz-opt-h);
   text-align: left;
   overflow-wrap: anywhere;
-  /* Номер слева по центру строки, текст занимает всё остальное, а
-     проценты лежат справа поверх заливки: отдельной строки под них нет.
-     Раньше под цифры была своя строка, и кнопка росла вниз пустотой —
-     теперь высота уходит тексту, а проценты просто видны на полосе. */
+  /* Номер, текст, галочка, проценты — четыре колонки, и они есть всегда,
+     в обеих стадиях: невидимые галочка и «100%» держат место, поэтому при
+     закрытии приёма и показе ответа карточки не меняют размер.
+     Зазоры в rem, а не в em: при крупном кегле они съедали почти всю
+     ширину карточки, и короткому «да» не оставалось места. */
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: .5em .8em;
+  gap: .35rem .55rem;
 }
-.quiz-s-opt.is-right { border-color: var(--ok); }
+.quiz-s-opt.is-right {
+  border-color: var(--ok);
+  box-shadow: 0 0 0 1px rgba(51, 201, 138, .1), 0 8px 24px rgba(0, 0, 0, .16);
+  /* Правильный ответ «проявляется» зеленью, а не вспыхивает: полсекунды
+     на рамку, тень и заливку. */
+  transition: border-color .5s ease, box-shadow .5s ease, background-color .5s ease;
+}
 
 /* Без картинки ответы — тот же столбик, что и рядом с фото, с тем же
    кеглем и той же высотой кнопки. Отличается только раскладка. */
@@ -691,9 +732,9 @@
   position: relative; flex: none;
   width: 1.5em; height: 1.5em;
   display: grid; place-items: center;
-  border: 1px solid var(--line); border-radius: 50%;
-  background: rgba(255, 255, 255, .05);
-  color: var(--muted);
+  border: 1px solid rgba(91, 140, 255, .3); border-radius: 50%;
+  background: rgba(91, 140, 255, .11);
+  color: #a9c3ff;
   /* по центру строки ответа, а не над текстом */
   align-self: center;
   font-size: .78em; font-weight: 700;
@@ -702,7 +743,22 @@
 .quiz-s-opt.is-right .quiz-s-idx {
   border-color: var(--ok); color: var(--ok);
   background: rgba(51, 201, 138, .16);
+  transition: border-color .5s ease, color .5s ease, background-color .5s ease;
 }
+
+/* Галочка правильного ответа — своя колонка, а не часть текста.
+   Дописанная к тексту, она переносилась на отдельную строку («гошща» /
+   «✓»), и карточка подрастала вдвое. Место под неё занято всегда, как и
+   под проценты, поэтому при показе ответа кадр не перестраивается. */
+.quiz-s-check {
+  visibility: hidden;
+  color: var(--ok);
+  font-weight: 800;
+  opacity: .9;
+  justify-self: center;
+  transition: opacity .5s ease;
+}
+.quiz-s-opt.is-right .quiz-s-check { visibility: visible; }
 
 /* .quiz-s-opt.is-bar раньше задавал свой gap (1em) — он перебивал gap
    сетки, и в закрытом состоянии строки становились выше, чем в открытом.
@@ -710,39 +766,47 @@
 .quiz-s-fill {
   position: absolute; inset: 0 auto 0 0;
   background: rgba(91, 140, 255, .18);
+  /* Ширину ведёт JS с requestAnimationFrame; CSS-переход тут не нужен и
+     только мешал бы: он догонял бы каждый кадр анимации. */
+  will-change: width;
 }
-.quiz-s-opt.is-bar.is-right .quiz-s-fill { background: rgba(51, 201, 138, .22); }
+.quiz-s-opt.is-bar.is-right .quiz-s-fill {
+  background: rgba(51, 201, 138, .22);
+  transition: background-color .5s ease;
+}
 
-/* Текст ответа лежит поверх заливки и занимает всю середину ячейки.
-   Справа от него узкий резерв под проценты — 2.2em дают длинному слову
-   (типа «Треугольник») шанс остаться одной строкой. «100%» при этом
-   на пару пикселей может лечь на край текста: проценты полупрозрачные,
-   и по замыслу они важнее идеального зазора — иначе длинные слова
-   рвутся посреди, и кнопка раздувается пустотой. */
+/* Текст ответа занимает середину ячейки. Место под проценты держит не
+   отступ, а третья колонка сетки (см. .quiz-s-num): она есть и в приёме
+   ответов, и в распределении, поэтому при закрытии приёма ширина текста
+   не меняется и кадр не «плывёт».
+   Слово, которое не влезает в строку, ужимает только своя карточка
+   (см. fitCardText в screen.js): переносить его посреди нельзя, зал
+   дочитывает ответ по кусочку. */
 .quiz-s-text {
   position: relative;
   min-width: 0;
-  padding-right: 2.2em;
 }
 
-/* Проценты: справа по центру, полупрозрачные, поверх заливки.
+/* Проценты: последняя колонка сетки карточки, справа по центру строки.
    Количество ответивших не показываем — залу важен процент, а не число.
-   absolute, а не колонка сетки: иначе цифры отнимали бы ширину у текста
-   и высоту у ответа. */
+   Именно колонка, а не absolute: место под цифры занято и в приёме ответов
+   (там стоит невидимый «100%»), поэтому при закрытии приёма текст не
+   сжимается и карточки не меняют размер. */
 .quiz-s-num {
-  position: absolute;
-  right: clamp(1rem, 2.5vw, 1.8rem);
-  top: 50%;
-  transform: translateY(-50%);
+  position: relative;
+  text-align: right;
   color: var(--muted);
   opacity: .75;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-  font-size: .9em;
+  /* Кегль процентов не тянется за ответом: иначе при крупном тексте
+     колонка цифр съедала половину карточки. */
+  font-size: clamp(1rem, 2.4vh, 1.6rem);
   pointer-events: none;
+  min-width: 3.2em;
 }
 /* в приёме ответов процентов ещё нет: место под них занято, но пусто */
-.quiz-s-num.is-blank { display: none; }
+.quiz-s-num.is-blank { visibility: hidden; }
 
 .quiz-count {
   margin: 0; color: var(--muted);
@@ -780,4 +844,7 @@
   .quiz-screen { transition: opacity .2s linear, visibility 0s linear .2s; }
   .quiz-screen.is-on { transition: opacity .2s linear; }
   .quiz-block.is-swap { animation: none; }
+  .quiz-s-opt.is-right,
+  .quiz-s-opt.is-right .quiz-s-idx,
+  .quiz-s-opt.is-bar.is-right .quiz-s-fill { transition: none; }
 }

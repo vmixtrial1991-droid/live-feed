@@ -719,11 +719,34 @@ check("screen.html: тело вопроса умеет раскладывать�
       and 'id="quizShotImg"' in screen_html)
 check("screen.js: картинка ставится только когда она есть у вопроса",
       "function setQuizImage" in screen_js and "has-image" in screen_js)
-check("screen.css: с картинкой ответы встают сеткой, а фото слева",
+check("screen.css: с картинкой ответы встают компактной сеткой, а фото слева",
       re.search(r"\.quiz-body\.has-image\s*\{[^}]*grid-template-columns", screen_css, re.S)
       is not None
-      and re.search(r"\.quiz-body\.has-image \.quiz-opts\s*\{[^}]*grid-template-columns:\s*1fr 1fr",
+      and "grid-template-columns: repeat(2, var(--quiz-card-w, minmax(0, max-content)))" in screen_css
+      and re.search(r"\.quiz-body\.has-image \.quiz-s-opt\s*\{[^}]*max-width:\s*100%",
+                    screen_css, re.S) is not None
+      and re.search(r"\.quiz-body\.has-image \.quiz-s-opt\s*\{[^}]*grid-template-columns:\s*auto minmax\(0,\s*1fr\) auto auto",
+                    screen_css, re.S) is not None
+      and re.search(r"\.quiz-body\.on-shot-(square|tall) \.quiz-s-opt\s*\{[^}]*justify-self:\s*stretch",
+                    screen_css, re.S) is not None
+      and re.search(r"\.quiz-s-text\s*\{[^}]*padding-right:\s*2\.2em",
+                    screen_css, re.S) is None
+      and re.search(r"\.quiz-s-num\s*\{[^}]*min-width:\s*3\.2em",
                     screen_css, re.S) is not None)
+check("screen.js: разорванное посреди слово ужимает кегль",
+      "function brokenWords" in screen_js
+      or "const brokenWords" in screen_js)
+check("screen.js: ширина карточек общая для всего вопроса",
+      "function fitQuizCardWidth" in screen_js)
+check("screen.css: кнопки ответов одной высоты",
+      "--quiz-opt-row-h" in screen_css)
+check("screen.css: широкая картинка отдаёт ответам меньше отступов",
+      re.search(r"\.quiz-body\.on-shot-wide \.quiz-s-opt\s*\{[^}]*padding-top:\s*calc\(var\(--quiz-opt-pad\) \* \.5\)",
+                screen_css, re.S) is not None)
+check("screen.js: распределение набирается плавно",
+      "function playShares" in screen_js and "requestAnimationFrame(step)" in screen_js)
+check("screen.css: правильный ответ проявляется зеленью постепенно",
+      "transition: border-color .5s ease" in screen_css)
 check("screen.css: раскладка учитывает пропорции фото, а не только «фото слева»",
       "on-shot-tall" in screen_css and "on-shot-square" in screen_css,
       "панорама и вертикаль требуют разного: ширина против высоты")

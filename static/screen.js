@@ -341,7 +341,12 @@ function quizTextHeight(inner) {
    Абсолютные максимумы страхуют совсем большие экраны и проекторы 4K:
    дальше текст превращается в плакат. */
 const QUIZ_Q_MAX = 150, QUIZ_Q_MIN = 24;
-const QUIZ_OPT_MAX = 78, QUIZ_OPT_MIN = 17;
+/* Нижний предел кегля ответа — 21 px. Было 17: на 720p с горизонтальным
+   фото текст упирался в этот предел, и кнопка превращалась в полоску
+   50 px высотой. 17 px с проектора с задних рядов не читается, поэтому
+   лучше отдать фото чуть меньше половины кадра, чем оставить нечитаемый
+   текст. */
+const QUIZ_OPT_MAX = 78, QUIZ_OPT_MIN = 21;
 const QUIZ_PAD_MAX = 42, QUIZ_PAD_MIN = 8;
 const QUIZ_TYPE_MAX = 1.9;    // во сколько раз максимум растягиваем базу
 const QUIZ_TYPE_MIN = 0.5;
@@ -699,15 +704,22 @@ function fitCardsText(block, maxRowH = 0) {
   const base = parseFloat(getComputedStyle(cards[0]).fontSize) || 0;
   if (!base) return;
 
-  /* Высота ряда — по самой низкой карточке плюс небольшой запас. Запас
-     нужен, чтобы короткие ответы не выглядели приплюснутыми рядом с
-     длинным, но и не раздували блок: от его высоты зависит размер фото. */
+  /* Высота ряда — по самой низкой карточке плюс запас. Запас нужен, чтобы
+     короткие ответы не выглядели приплюснутыми рядом с длинным, но и не
+     раздували блок: от его высоты зависит размер фото. */
   let lowH = 0;
   for (const card of cards) {
     const h = card.getBoundingClientRect().height;
     lowH = lowH ? Math.min(lowH, h) : h;
   }
-  let rowH = Math.round(lowH * 1.06);
+  /* Пол карточки: не меньше двух строк текста плюс отступы. Без этого
+     короткий ответ на плотном кадре превращался в полоску 42 px, хотя
+     рядом стоял крупный текст (вопрос 8: кегль 19 px, высота 42). */
+  const ccs0 = getComputedStyle(cards[0]);
+  const padV = parseFloat(ccs0.paddingTop) + parseFloat(ccs0.paddingBottom);
+  const lineH = base * 1.15;
+  const minCardH = Math.round(Math.max(lowH, lineH * 2 + padV));
+  let rowH = Math.round(Math.max(minCardH, lowH) * 1.06);
   /* Фиксируем числом: иначе браузер растянет ряд по самой высокой
      карточке, и выравнивание не сработает. */
   opts.style.setProperty("--quiz-opt-row-h", `${rowH}px`);
@@ -783,6 +795,11 @@ function enforceShotShare(block) {
 
   const needH = host.clientHeight * 0.5;
   const shotH = () => img.getBoundingClientRect().height;
+  /* Нижний предел кегля ответов — от базового, который дала шкала кадра
+     (5.4vh и т.п.), а не от текущего уже ужатого: иначе с каждым проходом
+     предел падал вместе с кеглем, и текст уезжал в 17 px, а карточка —
+     в полоску 50 px. */
+  const baseOpt = window.innerHeight / 100 * 3.5;
   /* 3 px допуска: пропорции снимка не всегда дают ровно половину —
      1600x1200 при кадре 720 просит ширину 480, и лишний пиксель высоты
      уже не влезает. */
@@ -795,11 +812,16 @@ function enforceShotShare(block) {
     const q = parseFloat(cs.getPropertyValue("--quiz-q-size")) || 0;
     const o = parseFloat(cs.getPropertyValue("--quiz-opt-size")) || 0;
     if (!q || !o) break;
-    if (o <= QUIZ_OPT_MIN + 0.5) break;   // мельче уже некуда
+    /* Ответы не мельче 62% базового кегля: на 17 px зал с задних рядов
+       не прочитает, а полоска 50 px высотой выглядит обрубком. Пусть фото
+       недоберёт пару процентов — текст важнее. */
+    const optFloor = Math.max(QUIZ_OPT_MIN + 4, baseOpt * 0.62);
+    if (o <= optFloor + 0.2) break;
     /* Вопрос ужимаем сильнее ответов: он и так крупнее, а зал читает его
        с проектора один раз, ответы — пока выбирает. */
     block.style.setProperty("--quiz-q-size", (q * 0.94).toFixed(1) + "px");
-    block.style.setProperty("--quiz-opt-size", (o * 0.97).toFixed(1) + "px");
+    block.style.setProperty("--quiz-opt-size",
+      Math.max(optFloor, o * 0.97).toFixed(1) + "px");
     block.style.setProperty("--quiz-opt-pad",
       (parseFloat(cs.getPropertyValue("--quiz-opt-pad")) * 0.97).toFixed(1) + "px");
     fitCardsText(block, quizRowCap(block));
@@ -808,12 +830,26 @@ function enforceShotShare(block) {
   return shrunk;
 }
 
-/* Подогнать тот блок, который сейчас на экране: содержимое меняется и без
-   смены блока (распределение ответов, пачка таблицы), и после каждой такой
-   правки масштаб надо пересчитать. */
+/* Подогнать тот блок, который сейчас на экране.
+
+   Ключевое правило: пока не сменился вопрос, размеры не пересчитываются.
+   Приём ответов → закрытие → показ ответа — это одна и та же вёрстка, и
+   зал не должен видеть, как карточки, вопрос и фото меняют размер на
+   каждой стадии. Подгонка запоминается по «отпечатку» кадра (вопрос,
+   варианты, фото, размер окна) и применяется повторно, если отпечаток
+   тот же.
+
+   force = true — пересчитать принудительно (смена вопроса, ресайз окна). */
 function fitQuizActive(force = false) {
   if (!quizLobby.hidden) fitQuiz(quizLobby, force);
   if (!quizPlay.hidden) {
+    const key = quizFitSignature(quizPlay);
+    if (!force && quizPlayLayout.key === key) {
+      /* Вопрос и содержимое те же — возвращаем сохранённые размеры.
+         Это и убирает «прыжки» между стадиями. */
+      applyQuizLayout(quizPlay, quizPlayLayout);
+      return;
+    }
     /* Порядок важен:
        1. кегль под высоту кадра (внутри он снимает фиксацию высоты ряда,
           чтобы она не мешала подбору);
@@ -840,7 +876,55 @@ function fitQuizActive(force = false) {
        первую строку вопроса. */
     const inner = quizPlay.querySelector(".quiz-fit");
     if (inner) fitQuizZoom(quizPlay, inner, quizRoomHeight(quizPlay));
+    /* Запоминаем результат: до смены вопроса он больше не пересчитается. */
+    quizPlayLayout.key = key;
+    quizPlayLayout.zoom = inner ? (inner.style.zoom || "1") : "1";
+    quizPlayLayout.vars = readQuizLayout(quizPlay);
   }
+}
+
+/* Сохранённая подгонка текущего вопроса. */
+const quizPlayLayout = { key: null, zoom: "1", vars: null, cards: null };
+
+/* Снять текущие размеры кадра: переменные блока, ширина карточек, высота
+   ряда и кегли отдельных карточек. */
+function readQuizLayout(block) {
+  const opts = block.querySelector(".quiz-opts");
+  const cards = opts
+    ? [...opts.children].filter((el) => el.classList.contains("quiz-s-opt"))
+    : [];
+  return {
+    q: block.style.getPropertyValue("--quiz-q-size"),
+    opt: block.style.getPropertyValue("--quiz-opt-size"),
+    pad: block.style.getPropertyValue("--quiz-opt-pad"),
+    cardW: opts ? opts.style.getPropertyValue("--quiz-card-w") : "",
+    rowH: opts ? opts.style.getPropertyValue("--quiz-opt-row-h") : "",
+    fonts: cards.map((c) => c.style.getPropertyValue("--quiz-card-font")),
+    heights: cards.map((c) => c.style.getPropertyValue("--quiz-card-h")),
+  };
+}
+
+/* Вернуть сохранённые размеры кадра. */
+function applyQuizLayout(block, layout) {
+  if (!layout || !layout.vars) return;
+  const v = layout.vars;
+  const opts = block.querySelector(".quiz-opts");
+  if (v.q) block.style.setProperty("--quiz-q-size", v.q);
+  if (v.opt) block.style.setProperty("--quiz-opt-size", v.opt);
+  if (v.pad) block.style.setProperty("--quiz-opt-pad", v.pad);
+  if (opts) {
+    if (v.cardW) opts.style.setProperty("--quiz-card-w", v.cardW);
+    if (v.rowH) opts.style.setProperty("--quiz-opt-row-h", v.rowH);
+  }
+  const cards = opts
+    ? [...opts.children].filter((el) => el.classList.contains("quiz-s-opt"))
+    : [];
+  cards.forEach((card, i) => {
+    if (v.fonts[i]) card.style.setProperty("--quiz-card-font", v.fonts[i]);
+    if (v.heights[i]) card.style.setProperty("--quiz-card-h", v.heights[i]);
+  });
+  const inner = block.querySelector(".quiz-fit");
+  if (inner) inner.style.zoom = layout.zoom === "1" ? "" : layout.zoom;
 }
 /* Холл игры: ведущий запустил квиз, а вопроса ещё нет. Зал читает название
    и сканирует QR, а ведущий в это время спокойно дописывает вопросы. */
@@ -977,20 +1061,7 @@ function renderQuiz() {
     } else {
       stopQuizTicker();
     }
-    quizOpts.replaceChildren(...q.options.map((text, i) => {
-      const el = document.createElement('div');
-      el.className = 'quiz-s-opt';
-      // номер перед вариантом: зал видит «3» на проекторе и нажимает
-      // третью кнопку у себя — сверять текст с экрана больше не нужно.
-      // В сам текст варианта номер не попадает: он живёт только в вёрстке.
-      // Невидимый «100%» держит место под проценты: без него при закрытии
-      // приёма колонка цифр появлялась, текст сжимался, и кадр «плыл».
-      el.innerHTML = `<span class="quiz-s-idx">${i + 1}</span>`
-        + `<span class="quiz-s-text">${escapeHTML(text)}</span>`
-        + `<span class="quiz-s-check" aria-hidden="true">✓</span>`
-        + `<span class="quiz-s-num is-blank">100%</span>`;
-      return el;
-    }));
+    paintOptions(q, f, false);
     quizCount.textContent = f.answered_total
       ? `Уже ответили: ${f.answered_total}` : 'Ждём ответы зала…';
     fitQuizActive();
@@ -1005,17 +1076,7 @@ function renderQuiz() {
   /* Заливку и цифру рисуем с нуля и «набираем» до итога: зал видит, как
      распределение растёт, а не получает готовые полосы щелчком. */
   const animate = shouldAnimateShares(f, q);
-  quizOpts.replaceChildren(...q.options.map((text, i) => {
-    const share = Math.round((counts[i] / total) * 100);
-    const el = document.createElement('div');
-    el.className = 'quiz-s-opt is-bar' + (f.correct === i ? ' is-right' : '');
-    el.innerHTML = `<span class="quiz-s-fill" style="width:${animate ? 0 : share}%"></span>
-      <span class="quiz-s-idx">${i + 1}</span>
-      <span class="quiz-s-text">${escapeHTML(text)}</span>
-      <span class="quiz-s-check" aria-hidden="true">✓</span>
-      <span class="quiz-s-num">${animate ? 0 : share}%</span>`;
-    return el;
-  }));
+  paintOptions(q, f, animate);
   quizCount.textContent = f.phase === 'closed'
     ? `Ответили: ${f.answered_total ?? total} · приём закрыт`
     : `Ответили: ${f.answered_total ?? total}`;
@@ -1036,6 +1097,70 @@ function renderQuiz() {
       if (num) num.textContent = `${share}%`;
     });
   }
+}
+
+/* Нарисовать варианты ответа.
+
+   Главное правило: карточки НЕ пересоздаются, пока не сменился вопрос.
+   Раньше каждый кадр (ответ гостя, закрытие приёма, показ ответа) строил
+   список заново, у инлайн-переменные сбрасывались, и подгонка считала всё
+   с нуля — из-за этого карточки, вопрос и фото меняли размер на каждой
+   стадии. Теперь разметка создаётся один раз, а стадия только переключает
+   уже существующие элементы: заливку, проценты, галочку, рамку.
+
+   У каждой карточки с самого начала есть все четыре ячейки: номер, текст,
+   галочка и проценты. В приёме ответов проценты и галочка скрыты, но место
+   под них занято, поэтому при закрытии приёма ширина текста не меняется. */
+function paintOptions(q, f, animate) {
+  const cards = [...quizOpts.children].filter((el) => el.classList.contains('quiz-s-opt'));
+  const same = cards.length === q.options.length
+    && cards.every((card, i) => {
+      const t = card.querySelector('.quiz-s-text');
+      return t && t.dataset.option === String(i) && t.textContent === q.options[i];
+    });
+
+  if (!same) {
+    quizOpts.replaceChildren(...q.options.map((text, i) => {
+      const el = document.createElement('div');
+      el.className = 'quiz-s-opt';
+      // номер перед вариантом: зал видит «3» на проекторе и нажимает
+      // третью кнопку у себя — сверять текст с экрана больше не нужно.
+      // В сам текст варианта номер не попадает: он живёт только в вёрстке.
+      el.innerHTML = `<span class="quiz-s-fill"></span>`
+        + `<span class="quiz-s-idx">${i + 1}</span>`
+        + `<span class="quiz-s-text" data-option="${i}">${escapeHTML(text)}</span>`
+        + `<span class="quiz-s-check" aria-hidden="true">✓</span>`
+        + `<span class="quiz-s-num is-blank">100%</span>`;
+      return el;
+    }));
+  }
+
+  const counts = f.counts || q.options.map(() => 0);
+  const total = counts.reduce((a, b) => a + b, 0) || 1;
+  const closed = f.phase === 'closed' || f.phase === 'reveal';
+  const list = [...quizOpts.children].filter((el) => el.classList.contains('quiz-s-opt'));
+
+  list.forEach((card, i) => {
+    const right = closed && f.correct === i;
+    card.classList.toggle('is-bar', closed);
+    card.classList.toggle('is-right', right);
+    const fill = card.querySelector('.quiz-s-fill');
+    const num = card.querySelector('.quiz-s-num');
+    if (!closed) {
+      if (fill) fill.style.width = '0%';
+      if (num) {
+        num.classList.add('is-blank');
+        num.textContent = '100%';
+      }
+      return;
+    }
+    const share = Math.round((counts[i] / total) * 100);
+    if (num) {
+      num.classList.remove('is-blank');
+      num.textContent = animate ? '0%' : `${share}%`;
+    }
+    if (fill) fill.style.width = animate ? '0%' : `${share}%`;
+  });
 }
 
 /* Анимация распределения: один раз на переход в «приём закрыт», а не на

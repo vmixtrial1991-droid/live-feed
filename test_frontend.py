@@ -731,7 +731,7 @@ check("screen.css: с картинкой ответы встают компак�
                     screen_css, re.S) is not None
       and re.search(r"\.quiz-s-text\s*\{[^}]*padding-right:\s*2\.2em",
                     screen_css, re.S) is None
-      and re.search(r"\.quiz-s-num\s*\{[^}]*min-width:\s*3\.2em",
+      and re.search(r"\.quiz-s-num\s*\{[^}]*min-width:\s*4\.5ch",
                     screen_css, re.S) is not None)
 check("screen.js: разорванное посреди слово ужимает кегль",
       "function brokenWords" in screen_js

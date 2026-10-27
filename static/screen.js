@@ -363,12 +363,26 @@ function buildQuizPlan(block) {
   const cfg = window.quizLayout.config;
   const scale = Math.min(vw / cfg.referenceWidth, vh / cfg.referenceHeight);
 
+  /* Безопасная область кадра. Но содержимое живёт не во всём кадре: сверху
+     шапка вопроса (номер и таймер) и внутренние отступы блока. Поэтому
+     реальная высота под кадр меньше, и план должен считать от неё, иначе
+     масштаб не срабатывает и подпись уезжает за край. */
+  const headEl = document.querySelector("#quizPlay .quiz-head");
+  const headH = headEl ? headEl.getBoundingClientRect().height : 0;
+  const screenEl = document.getElementById("quizPlay");
+  const scs = screenEl ? getComputedStyle(screenEl) : null;
+  const padY = scs
+    ? parseFloat(scs.paddingTop) + parseFloat(scs.paddingBottom) : 0;
+  const framePad = scs ? parseFloat(scs.rowGap) || 0 : 0;
+  const usableH = Math.max(0, vh - headH - padY - framePad);
+
   const plan = window.quizLayout.plan({
     question: qText,
     answers,
     image,
     viewport: { width: vw, height: vh },
     scale,
+    usableHeight: usableH,
   });
 
   const check = window.quizLayout.validate(plan);
@@ -401,6 +415,12 @@ function applyQuizPlan(block, stored) {
 
   /* Вопрос. */
   block.style.setProperty("--ql-q-size", `${plan.question.font.toFixed(1)}px`);
+  /* Ширина текстовой колонки в боковом режиме — из плана. */
+  if (plan.textColumnWidth) {
+    block.style.setProperty("--ql-text-w", `${Math.round(plan.textColumnWidth)}px`);
+  } else {
+    block.style.removeProperty("--ql-text-w");
+  }
 
   /* Ответы: сетка и карточки. Ширину колонки задаём числом из плана:
      иначе `1fr` растягивает колонки независимо, и в ряду из трёх карточек

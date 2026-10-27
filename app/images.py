@@ -78,6 +78,33 @@ def save_upload(
     return name
 
 
+def image_orientation(name: str, uploads_dir: str | Path) -> str:
+    """Ориентация сохранённого файла: wide, square или tall.
+
+    Нужна, чтобы выбрать лимиты текста для вопроса: горизонтальное фото
+    стоит сверху и делит с текстом высоту, вертикальное — слева и оставляет
+    справа всю ширину, поэтому лимиты у них разные.
+
+    Файл уже пережат при сохранении, так что чтение заголовка дешёвое.
+    При любой ошибке считаем фото горизонтальным: это самый строгий лимит
+    по ширине, и лучше не дать написать слишком длинный текст, чем
+    получить обрезанный кадр.
+    """
+    try:
+        with Image.open(Path(uploads_dir) / name) as img:
+            w, h = img.size
+    except (OSError, ValueError):
+        return "wide"
+    if not w or not h:
+        return "wide"
+    ratio = w / h
+    if ratio >= 1.2:
+        return "wide"
+    if ratio <= 0.85:
+        return "tall"
+    return "square"
+
+
 def delete_upload(name: str | None, uploads_dir: str | Path) -> None:
     if not name:
         return

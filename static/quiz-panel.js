@@ -57,12 +57,40 @@ let editingId = null;          // вопрос, который правят; nul
 let qImageFile = null;         // выбранный файл; ещё не загружен
 let qImageExisting = null;     // картинка вопроса, который правят
 let qImageRemove = false;      // просьба убрать прежнюю картинку
+/* Ориентация картинки в редакторе: wide / square / tall. От неё зависят
+   лимиты текста (горизонталь сверху — жёстче, квадрат и вертикаль
+   слева — мягче). null значит «ещё не знаем». */
+let imgOrientation = null;
 
-/* Пределы текста. С картинкой они жёстче: на экране фото занимает
-   половину кадра, и длинный текст рядом с ним не читается. Значения
-   повторяют серверные (MAX_QUESTION_LEN / WITH_IMAGE_*): сервер всё равно
-   проверит, а здесь они нужны, чтобы ведущий видел предел до отправки. */
-const LIMITS = { text: 200, option: 80, imgText: 90, imgOption: 40 };
+/* Пределы текста. Зависят от ориентации картинки, потому что от неё
+   зависит раскладка: горизонтальная стоит сверху и делит высоту,
+   квадратная и вертикальная — слева, оставляя справа всю ширину под
+   вопрос и ответы. Значения повторяют серверные (quiz_text_limits):
+   сервер всё равно проверит, а здесь они нужны, чтобы ведущий видел
+   предел до отправки. */
+const LIMITS = {
+  text: 90,
+  option: 45,
+  wideText: 65,
+  wideOption: 35,
+  sideText: 90,
+  sideOption: 35,
+};
+
+/* Лимиты для текущей картинки в редакторе.
+
+   Ориентацию знаем по натуральным размерам загруженного файла: квадрат
+   и вертикаль движок ставит слева, горизонталь — сверху. Пока файл не
+   прочитан (или его нет), берём лимиты без картинки — они самые щедрые,
+   а сервер всё равно пересчитает по фактической ориентации. */
+function currentLimits() {
+  const hasImg = qImageFile || (qImageExisting && !qImageRemove);
+  if (!hasImg) return { text: LIMITS.text, option: LIMITS.option };
+  if (imgOrientation === 'wide') {
+    return { text: LIMITS.wideText, option: LIMITS.wideOption };
+  }
+  return { text: LIMITS.sideText, option: LIMITS.sideOption };
+}
 
 /* ---------------- Стадия и кнопки ---------------- */
 const PHASE_LABEL = {
@@ -362,18 +390,20 @@ quizList.addEventListener('click', async (e) => {
    что всё равно не примут. */
 const MAX_OPTIONS = 4;
 
-/* Предел текста варианта зависит от того, есть ли у вопроса картинка:
-   рядом с фото сервер принимает только 40 знаков, и поле должно честно
+/* Предел текста варианта зависит от ориентации картинки: рядом с
+   горизонтальным фото сервер принимает 35 знаков, рядом с квадратным или
+   вертикальным — столько же, сколько без фото. Поле должно честно
    показывать тот же предел, а не давать набрать лишнее. */
 function optionLimit() {
-  return (qImageFile || (qImageExisting && !qImageRemove)) ? LIMITS.imgOption : LIMITS.option;
+  return currentLimits().option;
 }
 
 function syncOptionLimits() {
   const lim = optionLimit();
+  const short = lim < LIMITS.option;
   [...qOptions.querySelectorAll('.q-opt-input')].forEach((inp) => {
     inp.maxLength = lim;
-    inp.placeholder = lim === LIMITS.imgOption
+    inp.placeholder = short
       ? `Вариант ответа (до ${lim})` : 'Вариант ответа';
   });
 }
@@ -432,6 +462,20 @@ function openEditor(question) {
   clearImageChoice();
   qImageExisting = question && question.image ? question.image : null;
   if (qImageExisting) showImageState(qImageExisting);
+  /* Ориентацию известной картинки узнаём по натуральным размерам: от неё
+     зависят лимиты. До загрузки считаем неизвестной, и лимиты будут
+     мягкие — сервер всё равно пересчитает по файлу. */
+  imgOrientation = null;
+  if (qImageExisting) {
+    const probe = new Image();
+    probe.onload = () => {
+      const ratio = probe.naturalWidth / probe.naturalHeight;
+      imgOrientation = ratio >= 1.2 ? 'wide' : ratio <= 0.85 ? 'tall' : 'square';
+      syncOptionLimits();
+      applyTextLimit();
+    };
+    probe.src = ev(`/media/${encodeURIComponent(qImageExisting)}?w=320`);
+  }
   qOptions.replaceChildren();
   // новый вопрос начинается с одной строки: остальные добавляются кнопкой.
   // Пустой список выглядел бы как «вопрос без вариантов», хотя сервер
@@ -480,14 +524,22 @@ function hasImage() {
 
 function syncTextLimits() {
   const withImg = hasImage();
-  const textLim = withImg ? LIMITS.imgText : LIMITS.text;
-  qText.maxLength = textLim;
-  qTextMax.textContent = String(textLim);
+  const lim = currentLimits();
+  qText.maxLength = lim.text;
+  qTextMax.textContent = String(lim.text);
   qImageHint.hidden = !withImg;
   qImageName.textContent = qImageFile
     ? qImageFile.name
     : (qImageExisting && !qImageRemove ? qImageExisting : 'нет картинки — вопрос текстовый');
   syncOptionLimits();
+}
+
+/* Пересчитать только предел вопроса: вызывается, когда ориентация
+   картинки стала известна после загрузки. */
+function applyTextLimit() {
+  const lim = currentLimits();
+  qText.maxLength = lim.text;
+  qTextMax.textContent = String(lim.text);
 }
 
 qImage.addEventListener('change', () => {
@@ -499,12 +551,23 @@ qImage.addEventListener('change', () => {
   qImagePreview.hidden = false;
   qImageName.textContent = file.name;
   qImageDrop.hidden = false;
+  /* Ориентацию нового файла узнаём сразу: от неё зависят лимиты.
+     До загрузки — мягкие, после onload станут точными. */
+  imgOrientation = null;
   syncTextLimits();
+  const probe = new Image();
+  probe.onload = () => {
+    const ratio = probe.naturalWidth / probe.naturalHeight;
+    imgOrientation = ratio >= 1.2 ? 'wide' : ratio <= 0.85 ? 'tall' : 'square';
+    syncTextLimits();
+  };
+  probe.src = URL.createObjectURL(file);
 });
 
 qImageDrop.addEventListener('click', () => {
   qImageFile = null;
   qImageRemove = !!qImageExisting;   // прежнюю надо ещё и на сервере убрать
+  imgOrientation = null;
   qImage.value = '';
   qImagePreview.hidden = true;
   qImagePreview.removeAttribute('src');
@@ -552,9 +615,9 @@ qSave.addEventListener('click', async () => {
   }
   // предел длины проверяем здесь же: сервер откажет, но ведущему лучше
   // узнать до отправки, а не потерять набранное на ошибке
-  const textLim = hasImage() ? LIMITS.imgText : LIMITS.text;
+  const textLim = currentLimits().text;
   if (qText.value.trim().length > textLim) {
-    qStatus.textContent = `С картинкой вопрос — до ${textLim} знаков, `
+    qStatus.textContent = `Вопрос — до ${textLim} знаков, `
       + `сейчас ${qText.value.trim().length}`;
     qText.focus();
     return;
@@ -563,7 +626,7 @@ qSave.addEventListener('click', async () => {
   const longOpt = kept.find((r) => r.text.length > optLim);
   if (longOpt) {
     qStatus.textContent = `Вариант длиннее ${optLim} знаков не поместится `
-      + `рядом с картинкой — сократите`;
+      + `в карточке — сократите`;
     return;
   }
   const fields = {

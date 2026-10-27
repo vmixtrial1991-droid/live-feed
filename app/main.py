@@ -1170,12 +1170,12 @@ async def api_rotate_invite(slug: str, request: Request):
 # Квиз (5.0): панель ведущего — вопросы и управление стадиями
 # --------------------------------------------------------------------------
 # Лимиты свои, отдельные от ленты, и это не придирка: вопрос читают с
-# дальних рядов зала, поэтому текст длиннее 200 знаков уже теряется,
-# а четыре варианта — потолок: с пятью строка ответов на проекторе
+# дальних рядов зала, поэтому слишком длинный текст уже теряется,
+# а четыре варианта — потолок: с пятью строками ответов на проекторе
 # становятся мелкими, и зал перестаёт их различать.
+#
+# Значения зависят от картинки — см. quiz_text_limits ниже.
 
-MAX_QUESTION_LEN = 200
-MAX_OPTION_LEN = 80
 MIN_OPTIONS = 2
 MAX_OPTIONS = 4
 MIN_TIMER = 5
@@ -1183,11 +1183,52 @@ MAX_TIMER = 600
 # название игры на холле: оно стоит крупно над QR, длинное не влезает
 MAX_QUIZ_TITLE_LEN = 60
 
-# Вопрос с картинкой: картинка съедает половину кадра, и длинный текст
-# рядом с ней уже не читается. Поэтому в этом режиме лимиты жёстче, а на
-# экране ответы стоят в два столбца — так они видны целиком под картинкой.
-WITH_IMAGE_QUESTION_LEN = 90
-WITH_IMAGE_OPTION_LEN = 40
+# Вопрос с картинкой: картинка съедает часть кадра, и длинный текст рядом
+# с ней уже не читается. Лимиты зависят от ориентации снимка, потому что
+# от неё зависит раскладка:
+#
+#   горизонтальное — всегда сверху во всю ширину: оно хорошо использует
+#                    ширину экрана, но делит с текстом высоту;
+#   квадратное     — слева: справа остаётся место под вопрос и ответы,
+#                    а вертикального пространства больше, чем при «сверху»;
+#   вертикальное   — тоже слева: занимает меньше ширины и оставляет
+#                    справа всю ширину под текст.
+#
+# Ответы короткие во всех режимах: длинная строка в карточке рвётся на
+# 2-3 строки и вытесняет остальные варианты.
+#
+# Без картинки места больше всего — и вопросу, и ответам.
+NO_IMAGE_Q_LEN = 90
+NO_IMAGE_O_LEN = 45
+WIDE_IMAGE_Q_LEN = 65
+WIDE_IMAGE_O_LEN = 35
+SQUARE_IMAGE_Q_LEN = 90
+SQUARE_IMAGE_O_LEN = 35
+TALL_IMAGE_Q_LEN = 90
+TALL_IMAGE_O_LEN = 35
+
+# Значения по умолчанию для старых вызовов: без картинки.
+MAX_QUESTION_LEN = NO_IMAGE_Q_LEN
+MAX_OPTION_LEN = NO_IMAGE_O_LEN
+
+
+def quiz_text_limits(orientation: str | None) -> tuple[int, int]:
+    """Лимиты вопроса и ответа для ориентации картинки.
+
+    orientation: None — картинки нет, иначе "wide", "square" или "tall".
+    Возвращает (длина вопроса, длина ответа).
+
+    Квадрат и вертикаль стоят слева, поэтому справа остаётся полная ширина
+    под вопрос — им доступно столько же знаков, сколько вопросу без фото.
+    Горизонтальное фото занимает верх и делит высоту, поэтому лимит жёстче.
+    """
+    if not orientation:
+        return NO_IMAGE_Q_LEN, NO_IMAGE_O_LEN
+    if orientation == "wide":
+        return WIDE_IMAGE_Q_LEN, WIDE_IMAGE_O_LEN
+    if orientation == "square":
+        return SQUARE_IMAGE_Q_LEN, SQUARE_IMAGE_O_LEN
+    return TALL_IMAGE_Q_LEN, TALL_IMAGE_O_LEN
 
 # метка «поле не трогать» для формы правки: пустая строка слишком нужна
 # для «стереть», а выдуманное слово никто случайно не пришлёт
@@ -1313,8 +1354,9 @@ async def api_mod_quiz_add(
 ):
     """Новый вопрос встаёт в конец очереди; порядок правится кнопками.
 
-    Картинка необязательна. Если она есть, лимиты текста жёстче, а экран
-    ставит ответы в два столбца: фотография занимает заметную часть кадра.
+    Картинка необязательна. Лимиты текста зависят от её ориентации:
+    горизонтальная стоит сверху и делит высоту, квадратная и вертикальная —
+    слева, оставляя справа всю ширину под вопрос и ответы.
     Файл проходит тот же путь, что и фото ленты, — пережимается сервером
     до 1600 px по длинной стороне и сохраняется в uploads события.
     """
@@ -1322,8 +1364,9 @@ async def api_mod_quiz_add(
     _require_moderator(request, event)
 
     stored = await _quiz_image(event, image)
-    text_limit = WITH_IMAGE_QUESTION_LEN if stored else MAX_QUESTION_LEN
-    option_limit = WITH_IMAGE_OPTION_LEN if stored else MAX_OPTION_LEN
+    orientation = (images.image_orientation(stored, event.uploads_dir)
+                   if stored else None)
+    text_limit, option_limit = quiz_text_limits(orientation)
 
     text = " ".join((text or "").split())
     if not text:
@@ -1381,8 +1424,9 @@ async def api_mod_quiz_update(
     new_image = await _quiz_image(event, image)
     drop = str(drop_image).lower() in ("1", "true", "on", "yes")
     final_image = new_image if new_image else (None if drop else old.get("image"))
-    text_limit = WITH_IMAGE_QUESTION_LEN if final_image else MAX_QUESTION_LEN
-    option_limit = WITH_IMAGE_OPTION_LEN if final_image else MAX_OPTION_LEN
+    orientation = (images.image_orientation(final_image, event.uploads_dir)
+                   if final_image else None)
+    text_limit, option_limit = quiz_text_limits(orientation)
 
     fields: dict = {}
     if text.strip():

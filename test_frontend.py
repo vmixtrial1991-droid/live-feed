@@ -769,8 +769,10 @@ check("screen.js: пропорции фото определяются по на
       "function markShotShape" in screen_js and "on-shot-wide" in screen_js)
 check("screen.css: номер вопроса вынесен из сжимаемого блока",
       ".quiz-head" in screen_css and 'class="quiz-head"' in screen_html)
-check("quiz-panel.js: с картинкой лимиты текста жёстче",
-      "imgText: 90" in quiz_panel_js and "imgOption: 40" in quiz_panel_js)
+check("quiz-panel.js: лимиты текста зависят от ориентации картинки",
+      "wideText: 65" in quiz_panel_js and "wideOption: 35" in quiz_panel_js
+      and "sideText: 90" in quiz_panel_js and "sideOption: 35" in quiz_panel_js
+      and "function currentLimits" in quiz_panel_js)
 check("moderator.html: поле названия игры на вкладке «Квиз»",
       'id="quizTitleInput"' in mod_html and 'id="quizTitleSave"' in mod_html)
 check("quiz-panel.js: название игры уходит на сервер и подставляет событие подсказкой",

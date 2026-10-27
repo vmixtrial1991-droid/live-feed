@@ -954,23 +954,37 @@
   object-fit: contain;
 }
 
-/* Режим «фото слева»: две колонки, текст справа. */
+/* Режим «фото слева»: две колонки, текст справа.
+
+   Колонке текста даём фиксированную долю ширины из плана, а не «сколько
+   останется»: иначе группа ответов сжимается по самой длинной карточке,
+   и вся композиция прижимается к левому краю вместо центра. */
 .quiz-block[data-layout="v2"] .quiz-body[data-kind="image-side"] {
   flex-direction: row;
   align-items: center;
   justify-content: center;
   gap: clamp(1.4rem, 3.4vw, 2.6rem);
+  width: 100%;
+}
+.quiz-block[data-layout="v2"] .quiz-body[data-kind="image-side"] .quiz-shot {
+  flex: 0 0 auto;
 }
 .quiz-block[data-layout="v2"] .quiz-body[data-kind="image-side"] .quiz-ask {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
+  max-width: var(--ql-text-w, none);
   display: flex;
   flex-direction: column;
   gap: var(--ql-q-gap);
+  /* Содержимое правой колонки — по центру её ширины: вопрос и карточки
+     смотрятся единой группой. При выравнивании влево группа липла к
+     фото, а справа оставалась пустота. */
+  align-items: center;
 }
 .quiz-block[data-layout="v2"] .quiz-body[data-kind="image-side"] .quiz-q {
-  text-align: left;
+  text-align: center;
   margin: 0;
+  width: 100%;
 }
 
 /* Сетка ответов: колонки и число строк задаёт план. */
@@ -1031,12 +1045,18 @@
 /* Текст: середина, перенос по словам, не вылезает за колонку.
    padding-right не нужен: процент живёт в своей колонке сетки, и место
    под него уже вычтено при расчёте ширины текста. Лишний отступ съедал
-   24 px и заставлял слово «Квадрат» рваться. */
+   24 px и заставлял слово «Квадрат» рваться.
+
+   hyphens: none — переносы внутри слова не нужны: ширина текста уже
+   посчитана по самому длинному слову, и слово должно влезать целиком.
+   Если не влезает — виноват расчёт, и это должна ловить проверка, а не
+   рваный текст в кадре. */
 .quiz-block[data-layout="v2"] .quiz-s-text {
   position: relative;
   min-width: 0;
-  overflow-wrap: break-word;
-  hyphens: manual;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: none;
 }
 
 /* Процент: своя колонка справа, ширина зарезервирована всегда. */

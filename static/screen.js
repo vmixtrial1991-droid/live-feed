@@ -588,23 +588,36 @@ function fitQuizCardWidth(block) {
   /* Сколько места нужно каждой карточке. Меряем карточку вне сетки:
      внутри неё max-content считается циклически от той же ширины колонки,
      которую мы и определяем, и выходит «ровно впритык» — последняя буква
-     переносится, карточка получает мельче кегль, чем соседняя. */
+     переносится, карточка получает мельче кегль, чем соседняя.
+
+     Колонку текста тоже переводим в max-content: она задана как
+     minmax(0, 1fr), и в отрыве от сетки сжимается в ноль — текст
+     ломался по одной букве (карточка 214 px, строки по 6 px, весь кадр
+     уходил в масштаб 0.37). */
   const restore = [];
   for (const card of cards) {
     card.style.removeProperty("--quiz-card-font");
-    restore.push([card, card.style.position, card.style.width, card.style.maxWidth]);
+    const text = card.querySelector(".quiz-s-text");
+    restore.push([card, card.style.position, card.style.width,
+                  card.style.maxWidth, card.style.gridTemplateColumns,
+                  text ? text.style.width : null]);
     card.style.position = "absolute";
     card.style.width = "max-content";
     card.style.maxWidth = "none";
+    card.style.gridTemplateColumns = "auto max-content auto auto";
+    if (text) text.style.width = "max-content";
   }
   let needW = 0;
   for (const card of cards) {
     needW = Math.max(needW, card.getBoundingClientRect().width);
   }
-  for (const [card, pos, w, maxW] of restore) {
+  for (const [card, pos, w, maxW, cols, textW] of restore) {
     card.style.position = pos;
     card.style.width = w;
     card.style.maxWidth = maxW;
+    card.style.gridTemplateColumns = cols;
+    const text = card.querySelector(".quiz-s-text");
+    if (text && textW !== null) text.style.width = textW;
   }
   /* 4 px запаса: округление ширины вниз иначе переносит последнюю букву
      на вторую строку. */

@@ -253,6 +253,10 @@ def main() -> int:
 
         cdp.send("Page.enable")
         cdp.send("Runtime.enable")
+        # Кеш выключен: иначе после правки скриптов браузер отдаёт старые
+        # файлы, и замеры не соответствуют коду.
+        cdp.send("Network.enable")
+        cdp.send("Network.setCacheDisabled", cacheDisabled=True)
 
         # вопросы берём прямо из базы события: API ведущего требует входа,
         # а для прогона раскладок достаточно списка id

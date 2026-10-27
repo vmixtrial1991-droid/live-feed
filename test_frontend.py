@@ -197,6 +197,7 @@ screen_html = (STATIC / "screen.html").read_text(encoding="utf-8")
 for gone in ("screen-hud", "hudTitle", "hudCounter", "hudDot", "hud-item"):
     check(f"screen.html: нет {gone}", gone not in screen_html)
 screen_js = (STATIC / "screen.js").read_text(encoding="utf-8")
+layout_js = (STATIC / "quiz-layout.js").read_text(encoding="utf-8")
 for gone in ("hudTitle", "hudCounter", "hudDot", "updateHud"):
     check(f"screen.js: нет {gone}", gone not in screen_js)
 screen_css = (STATIC / "screen.css").read_text(encoding="utf-8")
@@ -731,30 +732,29 @@ check("screen.css: с картинкой ответы встают сеткой,
                     screen_css, re.S) is None
       and re.search(r"\.quiz-s-num\s*\{[^}]*min-width:\s*4\.5ch",
                     screen_css, re.S) is not None)
-check("screen.js: разорванное посреди слово ужимает кегль",
-      "brokenWordCount" in screen_js and "function fitCardText" in screen_js)
-check("screen.js: карточки делят ряд поровну",
-      "repeat(2, minmax(0, 1fr))" in screen_css
-      and "fitQuizCardWidth" not in screen_js)
-check("screen.css: кнопки ответов одной высоты",
-      "--quiz-opt-row-h" in screen_css)
-check("screen.css: широкая картинка отдаёт ответам меньше отступов",
-      re.search(r"\.quiz-body\.on-shot-wide \.quiz-s-opt\s*\{[^}]*padding-top:\s*calc\(var\(--quiz-opt-pad\) \* \.5\)",
+check("quiz-layout.js: текст меряется реальными метриками",
+      "quizTextMeasurer" in layout_js and "measureText" in layout_js)
+check("quiz-layout.js: все размеры в одном конфиге",
+      "quizLayoutConfig" in layout_js and "answerCard" in layout_js
+      and "typography" in layout_js and "safeArea" in layout_js)
+check("quiz-layout.js: компоновка выбирается перебором кандидатов",
+      "function chooseAnswersLayout" in layout_js
+      and '"grid2"' in layout_js and '"column"' in layout_js)
+check("quiz-layout.js: есть проверка безопасной области",
+      "function validateQuizPlan" in layout_js
+      and "safeArea" in layout_js)
+check("quiz-layout.js: место под проценты зарезервировано в конфиге",
+      "percentColumn" in layout_js and "textToPercentGap" in layout_js)
+check("screen.css: карточка v2 — три зоны сеткой",
+      re.search(r"\.quiz-block\[data-layout=\"v2\"\] \.quiz-s-opt\s*\{[^}]*grid-template-columns:\s*\n\s*var\(--ql-number-col\)\s*\n\s*minmax\(0, 1fr\)\s*\n\s*var\(--ql-percent-col\)",
                 screen_css, re.S) is not None)
-check("screen.css: номер ответа одного размера во всех карточках",
-      re.search(r"\.quiz-s-idx\s*\{[^}]*font-size:\s*calc\(var\(--quiz-opt-size\)",
-                screen_css, re.S) is not None)
-check("screen.css: доля горизонтального фото задана сверху",
-      re.search(r"\.quiz-body\.on-shot-wide\s*\{[^}]*var\(--quiz-shot-h",
-                screen_css, re.S) is not None
-      and "SHOT_SHARE_TARGET" in screen_js
-      and "function shotRowHeight" in screen_js)
-check("screen.css: боковая раскладка отдаёт ответам больше ширины",
-      re.search(r"\.quiz-body\.on-shot-square,\s*\.quiz-body\.on-shot-tall\s*\{[^}]*45fr\) minmax\(0,\s*55fr\)",
-                screen_css, re.S) is not None)
-check("screen.js: высота карточки делится из остатка, а не из числа строк",
-      "function fitCardsText" in screen_js
-      and "byDivision" in screen_js)
+check("screen.css: процент не позиционируется поверх текста",
+      "position: absolute" not in
+      re.search(r"\.quiz-block\[data-layout=\"v2\"\] \.quiz-s-num\s*\{([^}]*)\}",
+                screen_css, re.S).group(1))
+check("screen.js: использует движок раскладки",
+      "window.quizLayout.plan" in screen_js
+      and "function applyQuizPlan" in screen_js)
 check("screen.css: высота карточек одна и без картинки",
       re.search(r"\.quiz-opts > \.quiz-s-opt\s*\{[^}]*height:\s*var\(--quiz-card-h",
                 screen_css, re.S) is not None)
@@ -852,24 +852,22 @@ check("screen.html: содержимое слоя завёрнуто в масш
       screen_html.count('class="quiz-fit"') == 2,
       "длинный вопрос и таблица на десять человек иначе обрежутся краем экрана")
 check("screen.js: экран сжимает длинный вопрос, а не обрезает его",
-      "function fitQuiz(" in screen_js and "function fitQuizActive(" in screen_js
-      and "QUIZ_ZOOM_MIN" in screen_js)
+      "function fitQuizActive(" in screen_js
+      and "function applyQuizPlan(" in screen_js)
 check("screen.js: при смене размера окна игра пересчитывает масштаб",
       "fitQuizActive(true)" in screen_js,
       "на другом экране старый zoom уже не подходит")
-check("screen.js: масштаб считается по габариту содержимого",
-      "Math.min(...nodes.map" in screen_js and "Math.max(...nodes.map" in screen_js,
-      "сумма высот фото и ответов в боковой раскладке давала двойной размер")
+check("quiz-layout.js: масштаб считается от меньшей стороны окна",
+      "Math.min(vw / cfg.referenceWidth, vh / cfg.referenceHeight)" in screen_js,
+      "по большей стороне шрифт на 4:3 вырастал и не влезал")
 check("screen.css: у вопроса и ответов один размер и с фото, и без",
-      "--quiz-q-size" in screen_css and "--quiz-opt-h" in screen_css
+      "--ql-q-size" in screen_css and "--ql-answer-size" in screen_css
       and re.search(r"\.quiz-body\.has-image \.quiz-q\s*\{[^}]*font-size", screen_css, re.S) is None
-      and re.search(r"\.quiz-body:not\(\.has-image\) \.quiz-q\s*\{[^}]*font-size", screen_css, re.S) is None
-      and re.search(r"\.quiz-body\.has-image \.quiz-s-opt\s*\{[^}]*font-size", screen_css, re.S) is None
-      and re.search(r"\.quiz-body:not\(\.has-image\) \.quiz-s-opt\s*\{[^}]*font-size", screen_css, re.S) is None,
+      and re.search(r"\.quiz-body:not\(\.has-image\) \.quiz-q\s*\{[^}]*font-size", screen_css, re.S) is None,
       "вопрос с фото был 25 px, без фото 53 px — зал видел два разных экрана")
-check("screen.js: ровное попадание в кадр не считается переполнением",
-      "h <= roomH + 1" in screen_js,
-      "без допуска разница 0.004 px уводила масштаб в минимум 0.35")
+check("quiz-layout.js: допуск на округление при проверке высоты",
+      "<= availH + 1" in layout_js or "availH + 1" in layout_js,
+      "без допуска разница в доли пикселя считалась переполнением")
 
 check("screen.css: длинное слово не вылезает за край проектора",
       re.search(r"\.quiz-q\s*\{[^}]*overflow-wrap:\s*anywhere", screen_css, re.S) is not None)

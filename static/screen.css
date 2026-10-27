@@ -878,6 +878,228 @@
 }
 .quiz-s-row.is-hero .quiz-s-score { font-size: 1.15em; }
 
+/* ------------------------------------------------------------------ */
+/* Раскладка v2: размеры приходят из quiz-layout.js                     */
+/* ------------------------------------------------------------------ */
+
+/* Всё, что движок посчитал, приходит в CSS-переменные на #quizPlay.
+   Правила ниже используют их, поэтому JS не пишет инлайн-стили каждому
+   элементу — только один набор переменных на кадр.
+
+   Это позволяет держать геометрию в одном месте: поменял --ql-* и кадр
+   перестроился целиком. */
+
+.quiz-block[data-layout="v2"] {
+  --ql-q-size: 52px;
+  --ql-answer-size: 40px;
+  --ql-answer-number: 36px;
+  --ql-answer-percent: 36px;
+  --ql-number-col: 56px;
+  --ql-percent-col: 128px;
+  --ql-card-pad-x: 26px;
+  --ql-card-pad-y: 20px;
+  --ql-card-gap-x: 18px;
+  --ql-card-gap-y: 18px;
+  --ql-card-min-h: 84px;
+  --ql-q-gap: 34px;
+}
+
+/* Шапка: номер вопроса и таймер, не участвуют в подгонке. */
+.quiz-block[data-layout="v2"] .quiz-q {
+  font-size: var(--ql-q-size);
+  line-height: 1.18;
+  font-weight: 700;
+  max-width: 1600px;
+  margin: 0 auto;
+  text-align: center;
+  overflow-wrap: break-word;
+}
+
+/* Тело кадра — колонка: фото (если есть), вопрос, ответы, подпись.
+   Никакой сетки с растяжением: размеры уже посчитаны движком. */
+.quiz-block[data-layout="v2"] .quiz-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ql-q-gap);
+  width: 100%;
+  min-height: 0;
+}
+
+/* Подпись «ответили» — всегда внизу, своим размером. */
+.quiz-block[data-layout="v2"] .quiz-count {
+  font-size: clamp(.9rem, 2vw, 1.4rem);
+  margin: 0;
+}
+
+/* Фото: контейнер получает точные размеры из плана, картинка вписывается
+   с сохранением пропорций (object-fit: contain по ТЗ). */
+.quiz-block[data-layout="v2"] .quiz-shot {
+  flex: 0 0 auto;
+  width: var(--ql-shot-w, auto);
+  height: var(--ql-shot-h, auto);
+  min-width: var(--ql-shot-w, auto);
+  min-height: var(--ql-shot-h, auto);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.quiz-block[data-layout="v2"] .quiz-shot img {
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+}
+
+/* Режим «фото слева»: две колонки, текст справа. */
+.quiz-block[data-layout="v2"] .quiz-body[data-kind="image-side"] {
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(1.4rem, 3.4vw, 2.6rem);
+}
+.quiz-block[data-layout="v2"] .quiz-body[data-kind="image-side"] .quiz-ask {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ql-q-gap);
+}
+.quiz-block[data-layout="v2"] .quiz-body[data-kind="image-side"] .quiz-q {
+  text-align: left;
+  margin: 0;
+}
+
+/* Сетка ответов: колонки и число строк задаёт план. */
+.quiz-block[data-layout="v2"] .quiz-opts {
+  display: grid;
+  grid-template-columns: var(--ql-cols, 1fr);
+  gap: var(--ql-card-gap-y) var(--ql-card-gap-x);
+  width: var(--ql-group-w, 100%);
+  max-width: 100%;
+  margin: 0;
+  justify-content: center;
+  align-content: center;
+}
+
+/* Карточка: три зоны фиксированной ширины, текст в середине.
+   Ширины зон — из конфигурации, поэтому номер и процент не могут
+   наехать на текст и не двигаются при появлении результатов. */
+.quiz-block[data-layout="v2"] .quiz-s-opt {
+  display: grid;
+  grid-template-columns:
+    var(--ql-number-col)
+    minmax(0, 1fr)
+    var(--ql-percent-col);
+  align-items: center;
+  gap: 0 var(--ql-number-gap);
+  box-sizing: border-box;
+  width: 100%;
+  min-height: var(--ql-card-min-h);
+  height: var(--ql-card-h, auto);
+  padding: var(--ql-card-pad-y) var(--ql-card-pad-x);
+  font-size: var(--ql-answer-size);
+  line-height: 1.17;
+  text-align: left;
+  border: 1px solid rgba(137, 158, 210, .2);
+  border-radius: 16px;
+  background: linear-gradient(145deg, rgba(255, 255, 255, .035), transparent 72%), var(--bg-soft);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, .12), inset 0 1px rgba(255, 255, 255, .025);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Номер — кружок, размер от своего кегля. */
+.quiz-block[data-layout="v2"] .quiz-s-idx {
+  position: relative;
+  width: calc(var(--ql-answer-number) * 1.5);
+  height: calc(var(--ql-answer-number) * 1.5);
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(91, 140, 255, .3);
+  border-radius: 50%;
+  background: rgba(91, 140, 255, .11);
+  color: #a9c3ff;
+  font-size: var(--ql-answer-number);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Текст: середина, перенос по словам, не вылезает за колонку.
+   padding-right не нужен: процент живёт в своей колонке сетки, и место
+   под него уже вычтено при расчёте ширины текста. Лишний отступ съедал
+   24 px и заставлял слово «Квадрат» рваться. */
+.quiz-block[data-layout="v2"] .quiz-s-text {
+  position: relative;
+  min-width: 0;
+  overflow-wrap: break-word;
+  hyphens: manual;
+}
+
+/* Процент: своя колонка справа, ширина зарезервирована всегда. */
+.quiz-block[data-layout="v2"] .quiz-s-num {
+  position: relative;
+  width: var(--ql-percent-col);
+  text-align: right;
+  color: var(--muted);
+  opacity: .8;
+  font-size: var(--ql-answer-percent);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.quiz-block[data-layout="v2"] .quiz-s-num.is-blank { visibility: hidden; }
+
+/* Полоса результатов — отдельный слой под текстом, геометрию не меняет. */
+.quiz-block[data-layout="v2"] .quiz-s-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: rgba(91, 140, 255, .18);
+  transition: none;
+  will-change: width;
+}
+.quiz-block[data-layout="v2"] .quiz-s-opt.is-bar.is-right .quiz-s-fill {
+  background: rgba(51, 201, 138, .22);
+}
+
+/* Правильный ответ: зелёная рамка и галочка, размеры не меняются. */
+.quiz-block[data-layout="v2"] .quiz-s-opt.is-right {
+  border-color: var(--ok);
+  box-shadow: 0 0 0 1px rgba(51, 201, 138, .1), 0 8px 24px rgba(0, 0, 0, .16);
+  transition: border-color .5s ease, box-shadow .5s ease;
+}
+.quiz-block[data-layout="v2"] .quiz-s-check {
+  position: absolute;
+  right: var(--ql-percent-col);
+  top: 50%;
+  transform: translateY(-50%);
+  visibility: hidden;
+  color: var(--ok);
+  font-weight: 800;
+  font-size: var(--ql-answer-size);
+  pointer-events: none;
+}
+.quiz-block[data-layout="v2"] .quiz-s-opt.is-right .quiz-s-check {
+  visibility: visible;
+}
+
+/* Скрытая колонка галочки в разметке: место под неё держит отступ
+   процента, поэтому отдельной ячейки не нужно. */
+.quiz-block[data-layout="v2"] .quiz-s-check { display: none; }
+
+/* Старые правила «третий ответ по центру» и прочие из первой версии
+   раскладки не должны доставать до v2: там карточки всегда делят сетку
+   поровну. Перебиваем их тут, у нас выше специфичность. */
+.quiz-block[data-layout="v2"] .quiz-body.has-image .quiz-opts > .quiz-s-opt:last-child:nth-child(3),
+.quiz-block[data-layout="v2"] .quiz-opts > .quiz-s-opt:last-child:nth-child(3) {
+  grid-column: auto;
+  justify-self: stretch;
+  width: 100%;
+  max-width: 100%;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .slide { transition: opacity .2s linear; }
   .screen-stage::before { transition: none; }
@@ -887,4 +1109,6 @@
   .quiz-s-opt.is-right,
   .quiz-s-opt.is-right .quiz-s-idx,
   .quiz-s-opt.is-bar.is-right .quiz-s-fill { transition: none; }
+  .quiz-block[data-layout="v2"] .quiz-s-opt,
+  .quiz-block[data-layout="v2"] .quiz-s-opt .quiz-s-idx { transition: none; }
 }

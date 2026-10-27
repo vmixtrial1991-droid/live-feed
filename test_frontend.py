@@ -719,12 +719,10 @@ check("screen.html: тело вопроса умеет раскладывать�
       and 'id="quizShotImg"' in screen_html)
 check("screen.js: картинка ставится только когда она есть у вопроса",
       "function setQuizImage" in screen_js and "has-image" in screen_js)
-check("screen.css: с картинкой ответы встают компактной сеткой, а фото слева",
+check("screen.css: с картинкой ответы встают сеткой, а фото слева",
       re.search(r"\.quiz-body\.has-image\s*\{[^}]*grid-template-columns", screen_css, re.S)
       is not None
-      and "grid-template-columns: repeat(2, var(--quiz-card-w, minmax(0, max-content)))" in screen_css
-      and re.search(r"\.quiz-body\.has-image \.quiz-s-opt\s*\{[^}]*max-width:\s*100%",
-                    screen_css, re.S) is not None
+      and "grid-template-columns: repeat(2, minmax(0, 1fr))" in screen_css
       and re.search(r"\.quiz-body\.has-image \.quiz-s-opt\s*\{[^}]*grid-template-columns:\s*auto minmax\(0,\s*1fr\) auto auto",
                     screen_css, re.S) is not None
       and re.search(r"\.quiz-body\.on-shot-(square|tall) \.quiz-s-opt\s*\{[^}]*justify-self:\s*stretch",
@@ -734,10 +732,10 @@ check("screen.css: с картинкой ответы встают компак�
       and re.search(r"\.quiz-s-num\s*\{[^}]*min-width:\s*4\.5ch",
                     screen_css, re.S) is not None)
 check("screen.js: разорванное посреди слово ужимает кегль",
-      "function brokenWords" in screen_js
-      or "const brokenWords" in screen_js)
-check("screen.js: ширина карточек общая для всего вопроса",
-      "function fitQuizCardWidth" in screen_js)
+      "brokenWordCount" in screen_js and "function fitCardText" in screen_js)
+check("screen.js: карточки делят ряд поровну",
+      "repeat(2, minmax(0, 1fr))" in screen_css
+      and "fitQuizCardWidth" not in screen_js)
 check("screen.css: кнопки ответов одной высоты",
       "--quiz-opt-row-h" in screen_css)
 check("screen.css: широкая картинка отдаёт ответам меньше отступов",
@@ -746,11 +744,17 @@ check("screen.css: широкая картинка отдаёт ответам �
 check("screen.css: номер ответа одного размера во всех карточках",
       re.search(r"\.quiz-s-idx\s*\{[^}]*font-size:\s*calc\(var\(--quiz-opt-size\)",
                 screen_css, re.S) is not None)
-check("screen.css: горизонтальному фото гарантирована половина кадра",
-      re.search(r"\.quiz-body\.on-shot-wide\s*\{[^}]*minmax\(var\(--quiz-shot-min",
+check("screen.css: доля горизонтального фото задана сверху",
+      re.search(r"\.quiz-body\.on-shot-wide\s*\{[^}]*var\(--quiz-shot-h",
                 screen_css, re.S) is not None
-      and "function enforceShotShare" in screen_js
-      and "function quizRowCap" in screen_js)
+      and "SHOT_SHARE_TARGET" in screen_js
+      and "function shotRowHeight" in screen_js)
+check("screen.css: боковая раскладка отдаёт ответам больше ширины",
+      re.search(r"\.quiz-body\.on-shot-square,\s*\.quiz-body\.on-shot-tall\s*\{[^}]*45fr\) minmax\(0,\s*55fr\)",
+                screen_css, re.S) is not None)
+check("screen.js: высота карточки делится из остатка, а не из числа строк",
+      "function fitCardsText" in screen_js
+      and "byDivision" in screen_js)
 check("screen.css: высота карточек одна и без картинки",
       re.search(r"\.quiz-opts > \.quiz-s-opt\s*\{[^}]*height:\s*var\(--quiz-card-h",
                 screen_css, re.S) is not None)

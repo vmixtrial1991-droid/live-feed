@@ -879,6 +879,141 @@
 .quiz-s-row.is-hero .quiz-s-score { font-size: 1.15em; }
 
 /* ------------------------------------------------------------------ */
+/* Таблица лидеров: своя вёрстка, не связанная с вопросом              */
+/* ------------------------------------------------------------------ */
+
+/* Таблица живёт в том же блоке, что и вопрос, но это отдельная сцена:
+   у неё нет вариантов ответа, картинки и процентов. Разметка
+   `data-layout="board"` отключает правила вопроса, а размеры строк
+   приходят из fitBoard() числами — одна высота на все строки, поэтому
+   плашки не зависят от того, что было на экране до неё.
+
+   Ширина: одна колонка по центру, не шире 1200 px. Раскладка в две
+   колонки здесь была бы ошибкой: имена разной длины, и при сетке из
+   вопроса строки разъезжались по ширине. */
+.quiz-block[data-layout="board"] {
+  width: min(90vw, 1200px);
+  margin: 0 auto;
+  padding: 0;
+  gap: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.quiz-block[data-layout="board"] .quiz-q {
+  font-size: clamp(1.6rem, 3.4vw, 2.9rem);
+  line-height: 1.15;
+  font-weight: 700;
+  max-width: 100%;
+  margin: 0 auto .55em;
+  text-align: center;
+  text-wrap: balance;
+}
+
+/* Тело вопроса в таблице не участвует: показываем только строки. */
+.quiz-block[data-layout="board"] .quiz-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  width: 100%;
+  min-height: 0;
+}
+.quiz-block[data-layout="board"] .quiz-ask {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  width: 100%;
+  min-height: 0;
+}
+.quiz-block[data-layout="board"] .quiz-shot { display: none; }
+
+/* Список строк: одна колонка, общий зазор. */
+.quiz-block[data-layout="board"] .quiz-opts {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: var(--board-gap, 10px);
+  width: 100%;
+  height: auto;
+  margin: 0;
+}
+
+/* Строка лидера. Высота одна на всю таблицу, кегль — из той же цифры:
+   так десять человек помещаются и на 16:9, и на низком экране, а три
+   человека не растягиваются на полкадра. */
+.quiz-block[data-layout="board"] .quiz-s-row {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: .8em;
+  width: 100%;
+  height: var(--board-row-h, 64px);
+  min-height: 0;
+  padding: 0 1.1em;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg-soft);
+  font-size: var(--board-row-size, 26px);
+  line-height: 1.2;
+}
+
+/* Место под номер и очки зарезервировано всегда: строки не дёргаются,
+   когда у одного очков пять, а у другого один. */
+.quiz-block[data-layout="board"] .quiz-s-pos {
+  flex: none;
+  width: 2.2em;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.quiz-block[data-layout="board"] .quiz-s-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.quiz-block[data-layout="board"] .quiz-s-score {
+  flex: none;
+  min-width: 2.2em;
+  text-align: right;
+  font-weight: 800;
+  color: var(--ok);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Финальная таблица: победитель крупнее остальных, но в тех же рамках —
+   иначе первая строка вылезает из общего ритма и таблица едет. */
+.quiz-block[data-layout="board"] .quiz-s-row.is-hero {
+  border-color: var(--ok);
+  box-shadow: 0 0 0 1px rgba(51, 201, 138, .12), 0 10px 26px rgba(0, 0, 0, .18);
+}
+.quiz-block[data-layout="board"] .quiz-s-row.is-hero .quiz-s-score {
+  font-size: 1.15em;
+}
+
+/* Подпись внизу: сколько всего участников и какая страница. */
+.quiz-block[data-layout="board"] .quiz-count {
+  font-size: clamp(.85rem, 1.5vw, 1.05rem);
+  margin: .7em 0 0;
+  text-align: center;
+  color: var(--muted);
+}
+
+.quiz-block[data-layout="board"] .quiz-s-note {
+  color: var(--muted);
+  font-size: clamp(1rem, 2vw, 1.4rem);
+  text-align: center;
+  margin: 0;
+}
+
+/* ------------------------------------------------------------------ */
 /* Раскладка v3: размеры приходят из quiz-layout.js                    */
 /* ------------------------------------------------------------------ */
 

@@ -873,6 +873,15 @@ check("screen.html: содержимое слоя завёрнуто в масш
 check("screen.js: экран сжимает длинный вопрос, а не обрезает его",
       "function fitQuizActive(" in screen_js
       and "function applyQuizPlan(" in screen_js)
+check("screen.js: таблица лидеров не наследует вёрстку вопроса",
+      "function clearQuizPlan(" in screen_js
+      and "function fitBoard(" in screen_js
+      and 'dataset.layout === "board"' in screen_js,
+      "иначе ширина карточек, сетка и высота строк остаются от прошлого вопроса")
+check("screen.css: у таблицы лидеров своя разметка",
+      re.search(r'\.quiz-block\[data-layout="board"\]', screen_css) is not None
+      and "--board-row-h" in screen_css,
+      "высота строк приходит числом: десять лидеров должны влезать и на 1280×720")
 check("screen.js: при смене размера окна игра пересчитывает масштаб",
       "fitQuizActive(true)" in screen_js,
       "на другом экране старый zoom уже не подходит")

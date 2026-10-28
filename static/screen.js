@@ -324,6 +324,16 @@ function brokenWordCount(el) {
 function fitQuizActive(force = false) {
   if (quizPlay.hidden) return;
 
+  /* Таблица лидеров живёт по своим правилам: у неё нет вопроса с вариантами,
+     и план кадра к ней не применим. Если пустить её через движок, на блоке
+     остаются переменные предыдущего вопроса (ширина карточек, сетка, высота
+     строк), и таблица наследует его вёрстку — плашки то в две колонки, то
+     обрезаны сверху. */
+  if (quizPlay.dataset.layout === "board") {
+    fitBoard(quizPlay);
+    return;
+  }
+
   /* Разметка v3 включает свои поля и предел ширины. Её надо выставить до
      расчёта ключа: иначе первый кадр меряет блок ещё по старым правилам
      (1700 px вместо 1728), ключ выходит другим, и на каждой стадии кадр
@@ -375,6 +385,78 @@ function solveQuizPlan(block) {
     applyQuizPlan(block, { plan: final });
   }
   return best;
+}
+
+/* Снять с блока всё, что оставил план вопроса.
+
+   Переменные `--ql-*` висят на блоке, на группе ответов и на контейнере
+   снимка, а `zoom` — на .quiz-fit. Пока они там, любая другая сцена
+   (таблица лидеров) наследует чужую геометрию. */
+function clearQuizPlan(block) {
+  const strip = (el) => {
+    if (!el) return;
+    for (let i = el.style.length - 1; i >= 0; i--) {
+      const name = el.style.item(i);
+      if (name.startsWith("--ql-")) el.style.removeProperty(name);
+    }
+  };
+  strip(block);
+  const opts = block.querySelector(".quiz-opts");
+  if (opts) {
+    opts.removeAttribute("data-mode");
+    strip(opts);
+  }
+  const shot = block.querySelector(".quiz-shot");
+  if (shot) {
+    shot.hidden = true;
+    strip(shot);
+  }
+  const body = block.querySelector(".quiz-body");
+  if (body) body.removeAttribute("data-kind");
+  const inner = block.querySelector(".quiz-fit");
+  if (inner) inner.style.zoom = "";
+}
+
+/* Подогнать таблицу лидеров под кадр.
+
+   Своя арифметика, не связанная с вопросом: сколько строк пришло — столько
+   и раскладываем, высоту каждой делим от свободного места. Так десять
+   лидеров помещаются и на 16:9, и на 1280×720, и на 4:3, а не уезжают
+   за край на низком экране. */
+const BOARD_GAP = 10;
+
+function fitBoard(block) {
+  const fit = block.querySelector(".quiz-fit");
+  const opts = block.querySelector(".quiz-opts");
+  if (!fit || !opts) return;
+
+  block.style.removeProperty("--board-row-h");
+  block.style.removeProperty("--board-row-size");
+
+  const rows = opts.querySelectorAll(".quiz-s-row");
+  const n = Math.max(1, rows.length);
+  const title = block.querySelector(".quiz-q");
+  const caption = block.querySelector(".quiz-count");
+  const room = fit.clientHeight
+    || Math.round(window.innerHeight * 0.82);
+  const titleH = title ? title.getBoundingClientRect().height : 0;
+  const captionH = caption && caption.textContent
+    ? caption.getBoundingClientRect().height : 0;
+  const gaps = BOARD_GAP * Math.max(0, n - 1);
+  /* Поля сверху и снизу и зазор между заголовком, таблицей и подписью. */
+  const chrome = titleH + captionH + 48;
+  const avail = Math.max(0, room - chrome - gaps);
+
+  /* Строка не выше 96 px и не ниже 26: ниже зал не прочитает имя, выше
+     таблица из трёх человек выглядела бы тремя плашками на весь экран. */
+  const h = Math.max(26, Math.min(96, Math.floor(avail / n)));
+  /* Кегль от высоты строки: имя занимает примерно её половину, остальное
+     уходит на поля внутри плашки. */
+  const size = Math.max(12, Math.min(38, Math.round(h * 0.44)));
+
+  block.style.setProperty("--board-row-h", `${h}px`);
+  block.style.setProperty("--board-row-size", `${size}px`);
+  block.style.setProperty("--board-gap", `${BOARD_GAP}px`);
 }
 
 /* Насколько тело кадра выше отведённого места. 0 — влезло.
@@ -574,6 +656,11 @@ function renderBoard(f) {
   showQuizBlock(quizPlay, 'board');
   quizTag.textContent = 'Квиз';
   setQuizImage(null);
+  /* Таблица не наследует вёрстку вопроса: снимаем его переменные и ставим
+     собственную разметку. Иначе ширина карточек, сетка в две колонки и
+     высота строк остаются от только что показанного вопроса. */
+  clearQuizPlan(quizPlay);
+  quizPlay.dataset.layout = "board";
 
   // новый кадр прилетает с каждым ответом в зале, поэтому перематывать
   // страницу назад нельзя — при активном зале нулевая страница никогда бы

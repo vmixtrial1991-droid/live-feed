@@ -1021,51 +1021,106 @@ function slideGap() {
 }
 
 /**
- * Подгоняет кегль текста под отведённую высоту.
+ * Подгоняет кегль текста — бинарным поиском по наибольшему, что влезает.
  *
- * Короткий текст растёт до потолка TEXT_GROW_MAX, длинный ужимается,
- * но не ниже TEXT_MIN_PX. Считаем не «во сколько раз поместится», а меряем
- * по-настоящему: при увеличении шрифта текст начинает переноситься на
- * больше строк, и высота растёт быстрее кегля. Один расчёт по базовому
- * размеру давал текст, который вылезал за кадр, поэтому здесь цикл:
- * поставили кегль — измерили — поправили.
+ * Раньше здесь был цикл, который умножал кегль на отношение «бюджет /
+ * высота». На широкой колонке он раскачивался: текст на 96 px занимал
+ * 234 px, множитель давал 288 px, там переносов становилось больше и
+ * высота прыгала до 2811 px, коэффициент возвращал 91 px — и цикл так и
+ * ходил между двумя значениями, выходя на 91, то есть ниже стартового.
+ *
+ * Бинарный поиск устойчивее: высота текста не убывает с кеглем (даже когда
+ * меняется число строк), поэтому границу можно искать делением пополам.
+ *
+ * budget — сколько пикселей отведено под текст.
+ * measureTotal — необязательный замер всего блока слайда. Если он задан,
+ *   budget означает предел для всего блока (фото + текст + подпись + зазоры),
+ *   а кегль подбирается так, чтобы блок целиком влез в этот предел. Так
+ *   подгонка не может «не заметить», что фото уже заняло своё место.
  */
-function fitText(budget) {
+function fitText(budget, measureTotal) {
   textBox.style.fontSize = '';
   if (budget <= 0) return;
 
   const base = parseFloat(getComputedStyle(textBox).fontSize) || 32;
   const ceiling = base * TEXT_GROW_MAX;
-  let size = base;
-  // Последний кегль, который померился и поместился. Ставим именно его:
-  // размер, посчитанный в конце итерации, ещё не проверялся, а у границы
-  // цикл раскачивается между двумя соседними кеглями и на выходе оставлял
-  // как раз непроверенный — текст срезался снизу на 2-3 px.
+  const limit = budget - TEXT_SLACK_PX;
+
+  /* Потолок по самому длинному слову.
+
+     У текста стоит overflow-wrap: anywhere — это нужно, чтобы длинная
+     ссылка без пробелов не вылезла за кадр. Но при крупном кегле на узком
+     экране (3:4) то же правило рвало обычное слово: «использоваться»
+     делилось на «использоват» и «ься». Кегль не должен превышать ширину,
+     при которой самое длинное слово ещё помещается в строку целиком. */
+  const wordCap = longestWordCap();
+
+  let lo = TEXT_MIN_PX;
+  let hi = Math.min(ceiling, wordCap);
+
+  // Померить, влезает ли при таком кегле.
+  const fits = (px) => {
+    textBox.style.fontSize = `${px}px`;
+    if (measureTotal) return measureTotal() <= limit;
+    return textBox.scrollHeight <= limit;
+  };
+
   let best = null;
 
-  for (let i = 0; i < 8; i++) {
-    textBox.style.fontSize = `${Math.round(size)}px`;
-    // обрежется текст или нет — говорит scrollHeight, а не offsetHeight:
-    // глифы бывают выше строки, блок меряется по ней, и разница в 2-4 px
-    // как раз и съедала нижнюю строку
-    const sh = textBox.scrollHeight;
-    if (!sh) break;
-    if (sh + TEXT_SLACK_PX <= budget) {
-      best = Math.round(size);
-      if (size >= ceiling) break;
-      const next = Math.min(ceiling, size * ((budget - TEXT_SLACK_PX) / sh));
-      if (next - size < 1) break;     // упёрлись: расти больше некуда
-      size = next;
-    } else {
-      // коэффициент берём по scrollHeight, а не по offsetHeight: при блоке
-      // 240 px и глифах 244 px отношение по offsetHeight давало единицу,
-      // цикл решал, что ужимать нечего, и выходил с обрезанным текстом
-      const next = Math.max(TEXT_MIN_PX, size * ((budget - TEXT_SLACK_PX) / sh));
-      if (next >= size) break;        // упёрлись в минимальный кегль
-      size = next;
+  if (fits(hi)) {
+    best = hi;                       // влезает даже потолок
+  } else {
+    for (let i = 0; i < 14 && hi - lo > 0.5; i++) {
+      const mid = (lo + hi) / 2;
+      if (fits(mid)) {
+        best = mid;
+        lo = mid;
+      } else {
+        hi = mid;
+      }
     }
   }
-  textBox.style.fontSize = `${best ?? Math.round(size)}px`;
+  // Не влез даже минимум — ставим минимум: текст обрежется по overflow:
+  // hidden, но кадр не поедет и подпись останется на месте.
+  if (best === null) best = TEXT_MIN_PX;
+
+  textBox.style.fontSize = `${Math.max(TEXT_MIN_PX, Math.floor(best))}px`;
+}
+
+/** Наибольший кегль, при котором самое длинное слово влезает в строку. */
+function longestWordCap() {
+  const text = (textBox.textContent || '').trim();
+  if (!text) return Infinity;
+  const words = text.split(/\s+/).filter(Boolean);
+  if (words.length < 2) return Infinity;   // одно слово — рвать нечего
+
+  const boxW = textBox.clientWidth
+    || slideInner.getBoundingClientRect().width
+    || safeArea().w;
+  if (!boxW) return Infinity;
+
+  // Меряем на эталонном кегле и пересчитываем: ширина слова линейна кеглю.
+  const probe = 100;
+  const cs = getComputedStyle(textBox);
+  const ctx = measureCtx();
+  if (!ctx || !cs.fontFamily) return Infinity;
+  ctx.font = `${cs.fontWeight} ${probe}px ${cs.fontFamily}`;
+
+  let widest = 0;
+  for (const w of words) {
+    const width = ctx.measureText(w).width;
+    if (width > widest) widest = width;
+  }
+  if (!widest) return Infinity;
+
+  // 0.97 — запас на letter-spacing и разницу метрик canvas с браузером.
+  return (boxW * 0.97) / widest * probe;
+}
+
+let measureCanvas = null;
+function measureCtx() {
+  if (!measureCanvas) measureCanvas = document.createElement('canvas');
+  return measureCanvas.getContext('2d');
 }
 /** Подгоняет фото, текст и подпись под текущий размер окна. */
 function layoutSlide() {
@@ -1086,18 +1141,72 @@ function layoutSlide() {
   // и без: кадр от слайда к слайду не прыгает
   const authorH = fitAuthor(innerH * AUTHOR_SHARE);
 
+  /* Сколько места реально занято. Меряем от верхней границы безопасной
+     зоны до самой низкой точки содержимого: .slide-inner и .slide
+     растянуты по кадру (height: 100%), поэтому их собственные rect-ы
+     ничего не говорят о том, сколько занял текст. Сумма высот частей
+     тоже не сходится — зазоры и округление line-height давали до 15 px
+     разницы, и этого хватало, чтобы подпись ушла за сэйфзону.
+
+     Мерка одна на все случаи (фото с текстом, только текст, только фото) —
+     чтобы не было двух расходящихся расчетов. */
+  const safeTop = stage.getBoundingClientRect().top
+    + parseFloat(getComputedStyle(stage).paddingTop);
+  const contentHeight = () => {
+    let bottom = safeTop;
+    for (const el of [photoBox, textBox, authorBox]) {
+      if (el.hidden) continue;
+      const r = el.getBoundingClientRect();
+      if (r.height > 0 && r.bottom > bottom) bottom = r.bottom;
+    }
+    return bottom - safeTop;
+  };
+
   if (!hasPhoto || !hasText) {
-    // только фото или только текст: как было — одна часть забирает всё
+    // только фото или только текст: одна часть забирает всё остальное
     const rest = innerH - authorH - gapsTotal;
-    fitText(rest);
+    if (hasText) {
+      fitText(area.h, contentHeight);
+      shrinkToFit(area.h, contentHeight);
+    }
     if (hasPhoto) setPhoto(img, area, rest);
     return;
   }
 
-  // фото с текстом: ровно своя доля высоты, независимо от длины текста
+  /* Фото с текстом.
+
+     Раньше кегль подбирался под «остаток» арифметикой: innerH минус доля
+     фото минус подпись минус зазоры. На деле блок складывается из реальных
+     высот, и после подстановки фото сумма могла оказаться больше кадра:
+     короткий текст раздувался до 196 px, две строки занимали 478 px при
+     остатке 313, и подпись уезжала за нижний край на 231 px.
+
+     Поэтому сначала ставим фото, а потом подбираем кегль по фактической
+     высоте всего содержимого. */
   const photoH = innerH * PHOTO_SHARE;
-  fitText(Math.max(0, innerH - photoH - authorH - gapsTotal));
   setPhoto(img, area, photoH);
+
+  fitText(area.h, contentHeight);
+  shrinkToFit(area.h, contentHeight);
+}
+
+/**
+ * Поджимает кегль по одному пикселю, пока содержимое не влезет в limit.
+ *
+ * Бинарный поиск останавливается на полупиксельной точности, а высота
+ * строки зависит от числа строк: на границе переноса соседние кегли дают
+ * разный результат, и перелёт в 2–7 px оставался. Пара шагов вниз дешевле,
+ * чем подпись за краем кадра.
+ */
+function shrinkToFit(limit, measure) {
+  let guard = 0;
+  while (guard < 40 && measure() > limit) {
+    const cur = parseFloat(getComputedStyle(textBox).fontSize) || TEXT_MIN_PX;
+    const next = Math.max(TEXT_MIN_PX, Math.floor(cur) - 1);
+    if (next >= cur) break;
+    textBox.style.fontSize = `${next}px`;
+    guard += 1;
+  }
 }
 
 /** Ставит фото заданной высоты, сохраняя пропорции и границы кадра. */

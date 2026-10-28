@@ -217,6 +217,12 @@ function setQuizLayer(on) {
     stopQuizTicker();
     stopBoardScroll();
     shownBlock = null;
+    /* Слой погас — сцены нет; разметку таблицы и её размеры снимаем, чтобы
+       следующий запуск начался с чистого блока. */
+    clearBoardFit(quizPlay);
+    if (quizPlay.dataset.layout === "board") {
+      quizPlay.removeAttribute("data-layout");
+    }
     // слой погас — фото вопроса больше не нужно: следующий вопрос может
     // быть без картинки, и старый кадр не должен мигнуть
     setQuizImage(null);
@@ -457,6 +463,13 @@ function fitBoard(block) {
   block.style.setProperty("--board-row-h", `${h}px`);
   block.style.setProperty("--board-row-size", `${size}px`);
   block.style.setProperty("--board-gap", `${BOARD_GAP}px`);
+}
+
+/* Снять размеры, которые поставила таблица лидеров. */
+function clearBoardFit(block) {
+  block.style.removeProperty("--board-row-h");
+  block.style.removeProperty("--board-row-size");
+  block.style.removeProperty("--board-gap");
 }
 
 /* Насколько тело кадра выше отведённого места. 0 — влезло.
@@ -756,6 +769,14 @@ function renderQuiz() {
   }
   setQuizLayer(true);
   stopBoardScroll();
+  /* После таблицы лидеров на блоке остаются её разметка и размеры строк.
+     Вернулись к вопросу — снимаем их, иначе `fitQuizActive` решит, что
+     сцена всё ещё таблица, и вопрос останется без подгонки: мелкий текст,
+     чужая сетка, обрезанное содержимое. */
+  if (quizPlay.dataset.layout === "board") {
+    clearBoardFit(quizPlay);
+    quizPlay.removeAttribute("data-layout");
+  }
   showQuizBlock(quizPlay, `q${q.id}`);
   quizTag.textContent = f.questions_total
     ? `Вопрос ${f.question_no} из ${f.questions_total}` : `Вопрос ${f.question_no}`;

@@ -120,8 +120,10 @@ check("A, 4 ответа → сетка 2×2",
   plan(SHORT_Q, LONG_A, null).answers.cols === 2);
 check("B, 2 ответа → один ряд",
   plan(SHORT_Q, SHORT_A, IMAGES.wide).answers.cols === 2);
-check("B, 3 ответа → колонка",
-  plan(SHORT_Q, ["Да", "Нет", "Не знаю"], IMAGES.wide).answers.cols === 1);
+check("B, 3 ответа → два сверху, один по центру снизу",
+  plan(SHORT_Q, ["Да", "Нет", "Не знаю"], IMAGES.wide).answers.cols === 2
+  && plan(SHORT_Q, ["Да", "Нет", "Не знаю"], IMAGES.wide).answers.mode
+     === "grid2plus1");
 check("C, 4 ответа → колонка",
   plan(SHORT_Q, LONG_A, IMAGES.tall).answers.cols === 1);
 

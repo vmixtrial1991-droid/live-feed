@@ -1014,10 +1014,14 @@
 .quiz-block[data-layout="v3"] .quiz-body[data-kind="image-side"] {
   flex-direction: row;
   align-items: center;
+  /* Пара «снимок + текст» стоит по центру кадра. Композиция внутри пары —
+     слева направо от снимка, без растягивания: иначе при короткой
+     текстовой колонке между снимком и текстом оставалась пустота, и
+     казалось, что «всё сместилось влево». */
   justify-content: center;
   /* Зазор между фото и текстом — из плана, в пикселях экрана. Жёсткие
-     64px здесь расходились с расчётом на любом масштабе кроме 1:0 при
-     k < 1 группа вылезала за область контента. */
+     64px здесь расходились с расчётом при k < 1, и группа вылезала за
+     область контента. */
   gap: var(--ql-side-gap, 64px);
 }
 .quiz-block[data-layout="v3"] .quiz-body[data-kind="image-side"] .quiz-ask {
@@ -1039,20 +1043,26 @@
    Раньше здесь срабатывало старое правило первой раскладки
    `.quiz-body.has-image .quiz-opts { align-self: center }`, и группа из трёх
    карточек вставала на 280 px правее вопроса. */
+/* Ответы в схеме C. Карточки меряются по тексту, поэтому группа может быть
+   уже колонки: её ставим по центру, а не к левому краю. Так «всё сместилось
+   влево» не возникает: композиция стоит по центру правой половины, а
+   вопрос — над ней по центру. */
 .quiz-block[data-layout="v3"] .quiz-body[data-kind="image-side"] .quiz-opts {
-  align-self: stretch;
-  justify-content: start;
-  justify-items: start;
-  /* Группа растянута на всю правую колонку: иначе карточки, сжатые по
-     тексту, липли к левому краю, а справа оставалась пустота — кадр читался
-     как «всё сместилось влево». Карточка внутри получает ширину колонки,
-     текст в ней остаётся слева. */
-  width: 100%;
-  justify-self: stretch;
+  align-self: center;
+  justify-content: center;
+  justify-items: stretch;
+  width: var(--ql-group-w, auto);
+  max-width: 100%;
 }
-.quiz-block[data-layout="v3"] .quiz-body[data-kind="image-side"] .quiz-s-opt {
+/* Вопрос и подпись в C тоже по центру своей колонки: группа карточек уже
+   колонки, и вопрос, растянутый на всю ширину, «съезжал» относительно неё. */
+.quiz-block[data-layout="v3"] .quiz-body[data-kind="image-side"] .quiz-q {
+  text-align: center;
   width: 100%;
-  justify-self: stretch;
+}
+.quiz-block[data-layout="v3"] .quiz-body[data-kind="image-side"] .quiz-count {
+  text-align: center;
+  width: 100%;
 }
 .quiz-block[data-layout="v3"] .quiz-body[data-kind="image-side"] .quiz-count {
   text-align: left;
@@ -1152,6 +1162,12 @@
   position: relative;
   min-width: 0;
   text-wrap: pretty;
+  /* Длинный адрес без пробелов браузер сам рвёт по «/» и «?». Ставим то же
+     правило явно, иначе поведение зависит от версии браузера, а расчёт
+     сделан по этим точкам переноса. */
+  overflow-wrap: break-word;
+  word-break: normal;
+  hyphens: none;
 }
 
 /* Процент: своя колонка справа, ширина зарезервирована всегда.
@@ -1211,7 +1227,12 @@
    встают «два сверху, один по центру снизу» — это задаёт
    `.quiz-opts[data-mode="grid2plus1"]` выше, и перебивать его сбросом
    `grid-column: auto` нельзя: карточка съезжала в левую колонку. */
-.quiz-block[data-layout="v3"] .quiz-body.has-image .quiz-opts > .quiz-s-opt:last-child:nth-child(3) {
+/* Третья карточка в схеме с картинкой. Раньше здесь стоял сброс
+   `grid-column: auto` и `width: 100%`: он доставал и до v3, перебивая
+   правило «2 + 1», и третья карточка съезжала в левую колонку, растянутая
+   на всю ширину. Теперь режим группы целиком задаёт `data-mode` на
+   .quiz-opts, и перебивать его нечем. */
+.quiz-block[data-layout="v3"] .quiz-body.has-image .quiz-opts[data-mode="column"] > .quiz-s-opt:last-child:nth-child(3) {
   grid-column: auto;
   justify-self: stretch;
   width: 100%;

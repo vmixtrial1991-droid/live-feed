@@ -221,8 +221,61 @@ const quizTextMeasurer = (() => {
     return lines;
   }
 
+  /* Сколько строк займёт текст при данной ширине.
+
+     Считаем так же, как переносит браузер: не только по пробелам, но и по
+     точкам переноса внутри длинных слов. Иначе ответ-ссылка
+     («https://example.com/e/…/quiz?t=…») занимал на экране три строки, а
+     карточка была посчитана на одну — текст вылезал за подложку. */
   function lineCount(text, maxWidth, px, weight) {
-    return wrap(text, maxWidth, px, weight).length;
+    return wrapSmart(text, maxWidth, px, weight).length;
+  }
+
+  /* Точки переноса из UAX #14, которые браузер использует чаще всего:
+     после «/», «-», «?», «&», «=», «_» и точки. */
+  function wrapSmart(text, maxWidth, px, weight) {
+    ctx.font = font(px, weight);
+    const words = String(text || "").split(/\s+/).filter(Boolean);
+    if (!words.length) return [""];
+    const lines = [];
+    let line = "";
+    for (const word of words) {
+      const candidate = line ? line + " " + word : word;
+      if (ctx.measureText(candidate).width <= maxWidth) {
+        line = candidate;
+        continue;
+      }
+      if (line) lines.push(line);
+      if (ctx.measureText(word).width <= maxWidth) {
+        line = word;
+        continue;
+      }
+      /* Слово шире строки — режем в тех же местах, где режет браузер. */
+      const pieces = word.split(/(?<=[/\-?&=._])/);
+      let rest = "";
+      for (const piece of pieces) {
+        const next = rest + piece;
+        if (ctx.measureText(next).width <= maxWidth) {
+          rest = next;
+        } else {
+          if (rest) lines.push(rest);
+          /* Кусок сам шире строки — браузер порвёт его внутри. Чтобы
+             расчёт не занижал число строк, считаем такой кусок за столько
+             строк, сколько он займёт по ширине, и начинаем новую с него. */
+          const w = ctx.measureText(piece).width;
+          if (w > maxWidth) {
+            const n = Math.ceil(w / maxWidth);
+            for (let k = 1; k < n; k++) lines.push(piece);
+            rest = piece;
+          } else {
+            rest = piece;
+          }
+        }
+      }
+      line = rest;
+    }
+    if (line) lines.push(line);
+    return lines.length ? lines : [""];
   }
 
   /* Самое длинное слово: если оно шире строки, текст всё равно разорвётся. */
@@ -325,11 +378,29 @@ function chooseLayout(image, frame) {
    Для трёх ответов в схеме A выбран «2 + 1»: столбик из трёх занимал всю
    высоту и не давал места ни шрифту, ни карточкам, а две карточки в ряд и
    одна по центру под ними читаются так же, но позволяют всё увеличить. */
-function chooseAnswersLayout(layout, count) {
+function chooseAnswersLayout(layout, count, texts, fontPx, maxGroupW) {
   if (layout === "C") return { mode: "column", cols: 1 };
   if (layout === "B" && count === 2) return { mode: "row", cols: 2 };
   if (count === 4) return { mode: "grid2", cols: 2 };
-  if (count === 3 && layout === "A") return { mode: "grid2plus1", cols: 2 };
+  /* Три ответа «2 + 1» во всех схемах, кроме C: в B это ещё и освобождает
+     высоту снимку — колонка из трёх карточек отнимала у него больше.
+
+     Но если в ответе есть слово шире половины группы (длинный адрес без
+     пробелов), в две колонки оно не влезет и порвётся посреди — тогда
+     колонка: карточка вдвое шире, и слово остаётся целым. */
+  if (count === 3) {
+    if (texts && fontPx && maxGroupW) {
+      const cols = 2;
+      const gap = quizLayoutConfig.layout.cardGapGrid;
+      const cardW = (maxGroupW - gap * (cols - 1)) / cols;
+      const textW = cardW - cardOverhead(fontPx);
+      const weight = quizLayoutConfig.typography.answer.weight;
+      const tooWide = texts.some((t) =>
+        quizTextMeasurer.longestWord(t, fontPx, weight) > textW);
+      if (tooWide) return { mode: "column", cols: 1 };
+    }
+    return { mode: "grid2plus1", cols: 2 };
+  }
   return { mode: "column", cols: 1 };
 }
 
@@ -429,7 +500,13 @@ function measureCards(texts, fontPx, maxGroupW, cols, opts = {}) {
      cardW → зона текста, а строки считаются по этой зоне. Раньше он
      вычитался из ширины при подсчёте строк, то есть съедался самим
      расчётом и ни от чего не защищал. */
-  const wrapSafety = Math.max(2, fontPx * 0.06);
+  /* Запас на перенос. Браузер меряет строку своими метриками (кернинг,
+     хинтинг, округление в целые пиксели), и на узкой карточке разница с
+     canvas доходит до нескольких пикселей — текст уходил на вторую строку
+     уже после расчёта. 6% мало при мелком кегле: берём не меньше 3px и 7%,
+     а на узких зонах — больше. */
+  const narrow = Math.min(1, (maxCardW - overhead) / (12 * fontPx));
+  const wrapSafety = Math.max(3, fontPx * (0.07 + 0.05 * (1 - narrow)));
   const wantTextW = Math.max(widestLine + wrapSafety, cfg.minTextEm * fontPx);
   /* В схеме C карточка всегда занимает всю правую колонку. По ТЗ (§5.1)
      maxCardW для неё — именно ширина колонки, и сжимать карточку по тексту
@@ -437,20 +514,31 @@ function measureCards(texts, fontPx, maxGroupW, cols, opts = {}) {
      снимку, а справа оставалась пустота — «всё сместилось влево».
      В A и B сжатие по тексту остаётся: там короткое «Да» не должно
      растягиваться на пол-экрана. */
-  const cardW = opts.fillWidth
-    ? maxCardW
-    : Math.min(maxCardW, overhead + wantTextW);
-  const innerTextW = Math.max(1, cardW - overhead);
+  let cardW = Math.min(maxCardW, overhead + wantTextW);
   const maxTextW = Math.max(0, maxCardW - overhead);
 
-  const lines = texts.map((t) => quizTextMeasurer.lineCount(
+  /* Строки считаем по той ширине, которую карточка получит на самом деле.
+     Раньше карточка мерилась «по самому длинному слову + запас», а строки
+     считались по этой же ширине — но браузер переносит по всей строке, и
+     текст занимал больше строк, чем в расчёте. На узком кадре (1280×720)
+     это резало вторую строку карточки. Поэтому: считаем строки, и если их
+     вышло больше одной — расширяем карточку до предела, чтобы текст
+     влез. */
+  let innerTextW = Math.max(1, cardW - overhead);
+  let lines = texts.map((t) => quizTextMeasurer.lineCount(
     t, innerTextW, fontPx, typo.weight));
+  if (Math.max(...lines) > 1 && cardW < maxCardW) {
+    cardW = maxCardW;
+    innerTextW = Math.max(1, cardW - overhead);
+    lines = texts.map((t) => quizTextMeasurer.lineCount(
+      t, innerTextW, fontPx, typo.weight));
+  }
   /* Высота карточки: строки текста, вертикальные паддинги и рамка 2px.
      Рамка входит в border-box, и без неё расчёт был на 2px ниже каждой
      карточки — на трёх ответах это давало 5px переполнения кадра. */
   const heights = lines.map((n) => Math.max(
     cfg.minHeightEm * fontPx,
-    n * fontPx * typo.lineHeight + cfg.paddingY * 2 * fontPx + 2));
+    n * fontPx * typo.lineHeight + cfg.paddingY * 2 * fontPx + 2 + fontPx * 0.3));
 
   return {
     cardW, textW: innerTextW, lines, heights, overhead, maxCardW,
@@ -527,7 +615,9 @@ function evaluateFrame(input, fonts, frame, fill = 0) {
   const layout = chooseLayout(input.image, frame);
   const answers = (input.answers || []).filter((t) => String(t || "").trim());
   const count = answers.length || 1;
-  const arrangement = chooseAnswersLayout(layout, count);
+  const arrangement = chooseAnswersLayout(layout, count, answers, fonts.a,
+    layout === "A" ? Math.min(frame.Cw, frame.Wv * L.answersMaxWidth)
+                   : frame.Cw);
   const problems = [];
   /* Мягкие замечания — то, что мешает читать, но не выводит кадр за
      область. При подгонке они считаются ошибкой (значит, кегль велик),
@@ -564,6 +654,22 @@ function evaluateFrame(input, fonts, frame, fill = 0) {
     qWidth = Math.max(frame.Cw * 0.35,
       frame.Cw - imageBox.width - L.sideGap);
     answersMaxW = qWidth;
+  }
+
+  /* Схема C: колонка по ширине группы ответов, а не по остатку области.
+     Карточка меряется по тексту, и при коротких ответах группа выходила
+     вдвое уже колонки — справа оставалась пустота, а композиция
+     прижималась к снимку. */
+  let columnW = qWidth;
+  if (layout === "C") {
+    const probe = measureCards(answers, fonts.a, qWidth, arrangement.cols);
+    const wantW = Math.min(qWidth,
+      Math.max(probe.cardW * arrangement.cols
+        + L.cardGapGrid * (arrangement.cols - 1),
+      quizLayoutConfig.answerCard.minTextEm * fonts.a * 2));
+    columnW = Math.max(frame.Cw * 0.35, Math.min(qWidth, wantW));
+    qWidth = columnW;
+    answersMaxW = columnW;
   }
 
   /* Вопрос. */
@@ -606,8 +712,11 @@ function evaluateFrame(input, fonts, frame, fill = 0) {
   }
 
   /* Ответы. */
+  /* В схеме C карточки меряются по тексту, как и везде: по ТЗ (§5.1)
+     короткий ответ даёт компактную карточку. Растягивать их на всю колонку
+     значило получить длинные пустые плашки при коротких ответах. */
   const cards = measureCards(answers, fonts.a, answersMaxW,
-    arrangement.cols, { fillWidth: layout === "C" });
+    arrangement.cols);
   /* Сколько высоты можно отдать карточкам. В схеме A весь остаток области
      отдан ответам: там нет картинки. В B и C остаток уходит картинке, и
      тянуть карточки вниз незачем — иначе они отнимали бы у снимка место. */
@@ -619,10 +728,10 @@ function evaluateFrame(input, fonts, frame, fill = 0) {
       groupFill = Math.max(0, frame.Ch - qHeight - frame.gap * 2
         - captionH);
     } else if (layout === "C") {
-      /* В C правая колонка стоит рядом со снимком: её высота не ограничена
-         снимком, поэтому остаток области тоже можно отдать карточкам. */
-      groupFill = Math.max(0, frame.Ch - qHeight - frame.gap * 2
-        - captionH) * fill;
+      /* В C карточки высоту не тянут: ответы там короткие, и вытянутые
+         плашки читаются как пустые. Место в правой колонке отдаётся
+         шрифту, а не подложкам. */
+      groupFill = 0;
     }
   }
   /* Потолок высоты карточки: не выше доли области, чтобы подложки не
@@ -934,9 +1043,10 @@ function planQuizFrame(input) {
       upscale: input.image && input.image.width
         ? +((imagePlan.width * k) / input.image.width).toFixed(2) : 0,
     } : null,
+    /* Ширина правой колонки в C — по фактической группе ответов: от неё
+       зависит и центрирование композиции в кадре. */
     textColumnWidth: best.layout === "C"
-      ? (frame.Cw - (best.image ? best.image.width : 0)
-        - quizLayoutConfig.layout.sideGap) * k
+      ? best.question.textWidth * k
       : 0,
     captionHeight: quizLayoutConfig.typography.caption.font
       * quizLayoutConfig.typography.caption.lineHeight * k,

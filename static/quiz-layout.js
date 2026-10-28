@@ -71,6 +71,12 @@ const quizLayoutConfig = {
     percentColumn: 3.2,
     minTextEm: 8,
     minHeightEm: 2.2,
+    /* Все карточки группы одной высоты — по самой высокой: ряд из карточек
+       разной высоты читается как небрежность, а текст в них стоит на разном
+       уровне. Если в кадре остаётся свободное место, карточки подрастают,
+       но не больше этого множителя от самой высокой: пустое место лучше
+       заполнить, но «Да» не должно стать плашкой на пол-экрана. */
+    fillMax: 1.7,
   },
 
   /* Композиция и пределы раскладок. */
@@ -120,37 +126,58 @@ const quizLayoutConfig = {
     maxIterations: 20,
     tolerance: 1,
 
-    /* Рост шрифта в схеме A. По ТЗ (§1, §4.4) шрифты выше таблицы не
-       растут, и кадр просто центрируется. На практике без картинки это
-       даёт пустой экран: короткий вопрос занимает четверть высоты, и зал
-       с дальних рядов видит мелкий текст. Поэтому в A шрифты растут — но
-       только до потолка и только по содержимому.
+    /* Заполнение свободного места. По ТЗ (§1, §4.4) шрифты выше таблицы не
+       растут, и кадр просто центрируется. На практике это даёт полупустой
+       экран: короткий вопрос занимает четверть высоты, и зал с дальних
+       рядов видит мелкий текст. Поэтому шрифты растут во всех схемах — но
+       только до потолка и только пока содержимое влезает.
 
        Рост считается по эталонной области (1920×1080, Ch = 972), а не по
        фактической: иначе на 4:3, где места больше, шрифт вышел бы крупнее,
        чем на 16:9, а ТЗ требует одинаковых кеглей на 16:9, 16:10, 5:3 и
-       4:3. Виртуальная ширина области везде одна и та же (1728), так что
-       от холста результат не зависит.
+       4:3.
 
-       Заполнение 0.75 от эталонной высоты — с запасом: фактическая высота
-       области на 16:9 меньше эталонной (шапка вопроса), и без запаса
-       подгонка тут же ужимала бы шрифт обратно. */
+       Почему все схемы, а не только A: длинный вопрос с картинкой тоже
+       оставлял кадр пустым, а «места много, а всё мелко» — та же жалоба.
+       В B потолок ниже (1.15), потому что там высоту делит снимок: крупный
+       текст отнял бы у него место. В C картинка стоит сбоку и места не
+       делит, поэтому потолок как в A.
+
+       Заполнение 0.78 от эталонной высоты — с запасом: фактическая высота
+       области меньше эталонной (шапка вопроса), и без запаса подгонка тут
+       же ужимала бы шрифт обратно. */
     grow: {
-      layouts: ["A"],
+      layouts: ["A", "B", "C"],
       max: 1.4,
+      maxByLayout: { A: 1.4, C: 1.4, B: 1.15 },
       step: 2,
-      maxSteps: 60,
+      maxSteps: 80,
       referenceHeight: 972,
-      fill: 0.75,
+      fill: 0.78,
     },
   },
 };
 
-/* Потолок роста в виртуальных px: стартовый кегль из таблицы, умноженный
-   на предел роста. Считается от таблицы, а не от «сколько влезет», поэтому
-   не зависит от пропорции экрана. */
-function growCap(tableFont) {
-  return tableFont * quizLayoutConfig.layout.grow.max;
+/* Потолок роста в виртуальных px.
+
+   Считается от САМОГО КРУПНОГО кегля таблицы, а не от стартового: длинный
+   вопрос по таблице начинается с 32 px, и потолок 32 × 1.4 = 44 не давал
+   использовать кадр, где места вдвое больше. Это и была жалоба «текст
+   длинный, но места много — увеличь».
+
+   От таблицы, а не от «сколько влезет»: иначе на 4:3, где области выше,
+   шрифт вышел бы крупнее, чем на 16:9, а ТЗ требует одинаковых кеглей.
+   Сколько именно можно — решает рост по высоте (target), потолок только
+   не даёт превратить кадр в плакат. */
+function growCap(layout, hasImage) {
+  const g = quizLayoutConfig.layout.grow;
+  const typo = quizLayoutConfig.typography;
+  const max = (g.maxByLayout && g.maxByLayout[layout]) || g.max;
+  /* Таблица зависит от картинки: с ней вопрос начинается с 56, а не с 64.
+     Потолок обязан считаться по той же таблице, что и стартовый кегль,
+     иначе рост выходил за собственные пределы на 8 px. */
+  const table = hasImage ? typo.question.withImage : typo.question.table;
+  return table[0][1] * max;
 }
 
 /* ------------------------------------------------------------------ */
@@ -291,13 +318,18 @@ function chooseLayout(image, frame) {
 }
 
 /* Сколько колонок у ответов в этой схеме (раздел 4).
-   A: 2–3 — колонка, 4 — сетка 2×2;
+   A: 2 — колонка, 3 — два сверху и один по центру снизу, 4 — сетка 2×2;
    B: 2 — в один ряд, 3 — колонка, 4 — сетка 2×2;
-   C: всегда колонка. */
+   C: всегда колонка.
+
+   Для трёх ответов в схеме A выбран «2 + 1»: столбик из трёх занимал всю
+   высоту и не давал места ни шрифту, ни карточкам, а две карточки в ряд и
+   одна по центру под ними читаются так же, но позволяют всё увеличить. */
 function chooseAnswersLayout(layout, count) {
   if (layout === "C") return { mode: "column", cols: 1 };
   if (layout === "B" && count === 2) return { mode: "row", cols: 2 };
   if (count === 4) return { mode: "grid2", cols: 2 };
+  if (count === 3 && layout === "A") return { mode: "grid2plus1", cols: 2 };
   return { mode: "column", cols: 1 };
 }
 
@@ -373,7 +405,7 @@ function cardOverhead(fontPx) {
 
    То есть короткое «Да» даёт компактную карточку, а длинный ответ упирается
    в предел группы и переносится по словам. */
-function measureCards(texts, fontPx, maxGroupW, cols) {
+function measureCards(texts, fontPx, maxGroupW, cols, opts = {}) {
   const cfg = quizLayoutConfig.answerCard;
   const typo = quizLayoutConfig.typography.answer;
   const overhead = cardOverhead(fontPx);
@@ -399,7 +431,15 @@ function measureCards(texts, fontPx, maxGroupW, cols) {
      расчётом и ни от чего не защищал. */
   const wrapSafety = Math.max(2, fontPx * 0.06);
   const wantTextW = Math.max(widestLine + wrapSafety, cfg.minTextEm * fontPx);
-  const cardW = Math.min(maxCardW, overhead + wantTextW);
+  /* В схеме C карточка всегда занимает всю правую колонку. По ТЗ (§5.1)
+     maxCardW для неё — именно ширина колонки, и сжимать карточку по тексту
+     там нельзя: колонка узкая, группа из коротких ответов прилипала к
+     снимку, а справа оставалась пустота — «всё сместилось влево».
+     В A и B сжатие по тексту остаётся: там короткое «Да» не должно
+     растягиваться на пол-экрана. */
+  const cardW = opts.fillWidth
+    ? maxCardW
+    : Math.min(maxCardW, overhead + wantTextW);
   const innerTextW = Math.max(1, cardW - overhead);
   const maxTextW = Math.max(0, maxCardW - overhead);
 
@@ -419,29 +459,49 @@ function measureCards(texts, fontPx, maxGroupW, cols) {
 
 /* Собрать группу карточек: строки, высоты рядов, общая высота.
 
-   По ТЗ (§5.1) по высоте выравнивается ряд: в сетке 2×2 карточки одной
-   строки становятся одной высоты, а в колонке каждая карточка — свой ряд и
-   растёт по своему тексту. Поэтому высоту задаёт grid, а не общая цифра:
-   одна высота на всю колонку резала ответ, который браузер переносил на
-   строку больше расчётного. */
-function buildGroup(cards, count, cols) {
+   Высота одна на все карточки группы — по самой высокой. Ряд из карточек
+   разной высоты читается как небрежность, а текст в них стоит на разном
+   уровне; на стенде это видно на вопросе с одним длинным ответом.
+
+   fillH — сколько высоты карточке можно отдать, если в кадре есть запас.
+   Не задан — карточка растёт по тексту, как раньше. */
+function buildGroup(cards, count, cols, fillH, fillCap) {
   const cfg = quizLayoutConfig.layout;
   const rows = Math.ceil(count / cols);
   const gapX = cols > 1 ? cfg.cardGapGrid : 0;
   const gapY = cfg.cardGap;
-  const rowHeights = [];
+
+  /* Натуральная высота группы: каждый ряд — по своей самой высокой карточке,
+     дальше выравниваем всё по общей. */
+  const naturalRows = [];
   for (let r = 0; r < rows; r++) {
     let h = 0;
     for (let c = 0; c < cols; c++) {
       const i = r * cols + c;
       if (i < count) h = Math.max(h, cards.heights[i]);
     }
-    rowHeights.push(h);
+    naturalRows.push(h);
   }
+  const tallest = Math.max(...naturalRows);
+
+  let cardH = tallest;
+  if (fillH > 0) {
+    const available = (fillH - gapY * (rows - 1)) / rows;
+    /* Не больше fillMax от натуральной высоты и не больше доли области:
+       иначе на узком вертикальном снимке карточки вырастали в полкадра и
+       читались как пустые плашки. */
+    const cap = Math.min(tallest * quizLayoutConfig.answerCard.fillMax,
+      fillCap || Infinity);
+    cardH = Math.max(tallest, Math.min(available, cap));
+  }
+  const rowHeights = naturalRows.map(() => cardH);
   const groupH = rowHeights.reduce((s, h) => s + h, 0) + gapY * (rows - 1);
   const groupW = cards.cardW * cols + gapX * (cols - 1);
   return {
-    rows, cols, gapX, gapY, rowHeights, groupH, groupW,
+    rows, cols, gapX, gapY, rowHeights, groupH, groupW, cardH,
+    /* Сколько карточек в последнем ряду: у «2 + 1» последний ряд из одной
+       карточки, и его надо ставить по центру, а не в левую колонку. */
+    lastRowCount: count - (rows - 1) * cols,
     cardW: cards.cardW, textW: cards.textW, lines: cards.lines,
     heights: cards.heights,
   };
@@ -454,10 +514,13 @@ function buildGroup(cards, count, cols) {
 /* Посчитать кадр при заданных кеглях. Возвращает геометрию и проблемы:
    пустой список проблем значит «влезает».
 
+   fill — доля свободной высоты, которую отдаём карточкам (0 — не отдавать).
+   Считается после подгонки, поэтому по умолчанию выключен.
+
    Здесь же считается картинка: в схеме B ей достаётся всё, что осталось
    по высоте (не меньше 30% Ch), в схеме C — левый бокс по лимитам раздела
    4.3, в схеме A её нет. */
-function evaluateFrame(input, fonts, frame) {
+function evaluateFrame(input, fonts, frame, fill = 0) {
   const cfg = quizLayoutConfig;
   const L = cfg.layout;
   const hasImage = input.image && input.image.width && input.image.height;
@@ -466,6 +529,11 @@ function evaluateFrame(input, fonts, frame) {
   const count = answers.length || 1;
   const arrangement = chooseAnswersLayout(layout, count);
   const problems = [];
+  /* Мягкие замечания — то, что мешает читать, но не выводит кадр за
+     область. При подгонке они считаются ошибкой (значит, кегль велик),
+     а при росте в схеме A — нет: там высота уже проверена, и строка сверх
+     лимита означает лишь, что шрифт занял свободное место. */
+  const soft = [];
 
   /* Ширина вопроса и ответов. Схема C отдаёт всю ширину правой колонке:
      ширина полосы под картинку считается ниже, но вопрос и ответы живут
@@ -504,33 +572,76 @@ function evaluateFrame(input, fonts, frame) {
     fonts.q, typo.weight);
   const qHeight = qLines.length * fonts.q * typo.lineHeight;
 
-  /* Предел строк вопроса: крупный кегль — 4 строки, мелкий — 6. */
+  /* Предел строк вопроса: крупный кегль — 4 строки, мелкий — 6.
+     Это не жёсткий запрет, а признак «кегль великоват»: при подгонке он
+     работает, при росте в схеме A его снимаем — там высота уже проверена,
+     и лишние строки означают лишь, что шрифт занял свободное место. */
   const qLineLimit = fonts.q >= L.questionLines.bigFrom
     ? L.questionLines.big : L.questionLines.small;
   if (qLines.length > qLineLimit) {
     problems.push(`строк вопроса ${qLines.length} > ${qLineLimit}`);
+    soft.push(`строк вопроса ${qLines.length} > ${qLineLimit}`);
   }
+  /* Доля высоты под вопрос — не запрет, а ориентир из ТЗ: она нужна, чтобы
+     вопрос не съел место у ответов. Реальную проверку делает итоговая
+     высота (она складывает вопрос, картинку, ответы и подпись), поэтому
+     здесь замечание мягкое: иначе длинный вопрос на 40 px не мог вырасти,
+     хотя кадр стоял наполовину пустым. */
   if (layout === "A" && qHeight > frame.Ch * L.questionMaxShareA + L.tolerance) {
-    problems.push("вопрос выше 30% области");
+    const m = "вопрос выше 30% области";
+    problems.push(m);
+    soft.push(m);
   }
   if (layout === "B") {
     if (qHeight > frame.Ch * L.questionMaxShareB + L.tolerance) {
-      problems.push("вопрос выше 16% области");
+      const m = "вопрос выше 16% области";
+      problems.push(m);
+      soft.push(m);
     }
     if (qLines.length > L.questionMaxLinesB) {
-      problems.push(`строк вопроса ${qLines.length} > ${L.questionMaxLinesB}`);
+      const m = `строк вопроса ${qLines.length} > ${L.questionMaxLinesB}`;
+      problems.push(m);
+      soft.push(m);
     }
   }
 
   /* Ответы. */
   const cards = measureCards(answers, fonts.a, answersMaxW,
-    arrangement.cols);
-  const group = buildGroup(cards, count, arrangement.cols);
+    arrangement.cols, { fillWidth: layout === "C" });
+  /* Сколько высоты можно отдать карточкам. В схеме A весь остаток области
+     отдан ответам: там нет картинки. В B и C остаток уходит картинке, и
+     тянуть карточки вниз незачем — иначе они отнимали бы у снимка место. */
+  const captionH = cfg.typography.caption.font
+    * cfg.typography.caption.lineHeight;
+  let groupFill = 0;
+  if (fill > 0) {
+    if (layout === "A") {
+      groupFill = Math.max(0, frame.Ch - qHeight - frame.gap * 2
+        - captionH);
+    } else if (layout === "C") {
+      /* В C правая колонка стоит рядом со снимком: её высота не ограничена
+         снимком, поэтому остаток области тоже можно отдать карточкам. */
+      groupFill = Math.max(0, frame.Ch - qHeight - frame.gap * 2
+        - captionH) * fill;
+    }
+  }
+  /* Потолок высоты карточки: не выше доли области, чтобы подложки не
+     превращались в плашки на пол-экрана. В схеме C доля меньше: снимок
+     стоит рядом и задаёт высоту кадра. */
+  const capShare = layout === "C" ? 0.16 : 0.22;
+  const group = buildGroup(cards, count, arrangement.cols, groupFill,
+    frame.Ch * capShare);
+  /* Предел строк ответа — тоже ориентир, а не запрет: он нужен, чтобы
+     длинный ответ не превращал карточку в простыню. При росте его снимаем,
+     потому что итоговая высота и так проверяется, а рост крупного шрифта
+     неизбежно добавляет строку. */
   const aLineLimit = fonts.a >= L.answerLines.bigFrom
     ? L.answerLines.big : L.answerLines.small;
   const worstLines = Math.max(...group.lines);
   if (worstLines > aLineLimit) {
-    problems.push(`строк ответа ${worstLines} > ${aLineLimit}`);
+    const m = `строк ответа ${worstLines} > ${aLineLimit}`;
+    problems.push(m);
+    soft.push(m);
   }
   /* Слово шире текстовой зоны — оно порвётся внутри. Это видно в кадре,
      поэтому считаем ошибкой раскладки, а не мелочью. */
@@ -545,7 +656,6 @@ function evaluateFrame(input, fonts, frame) {
      В схеме C вопрос и ответы живут в правой колонке отдельно от снимка,
      поэтому её высота считается сама по себе, а общая — как большая из
      двух: колонки стоят рядом, а не друг под другом. */
-  const captionH = cfg.typography.caption.font * cfg.typography.caption.lineHeight;
   const textColumnH = qHeight + frame.gap + group.groupH + frame.gap + captionH;
   let imageHeight = 0;
   let totalHeight = 0;
@@ -593,7 +703,7 @@ function evaluateFrame(input, fonts, frame) {
   }
 
   return {
-    layout, arrangement, problems,
+    layout, arrangement, problems, soft,
     question: {
       font: fonts.q, lines: qLines, width: qWidth, height: qHeight,
       textWidth: qWidth,
@@ -718,11 +828,22 @@ function planQuizFrame(input) {
      содержимое не займёт долю эталонной высоты или не упрётся в потолок —
      тот считается от табличного кегля, поэтому от пропорции экрана не
      зависит. */
+  /* Рост запускаем и тогда, когда кадр сошёлся только по высоте, а мягкие
+     замечания остались: длинный вопрос на минимальном кегле занимал четыре
+     строки при лимите «не больше четырёх», и рост не начинался вовсе —
+     отсюда «места много, а всё мелко». */
+  const hardOf = (r) => r.problems.filter((p) => !r.soft.includes(p));
   const grow = quizLayoutConfig.layout.grow;
-  if (grow.layouts.includes(best.layout)) {
-    const start = startFonts(question, answers, input.image);
-    const maxQ = growCap(start.q);
-    const maxA = growCap(start.a);
+  if (grow.layouts.includes(best.layout) && !hardOf(best).length) {
+    const hasImage = classifyImage(input.image) !== "none";
+    const maxQ = growCap(best.layout, hasImage);
+    /* Ответ не крупнее 0.9 вопроса — то же правило, что в подгонке. */
+    const maxA = Math.min(
+      quizLayoutConfig.typography.answer.table[0][1]
+        * ((quizLayoutConfig.layout.grow.maxByLayout
+          && quizLayoutConfig.layout.grow.maxByLayout[best.layout])
+          || quizLayoutConfig.layout.grow.max),
+      maxQ * quizLayoutConfig.typography.answer.maxOfQuestion);
     const target = grow.referenceHeight * grow.fill;
     let gq = best.question.font;
     let ga = best.answers.font;
@@ -735,12 +856,27 @@ function planQuizFrame(input) {
       if (nextQ <= gq + 0.01 && nextA <= ga + 0.01) break;
       const grown = evaluateFrame({ ...input, question, answers },
         { q: nextQ, a: nextA }, frame);
-      /* Растём только если кадр по-прежнему сходится: рост не имеет права
-         вытолкнуть содержимое за область. */
-      if (grown.problems.length) break;
+      /* Растём только если кадр по-прежнему сходится по высоте: рост не
+         имеет права вытолкнуть содержимое за область. Мягкие замечания
+         (лишняя строка вопроса) рост не останавливают — высота уже
+         проверена, а лишняя строка значит, что шрифт занял свободное место. */
+      if (grown.problems.some((p) => !grown.soft.includes(p))) break;
       best = grown;
       gq = nextQ;
       ga = nextA;
+    }
+  }
+
+  /* Остаток высоты отдаём карточкам: кадр, где шрифт вырос, а карточки
+     остались ростом по тексту, читается как «мелко и пусто». Высоту тянем
+     только в том же кадре, который уже сошёлся, и только до предела
+     fillMax от натуральной высоты. */
+  if (!best.problems.length) {
+    const filled = evaluateFrame({ ...input, question, answers },
+      { q: best.question.font, a: best.answers.font }, frame, 1);
+    if (!filled.problems.length && filled.answers.cardH
+        > best.answers.cardH + 0.5) {
+      best = filled;
     }
   }
 
@@ -770,11 +906,17 @@ function planQuizFrame(input) {
       font: answersPlan.font * k,
       cols: answersPlan.cols,
       rows: answersPlan.rows,
+      /* Сколько карточек в последнем ряду: у схемы «2 + 1» последняя
+         карточка встаёт по центру, а не в левую колонку. */
+      lastRowCount: answersPlan.lastRowCount,
       mode: best.arrangement.mode,
       cardWidth: answersPlan.cardW * k,
       textWidth: answersPlan.textW * k,
       groupWidth: answersPlan.groupW * k,
       groupHeight: answersPlan.groupH * k,
+      /* Высота карточки одна на всю группу — её и применяет CSS, чтобы
+         подложки были одинаковыми, а лишнее место уходило в них. */
+      cardHeight: answersPlan.cardH * k,
       rowHeights: answersPlan.rowHeights.map((h) => h * k),
       gapX: answersPlan.gapX * k,
       gapY: answersPlan.gapY * k,

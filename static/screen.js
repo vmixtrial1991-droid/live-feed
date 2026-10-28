@@ -510,6 +510,15 @@ function applyQuizPlan(block, stored) {
   opts.style.setProperty("--ql-cols",
     `repeat(${plan.answers.cols}, ${Math.floor(plan.answers.cardWidth)}px)`);
   opts.style.setProperty("--ql-group-w", `${Math.round(plan.answers.groupWidth)}px`);
+  /* Режим группы: у схемы «2 + 1» последняя карточка встаёт по центру
+     нижнего ряда, и CSS должен знать, что это не обычная сетка 2×2. */
+  opts.dataset.mode = plan.answers.mode;
+  /* Ширина одной карточки: нужна правилу «2 + 1», чтобы третья карточка
+     по центру была такой же, как верхние. */
+  block.style.setProperty("--ql-card-w", `${Math.floor(plan.answers.cardWidth)}px`);
+  /* Высота подложки одна на всю группу: карточки выравниваются по самой
+     высокой, и свободное место уходит в них. */
+  block.style.setProperty("--ql-card-h", `${Math.round(plan.answers.cardHeight)}px`);
   block.style.setProperty("--ql-answer-size", `${plan.answers.font.toFixed(1)}px`);
   block.style.setProperty("--ql-card-gap-x", `${Math.round(plan.answers.gapX)}px`);
   block.style.setProperty("--ql-card-gap-y", `${Math.round(plan.answers.gapY)}px`);

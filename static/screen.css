@@ -1043,17 +1043,30 @@
   align-self: stretch;
   justify-content: start;
   justify-items: start;
+  /* Группа растянута на всю правую колонку: иначе карточки, сжатые по
+     тексту, липли к левому краю, а справа оставалась пустота — кадр читался
+     как «всё сместилось влево». Карточка внутри получает ширину колонки,
+     текст в ней остаётся слева. */
+  width: 100%;
+  justify-self: stretch;
+}
+.quiz-block[data-layout="v3"] .quiz-body[data-kind="image-side"] .quiz-s-opt {
+  width: 100%;
+  justify-self: stretch;
 }
 .quiz-block[data-layout="v3"] .quiz-body[data-kind="image-side"] .quiz-count {
   text-align: left;
 }
 
-/* Сетка ответов: число колонок и ширина карточки — из плана. */
+/* Сетка ответов: число колонок и ширина карточки — из плана.
+   Высота ряда берётся из плана одной на всю группу: подложки ответов
+   должны быть одинаковыми, а свободное место уходит в них, а не в воздух
+   между карточками. */
 .quiz-block[data-layout="v3"] .quiz-opts,
 .quiz-block[data-layout="v3"] .quiz-body.has-image .quiz-opts {
   display: grid;
   grid-template-columns: var(--ql-cols, 1fr);
-  grid-auto-rows: auto;
+  grid-auto-rows: var(--ql-card-h, auto);
   gap: var(--ql-card-gap-y) var(--ql-card-gap-x);
   width: var(--ql-group-w, auto);
   max-width: 100%;
@@ -1063,6 +1076,19 @@
   align-items: stretch;
   justify-items: stretch;
   height: auto;
+}
+
+/* Схема «2 + 1»: три ответа — два сверху, третий по центру снизу. Без
+   этого правила третья карточка встаёт в левую колонку, и справа от неё
+   остаётся дырка. */
+/* Схема «2 + 1»: три ответа — два сверху, третий по центру снизу. Ширина
+   третьей ровно как у верхних: иначе она выходит уже и читается как
+   карточка другого размера. */
+.quiz-block[data-layout="v3"] .quiz-opts[data-mode="grid2plus1"] > .quiz-s-opt:last-child {
+  grid-column: 1 / -1;
+  justify-self: center;
+  width: var(--ql-card-w, 100%);
+  max-width: var(--ql-card-w, 100%);
 }
 
 /* Карточка: три зоны. Все размеры в em от кегля ответа — так карточка
@@ -1180,10 +1206,12 @@
    Правило держит её скрытой, чтобы старая разметка не всплыла в кадре. */
 .quiz-block[data-layout="v3"] .quiz-s-check { display: none; }
 
-/* Старое правило «третий ответ по центру» из первой раскладки до v3 не
-   должно доставать: в схемах A и B третий ответ стоит в своей колонке. */
-.quiz-block[data-layout="v3"] .quiz-body.has-image .quiz-opts > .quiz-s-opt:last-child:nth-child(3),
-.quiz-block[data-layout="v3"] .quiz-opts > .quiz-s-opt:last-child:nth-child(3) {
+/* Третий ответ в сетке v3. В схемах B и C он стоит колонкой (колонка одна),
+   поэтому правило про центр к нему не относится. В схеме A три ответа
+   встают «два сверху, один по центру снизу» — это задаёт
+   `.quiz-opts[data-mode="grid2plus1"]` выше, и перебивать его сбросом
+   `grid-column: auto` нельзя: карточка съезжала в левую колонку. */
+.quiz-block[data-layout="v3"] .quiz-body.has-image .quiz-opts > .quiz-s-opt:last-child:nth-child(3) {
   grid-column: auto;
   justify-self: stretch;
   width: 100%;

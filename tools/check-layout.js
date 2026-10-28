@@ -113,8 +113,9 @@ check("16:9, квадрат → схема C", sq169.layout === "C", sq169.layou
 
 console.log("\nРаскладка ответов по схеме:");
 check("A, 2 ответа → колонка", plan(SHORT_Q, SHORT_A, null).answers.cols === 1);
-check("A, 3 ответа → колонка",
-  plan(SHORT_Q, ["Да", "Нет", "Не знаю"], null).answers.cols === 1);
+check("A, 3 ответа → два сверху, один по центру снизу",
+  plan(SHORT_Q, ["Да", "Нет", "Не знаю"], null).answers.cols === 2
+  && plan(SHORT_Q, ["Да", "Нет", "Не знаю"], null).answers.lastRowCount === 1);
 check("A, 4 ответа → сетка 2×2",
   plan(SHORT_Q, LONG_A, null).answers.cols === 2);
 check("B, 2 ответа → один ряд",
@@ -188,15 +189,19 @@ const growFonts = canvases.map(([w, h]) => {
 });
 check("рост одинаков в виртуальных px на всех холстах",
   growFonts.every((f) => f === growFonts[0]), growFonts.join(", "));
-/* В схемах B и C рост запрещён: там место делят картинка и текст. */
+/* В схеме C картинка стоит сбоку и высоту не делит, поэтому текст там
+   растёт как в A; в B потолок ниже — снимок делит высоту с текстом. */
 for (const name of ["wide", "square", "tall"]) {
   const p = plan(SHORT_Q, SHORT_A, IMAGES[name]);
   const table = L.config.typography.question.withImage;
   let base = table[table.length - 1][1];
   for (const [limit, size] of table) if (SHORT_Q.length <= limit) { base = size; break; }
-  check(`схема ${p.layout} (${name}): шрифт не растёт выше таблицы`,
-    p.question.font / p.scale <= base + 1,
-    `${Math.round(p.question.font / p.scale)} при табличном ${base}`);
+  const want = p.layout === "B"
+    ? base * L.config.layout.grow.maxByLayout.B
+    : base * L.config.layout.grow.maxByLayout.C;
+  check(`схема ${p.layout} (${name}): рост не выше потолка`,
+    p.question.font / p.scale <= want + 1,
+    `${Math.round(p.question.font / p.scale)} при потолке ${Math.round(want)}`);
 }
 
 console.log("\nМинимумы и подгонка:");

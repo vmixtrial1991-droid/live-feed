@@ -1032,6 +1032,18 @@
   margin: 0;
   max-width: 100%;
 }
+/* Ответы в C начинаются там же, где вопрос. Карточки уже колонки — это
+   по ТЗ (§5.1: короткий ответ даёт компактную карточку), но центрировать
+   их нельзя: вопрос стоит по левому краю колонки, и группа, сдвинутая к
+   середине, читается как «вопрос съехал относительно ответов».
+   Раньше здесь срабатывало старое правило первой раскладки
+   `.quiz-body.has-image .quiz-opts { align-self: center }`, и группа из трёх
+   карточек вставала на 280 px правее вопроса. */
+.quiz-block[data-layout="v3"] .quiz-body[data-kind="image-side"] .quiz-opts {
+  align-self: stretch;
+  justify-content: start;
+  justify-items: start;
+}
 .quiz-block[data-layout="v3"] .quiz-body[data-kind="image-side"] .quiz-count {
   text-align: left;
 }

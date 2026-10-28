@@ -159,6 +159,46 @@ check("карточка не ниже 2.2em",
   short.answers.rowHeights[0] >= short.answers.font * 2.2 - 1,
   `${short.answers.rowHeights[0]} при кегле ${short.answers.font}`);
 
+/* Рост в схеме A: без картинки кадр не должен оставаться наполовину пустым.
+   Потолок — 1.4 от табличного кегля, и он одинаков на всех холстах, иначе
+   «Да/Нет» на 4:3 вышло бы крупнее, чем на 16:9. */
+console.log("\nРост шрифта в схеме A:");
+const shortA = plan(SHORT_Q, SHORT_A, null);
+
+// Стартовый кегль берём из таблицы через сам движок: это то, от чего
+// считается потолок роста.
+const tableQ = (function () {
+  const table = L.config.typography.question.table;
+  for (const [limit, size] of table) if (SHORT_Q.length <= limit) return size;
+  return table[table.length - 1][1];
+})();
+const capQ = tableQ * L.config.layout.grow.max;
+check("короткий вопрос подрос выше табличного кегля",
+  shortA.question.font > tableQ + 1,
+  `${Math.round(shortA.question.font)} при табличном ${tableQ}`);
+check("рост не вышел за потолок 1.4×",
+  shortA.question.font <= capQ + 1,
+  `${Math.round(shortA.question.font)} > ${Math.round(capQ)}`);
+check("рост не вытолкнул содержимое за область",
+  shortA.totalHeight <= shortA.area.height + 1,
+  `${Math.round(shortA.totalHeight)} > ${Math.round(shortA.area.height)}`);
+const growFonts = canvases.map(([w, h]) => {
+  const p = plan(SHORT_Q, SHORT_A, null, { width: w, height: h });
+  return Math.round(p.question.font / p.scale);
+});
+check("рост одинаков в виртуальных px на всех холстах",
+  growFonts.every((f) => f === growFonts[0]), growFonts.join(", "));
+/* В схемах B и C рост запрещён: там место делят картинка и текст. */
+for (const name of ["wide", "square", "tall"]) {
+  const p = plan(SHORT_Q, SHORT_A, IMAGES[name]);
+  const table = L.config.typography.question.withImage;
+  let base = table[table.length - 1][1];
+  for (const [limit, size] of table) if (SHORT_Q.length <= limit) { base = size; break; }
+  check(`схема ${p.layout} (${name}): шрифт не растёт выше таблицы`,
+    p.question.font / p.scale <= base + 1,
+    `${Math.round(p.question.font / p.scale)} при табличном ${base}`);
+}
+
 console.log("\nМинимумы и подгонка:");
 for (const [name, image] of Object.entries(IMAGES)) {
   for (const [qname, q, a] of [["короткий", SHORT_Q, SHORT_A],

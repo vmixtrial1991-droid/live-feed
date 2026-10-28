@@ -259,7 +259,11 @@ function quizFitSignature(block) {
       }).join("\u0001")
     : "";
   return [
-    block.clientWidth, block.clientHeight,
+    /* Размер окна, а не блока: ширина блока зависит от того, применён ли
+       уже план (поля задаёт разметка v3), и на первом кадре она меньше.
+       Ключ по блоку выходил разным до и после применения плана, и кадр
+       считался новым на каждой стадии — кегль менялся на глазах у зала. */
+    window.innerWidth, window.innerHeight,
     q ? q.textContent : "",
     optText,
     img && img.naturalWidth ? img.naturalWidth + "x" + img.naturalHeight : "",
@@ -320,29 +324,57 @@ function brokenWordCount(el) {
 function fitQuizActive(force = false) {
   if (quizPlay.hidden) return;
 
+  /* Разметка v3 включает свои поля и предел ширины. Её надо выставить до
+     расчёта ключа: иначе первый кадр меряет блок ещё по старым правилам
+     (1700 px вместо 1728), ключ выходит другим, и на каждой стадии кадр
+     считается новым — кегль менялся на глазах у зала. */
+  quizPlay.dataset.layout = "v3";
+
   const key = quizFitSignature(quizPlay);
   if (!force && quizPlayLayout.key === key) {
     applyQuizPlan(quizPlay, quizPlayLayout);
     return;
   }
 
-  /* План считается по метрикам canvas, а браузер переносит текст сам
-     (`text-wrap: pretty` может увести слово на новую строку). Поэтому
-     после применения проверяем реальную высоту тела кадра и, если оно
-     вылезло, пересчитываем с уменьшенной доступной высотой. Две попытки
-     хватает: каждая честно меряет то, что получилось. */
-  let extra = 0;
-  let plan = null;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    plan = buildQuizPlan(quizPlay, extra);
-    if (!plan) return;
-    quizPlayLayout.plan = plan;
-    applyQuizPlan(quizPlay, quizPlayLayout);
-    const overflow = quizOverflow(quizPlay);
-    if (overflow <= 1) break;
-    extra += overflow;
-  }
+  const plan = solveQuizPlan(quizPlay);
+  if (!plan) return;
+  quizPlayLayout.plan = plan;
   quizPlayLayout.key = key;
+  applyQuizPlan(quizPlay, quizPlayLayout);
+}
+
+/* Подобрать план по фактической геометрии блока.
+
+   Первый заход идёт по запасной высоте: блок ещё не разложен, и настоящих
+   размеров у него нет. Дальше план пересчитывается уже по тому, что
+   получилось, — до трёх раз. Это важно именно из-за роста шрифта в схеме A:
+   ужимание сходилось и с первого раза, а рост упирался в запасную высоту,
+   и кадр после смены стадии менял кегль на два пикселя.
+
+   Заодно каждая попытка честно меряет переполнение: canvas и браузер
+   переносят текст по-разному, и план обязан уложиться в то, что видно. */
+function solveQuizPlan(block) {
+  /* Разметку v3 включаем до первого расчёта: от неё зависят поля блока, а
+     значит и фактическая ширина области контента. Иначе первый план
+     считался по старым полям (1700 вместо 1728), и после применения
+     ширина менялась — кадр пересчитывался на каждой стадии. */
+  block.dataset.layout = "v3";
+  let best = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const plan = buildQuizPlan(block);
+    if (!plan) return null;
+    best = plan;
+    applyQuizPlan(block, { plan });
+    if (quizOverflow(block) <= 1) break;
+  }
+  /* Последний расчёт — от фактической геометрии: именно он и останется
+     в кадре, поэтому ключ кеширования должен описывать его, а не первый. */
+  const final = buildQuizPlan(block);
+  if (final) {
+    best = final;
+    applyQuizPlan(block, { plan: final });
+  }
+  return best;
 }
 
 /* Насколько тело кадра выше отведённого места. 0 — влезло.

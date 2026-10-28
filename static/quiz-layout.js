@@ -119,8 +119,39 @@ const quizLayoutConfig = {
     fontStep: 2,
     maxIterations: 20,
     tolerance: 1,
+
+    /* Рост шрифта в схеме A. По ТЗ (§1, §4.4) шрифты выше таблицы не
+       растут, и кадр просто центрируется. На практике без картинки это
+       даёт пустой экран: короткий вопрос занимает четверть высоты, и зал
+       с дальних рядов видит мелкий текст. Поэтому в A шрифты растут — но
+       только до потолка и только по содержимому.
+
+       Рост считается по эталонной области (1920×1080, Ch = 972), а не по
+       фактической: иначе на 4:3, где места больше, шрифт вышел бы крупнее,
+       чем на 16:9, а ТЗ требует одинаковых кеглей на 16:9, 16:10, 5:3 и
+       4:3. Виртуальная ширина области везде одна и та же (1728), так что
+       от холста результат не зависит.
+
+       Заполнение 0.75 от эталонной высоты — с запасом: фактическая высота
+       области на 16:9 меньше эталонной (шапка вопроса), и без запаса
+       подгонка тут же ужимала бы шрифт обратно. */
+    grow: {
+      layouts: ["A"],
+      max: 1.4,
+      step: 2,
+      maxSteps: 60,
+      referenceHeight: 972,
+      fill: 0.75,
+    },
   },
 };
+
+/* Потолок роста в виртуальных px: стартовый кегль из таблицы, умноженный
+   на предел роста. Считается от таблицы, а не от «сколько влезет», поэтому
+   не зависит от пропорции экрана. */
+function growCap(tableFont) {
+  return tableFont * quizLayoutConfig.layout.grow.max;
+}
 
 /* ------------------------------------------------------------------ */
 /* TextMeasurer                                                        */
@@ -681,6 +712,37 @@ function planQuizFrame(input) {
   }
 
   for (const p of best.problems) warnings.push(p);
+
+  /* Рост шрифта в схеме A: подгонка умеет только ужимать, поэтому кадр без
+     картинки оставался наполовину пустым. Растим оба кегля вместе, пока
+     содержимое не займёт долю эталонной высоты или не упрётся в потолок —
+     тот считается от табличного кегля, поэтому от пропорции экрана не
+     зависит. */
+  const grow = quizLayoutConfig.layout.grow;
+  if (grow.layouts.includes(best.layout)) {
+    const start = startFonts(question, answers, input.image);
+    const maxQ = growCap(start.q);
+    const maxA = growCap(start.a);
+    const target = grow.referenceHeight * grow.fill;
+    let gq = best.question.font;
+    let ga = best.answers.font;
+    for (let i = 0; i < grow.maxSteps; i++) {
+      if (best.totalHeight >= target) break;
+      if (gq >= maxQ - 0.5 && ga >= maxA - 0.5) break;
+      const nextQ = Math.min(maxQ, gq + grow.step);
+      const nextA = Math.min(maxA,
+        Math.min(ga + grow.step, nextQ * quizLayoutConfig.typography.answer.maxOfQuestion));
+      if (nextQ <= gq + 0.01 && nextA <= ga + 0.01) break;
+      const grown = evaluateFrame({ ...input, question, answers },
+        { q: nextQ, a: nextA }, frame);
+      /* Растём только если кадр по-прежнему сходится: рост не имеет права
+         вытолкнуть содержимое за область. */
+      if (grown.problems.length) break;
+      best = grown;
+      gq = nextQ;
+      ga = nextA;
+    }
+  }
 
   const k = frame.k;
   const answersPlan = best.answers;

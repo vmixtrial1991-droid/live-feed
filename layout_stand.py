@@ -1,21 +1,27 @@
-"""Стенд раскладки квиза по ТЗ 2.0, раздел 17.
+"""Стенд раскладки квиза по ТЗ «Вёрстка экрана квиза».
 
-Заводит событие с 15 сценариями из ТЗ, гоняет каждый на трёх форматах
-(16:9, 4:3, 1:1), снимает скриншот и автоматически проверяет кадр.
+Заводит событие со сценариями и снимает кадры на холстах из раздела 10:
 
-Что проверяется (раздел 18 ТЗ):
-  • всё внутри безопасной области;
-  • номер и процент не перекрывают текст;
-  • текст не обрезан (нет переполнения по высоте);
-  • кегли не ниже минимума;
-  • все варианты видны;
-  • геометрия до и после голосования не меняется.
+  • полная матрица на 16:9 (1920×1080): 3 количества ответов (2/3/4)
+    × 6 вариантов картинки (нет / 16:9 / 4:3 / 1:1 / 3:4 / 9:16)
+    × 2 объёма текста (короткий / длинный) = 36 кадров;
+  • сокращённый набор на 1920×1200 (16:10), 1800×1080 (5:3),
+    1440×1080 (4:3), 1280×720 — по 6 сценариев из раздела 10.2.
+
+Что проверяется (раздел 10.3):
+  • ничего не выходит за область контента;
+  • текст не перекрывает бейдж и зону процента (показываем «100%»);
+  • короткие тексты дают компактные карточки, а не на всю ширину;
+  • картинка не обрезана, не искажена и увеличена не больше 1.5×;
+  • кегли не ниже минимумов;
+  • кегли в виртуальных px одинаковы на 16:10, 5:3 и 4:3;
+  • квадратная картинка: на 4:3 схема B, на 16:9 — C.
 
 Запуск (сервер должен быть поднят):
 
-    python layout_stand.py                     # все сценарии, три формата
-    python layout_stand.py --only 1,8          # выбранные
-    python layout_stand.py --formats 16x9      # один формат
+    python layout_stand.py                    # всё
+    python layout_stand.py --formats 16x9     # только основная матрица
+    python layout_stand.py --only 8,11        # выбранные сценарии
 
 Результат: layout-stand/<формат>/NN-<имя>.png и report.html с таблицей.
 """
@@ -33,6 +39,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -40,179 +47,107 @@ from sweep_quiz import CDP, find_chrome, free_port, wait_json
 
 BASE = "http://127.0.0.1:8123"
 EVENT_TITLE = "Стенд раскладки"
-EVENT_SLUG = "stenд-raskladki"          # латиница ниже, см. _slug()
-MOD_PASSWORD = "stenд-proverka-1"
+EVENT_SLUG = "stand-raskladki"
+MOD_PASSWORD = "stand-proverka-1"
 
-# Форматы из ТЗ. 16:9 — основной, 4:3 и 1:1 — адаптация.
+# Холсты из раздела 10. 16:9 — основная матрица, остальные — сокращённый
+# набор. 1280×720 проверяет масштаб k.
 FORMATS = [
     (1920, 1080, "16x9"),
-    (1280, 960, "4x3"),
-    (1080, 1080, "1x1"),
+    (1920, 1200, "16x10"),
+    (1800, 1080, "5x3"),
+    (1440, 1080, "4x3"),
+    (1280, 720, "1280x720"),
 ]
 
-# Пределы сервера.
-Q_IMG, Q_NOIMG = 90, 200
-O_IMG, O_NOIMG = 40, 80
+# Пропорции картинок из раздела 10.1.
+SHOTS = {
+    "none": None,
+    "16x9": (1600, 900),
+    "4x3": (1200, 900),
+    "1x1": (1200, 1200),
+    "3x4": (900, 1200),
+    "9x16": (900, 1600),
+}
 
-SHOT_WIDE = (1600, 900)     # 16:9
-SHOT_SQUARE = (1200, 1200)  # 1:1
-SHOT_TALL = (900, 1600)     # 9:16
+# Тексты из раздела 10.1. «Короткий» — вопрос около 30 знаков и ответы по
+# 1–2 слова. «Длинный» — на пределе, который сегодня принимает сервер:
+# лимиты длины из раздела 12 ТЗ пока не приняты, в кабинете действуют
+# прежние (90/45 без картинки, 65/35 с картинкой), и стенд обязан
+# проверять именно ту границу, которую автор вопроса реально увидит.
+SHORT_Q = "Какая фигура нарисована в центре?"
+LONG_Q = (
+    "Перед вами длинный вопрос: он проверяет, как раскладка делит высоту "
+    "кадра между текстом, картинкой и вариантами ответа, когда места "
+    "заведомо меньше, чем хотелось бы"
+)
+SHORT_ANSWERS = {
+    2: ["Да", "Нет"],
+    3: ["Круг", "Квадрат", "Ромб"],
+    4: ["Круг", "Квадрат", "Ромб", "Овал"],
+}
+LONG_ANSWERS = {
+    2: [
+        "Кегль уменьшится до минимума, а текст обрежется",
+        "Карточка вырастет по высоте и вытеснит остальные",
+    ],
+    3: [
+        "Кегль уменьшится до минимума, а текст обрежется",
+        "Карточка вырастет по высоте и вытеснит остальные",
+        "Сетка перестроится в колонку на всю ширину",
+    ],
+    4: [
+        "Кегль уменьшится до минимума, а текст обрежется",
+        "Карточка вырастет по высоте и вытеснит остальные",
+        "Сетка перестроится в колонку на всю ширину",
+        "Картинка сожмётся, освобождая место под текст",
+    ],
+}
 
-# 15 сценариев из ТЗ, раздел 17. Поле check — что именно проверяем.
-SCENARIOS = [
-    {
-        "name": "01-da-net",
-        "label": "Короткий вопрос, «Да» и «Нет»",
-        "text": "Играем дальше?",
-        "options": ["Да", "Нет"],
-        "correct": 0,
-        "shot": None,
-    },
-    {
-        "name": "02-two-long",
-        "label": "Два длинных ответа",
-        "text": "Как переносится текст ответа?",
-        "options": [
-            "По словам, оставаясь внутри карточки",
-            "Обрезается многоточием на второй строке",
-        ],
-        "correct": 0,
-        "shot": None,
-    },
-    {
-        "name": "03-three-short",
-        "label": "Три коротких ответа",
-        "text": "Сколько сторон у треугольника?",
-        "options": ["Одна", "Две", "Три"],
-        "correct": 2,
-        "shot": None,
-    },
-    {
-        "name": "04-three-long",
-        "label": "Три длинных ответа",
-        "text": "Что будет, если ответ не влезает?",
-        "options": [
-            "Кегль уменьшится до минимума",
-            "Карточка вырастет по высоте вверх",
-            "Сетка перестроится в колонку",
-        ],
-        "correct": 2,
-        "shot": None,
-    },
-    {
-        "name": "05-four-short",
-        "label": "Четыре коротких ответа",
-        "text": "Какая фигура нарисована?",
-        "options": ["Круг", "Квадрат", "Ромб", "Овал"],
-        "correct": 0,
-        "shot": None,
-    },
-    {
-        "name": "06-four-long",
-        "label": "Четыре длинных ответа",
-        "text": "Что важнее на большом экране?",
-        "options": [
-            "Читаемость текста с пятнадцати метров",
-            "Крупное изображение по центру кадра",
-            "Симметрия всех элементов на экране",
-            "Максимум декоративных эффектов",
-        ],
-        "correct": 0,
-        "shot": None,
-    },
-    {
-        "name": "07-four-mixed",
-        "label": "Четыре ответа разной длины",
-        "text": "Выберите верное утверждение.",
-        "options": [
-            "Да",
-            "Короткий ответ",
-            "Ответ средней длины на полстроки",
-            "Длинный ответ, который потребует переноса",
-        ],
-        "correct": 3,
-        "shot": None,
-    },
-    {
-        "name": "08-image-wide",
-        "label": "Вопрос с горизонтальным изображением",
-        "text": "Какая фигура в центре снимка?",
-        "options": ["Круг", "Квадрат", "Треугольник", "Звезда"],
-        "correct": 0,
-        "shot": SHOT_WIDE,
-    },
-    {
-        "name": "09-image-tall",
-        "label": "Вопрос с вертикальным изображением",
-        "text": "Что видно на вертикальном снимке?",
-        "options": ["Круг", "Квадрат", "Линия", "Точка"],
-        "correct": 0,
-        "shot": SHOT_TALL,
-    },
-    {
-        "name": "10-image-square",
-        "label": "Вопрос с квадратным изображением",
-        "text": "Сколько сторон у фигуры?",
-        "options": ["Одна", "Две", "Ни одной", "Много"],
-        "correct": 2,
-        "shot": SHOT_SQUARE,
-    },
-    {
-        "name": "11-image-four-long",
-        "label": "Изображение и четыре длинных ответа",
-        "text": "Что станет с кадром?",
-        "options": [
-            "Фото меньше, ответам больше места",
-            "Кегль уменьшится, фото прежнее",
-            "Ответы уйдут в колонку",
-            "Текст сократится многоточием",
-        ],
-        "correct": 2,
-        "shot": SHOT_WIDE,
-    },
-    {
-        "name": "12-long-q-four",
-        "label": "Длинный вопрос с четырьмя вариантами",
-        "text": "Этот вопрос длинный: он проверяет, как система "
-                "делит кадр между вопросом и ответом",
-        "options": [
-            "Вопросу больше места, ответы сжимаются",
-            "Ответы читаемы, вопрос переносится",
-            "Вопрос обрезается многоточием",
-            "Текст уменьшается до минимума",
-        ],
-        "correct": 1,
-        "shot": None,
-    },
-    {
-        "name": "13-percent",
-        "label": "Появление процентов голосования",
-        "text": "Куда пойдём после квиза?",
-        "options": ["В бар", "Домой", "Танцевать", "Решим по ходу"],
-        "correct": -1,
-        "shot": None,
-        # После ответа смотрим проценты: геометрия не должна поменяться.
-        "voting": True,
-    },
-    {
-        "name": "14-image-with-text",
-        "label": "Изображение с важным текстом внутри",
-        "text": "Что написано на табличке?",
-        "options": ["Вход", "Выход", "Сцена", "Буфет"],
-        "correct": 0,
-        "shot": "text-image",
-    },
-    {
-        "name": "15-extreme-long",
-        "label": "Экстремально длинный ответ",
-        "text": "Какой из вариантов самый длинный?",
-        "options": [
-            "Короткий",
-            "Длинный ответ ровно на сорок пять знаков тут",
-        ],
-        "correct": 1,
-        "shot": None,
-    },
+# Пределы сервера (app/main.py, quiz_text_limits). Держим копию здесь,
+# чтобы стенд не тянул FastAPI ради двух чисел; расхождение ловится тем,
+# что сервер отвечает 400 и сценарий падает в отчёте.
+LIMITS = {
+    None: (90, 45),
+    "wide": (65, 35),
+    "square": (90, 35),
+    "tall": (90, 35),
+}
+
+
+def orientation_of(shot) -> str | None:
+    """Ориентация по пропорции снимка — как image_orientation в app/images.py."""
+    if not shot:
+        return None
+    w, h = shot
+    ratio = w / h
+    if ratio >= 1.2:
+        return "wide"
+    if ratio <= 0.85:
+        return "tall"
+    return "square"
+
+
+def fit_text(text: str, limit: int) -> str:
+    """Уложить текст в предел сервера по границе слова."""
+    text = " ".join(text.split())
+    if len(text) <= limit:
+        return text
+    cut = text[:limit + 1]
+    space = cut.rfind(" ")
+    if space > limit // 2:
+        cut = cut[:space]
+    return cut[:limit].strip()
+
+
+# Сценарии сокращённого набора (раздел 10.2).
+SMALL_SET = [
+    {"count": 4, "shot": "none", "long": True,  "label": "4 ответа, без картинки, длинный"},
+    {"count": 2, "shot": "none", "long": False, "label": "2 ответа, без картинки, короткий"},
+    {"count": 3, "shot": "16x9", "long": False, "label": "3 ответа, картинка 16:9"},
+    {"count": 4, "shot": "4x3",  "long": True,  "label": "4 ответа, картинка 4:3, длинный"},
+    {"count": 4, "shot": "1x1",  "long": True,  "label": "4 ответа, картинка 1:1"},
+    {"count": 3, "shot": "9x16", "long": True,  "label": "3 ответа, картинка 9:16, длинный"},
 ]
 
 
@@ -240,9 +175,9 @@ def admin_get(path: str) -> tuple[int, dict]:
     return testlib.admin_get(path)
 
 
-def figure(w: int, h: int, path: Path, with_text: bool = False) -> Path:
+def figure(w: int, h: int, path: Path) -> Path:
     """Нарисовать снимок нужных пропорций. Рамка и подпись — чтобы видеть
-    границы кадра на тёмном фоне."""
+    границы кадра на тёмном фоне и поймать обрезку."""
     from PIL import Image, ImageDraw, ImageFont
 
     img = Image.new("RGB", (w, h), (22, 30, 56))
@@ -267,42 +202,67 @@ def figure(w: int, h: int, path: Path, with_text: bool = False) -> Path:
                 continue
         return ImageFont.load_default()
 
-    if with_text:
-        # Крупная надпись внутри: проверяем, что её не обрезает контейнер.
-        f = font(max(40, min(w, h) // 8))
-        caption = "ВХОД"
-        box = d.textbbox((0, 0), caption, font=f)
-        tw, th = box[2] - box[0], box[3] - box[1]
-        tx, ty = (w - tw) // 2, (h - th) // 2
-        pad = max(10, th // 3)
-        d.rectangle([tx - pad, ty - pad, tx + tw + pad, ty + th + pad],
-                    fill=(12, 16, 30))
-        d.text((tx, ty), caption, font=f, fill=(235, 240, 255))
-    else:
-        ratio = round(w / h, 2)
-        f = font(max(24, min(w, h) // 12))
-        caption = f"{w}x{h}  ·  {ratio}:1"
-        box = d.textbbox((0, 0), caption, font=f)
-        tw, th = box[2] - box[0], box[3] - box[1]
-        pad = max(8, th // 3)
-        tx, ty = (w - tw) // 2, (h - th) // 2 - r - th - pad
-        d.rectangle([tx - pad, ty - pad, tx + tw + pad, ty + th + pad],
-                    fill=(12, 16, 30))
-        d.text((tx, ty), caption, font=f, fill=(220, 232, 255))
+    ratio = round(w / h, 2)
+    f = font(max(20, min(w, h) // 14))
+    caption = f"{w}×{h} · {ratio}:1"
+    box = d.textbbox((0, 0), caption, font=f)
+    tw, th = box[2] - box[0], box[3] - box[1]
+    pad = max(8, th // 3)
+    tx, ty = (w - tw) // 2, (h - th) // 2 - r - th - pad
+    d.rectangle([tx - pad, ty - pad, tx + tw + pad, ty + th + pad],
+                fill=(12, 16, 30))
+    d.text((tx, ty), caption, font=f, fill=(220, 232, 255))
 
     path.parent.mkdir(parents=True, exist_ok=True)
     img.save(path, "JPEG", quality=90)
     return path
 
 
-def build_event() -> dict:
-    """Создать событие со сценариями и вернуть адреса."""
-    import uuid
+def full_matrix() -> list[dict]:
+    """36 сценариев раздела 10.1: 3 × 6 × 2."""
+    out = []
+    for count in (2, 3, 4):
+        for shot_name, shot in SHOTS.items():
+            for long in (False, True):
+                answers = (LONG_ANSWERS if long else SHORT_ANSWERS)[count]
+                out.append({
+                    "name": f"{count}-{shot_name}-{'long' if long else 'short'}",
+                    "label": f"{count} отв., фото {shot_name}, "
+                             f"{'длинный' if long else 'короткий'}",
+                    "text": LONG_Q if long else SHORT_Q,
+                    "options": answers,
+                    "shot": shot,
+                    "long": long,
+                    "count": count,
+                    "shot_name": shot_name,
+                    "small": False,
+                })
+    return out
 
+def small_set() -> list[dict]:
+    """6 сценариев раздела 10.2."""
+    out = []
+    for i, s in enumerate(SMALL_SET, 1):
+        answers = (LONG_ANSWERS if s["long"] else SHORT_ANSWERS)[s["count"]]
+        out.append({
+            "name": f"s{i}-{s['count']}-{s['shot']}",
+            "label": s["label"],
+            "text": LONG_Q if s["long"] else SHORT_Q,
+            "options": answers,
+            "shot": SHOTS[s["shot"]],
+            "long": s["long"],
+            "count": s["count"],
+            "shot_name": s["shot"],
+            "small": True,
+        })
+    return out
+
+
+def build_event(scenarios: list[dict]) -> dict:
+    """Создать событие со сценариями и вернуть адреса."""
     root = BASE
     tmp = Path(os.environ.get("TEMP", ".")) / "opencode" / "stand-shots"
 
-    # Убираем прежнее событие с тем же названием.
     _, listing = admin_get("/api/admin/events")
     for e in (listing.get("events") or []):
         if e.get("title") == EVENT_TITLE and e.get("slug"):
@@ -319,7 +279,6 @@ def build_event() -> dict:
         st, card = admin_post(f"/api/admin/events/{slug}")
         links = card.get("links") or {}
 
-    total = len(SCENARIOS)
     base = f"/e/{slug}"
     jar = http.cookiejar.CookieJar()
     opener = urllib.request.build_opener(
@@ -364,24 +323,26 @@ def build_event() -> dict:
     if st != 200:
         raise SystemExit(f"ведущий не вошёл: {st}")
 
-    call(f"{base}/api/moderator/quiz/title", {"title": EVENT_TITLE})
+    call(f"{base}/api/moderator/quiz/title", {"title": "Стенд раскладки"})
 
     ids = []
-    for n, s in enumerate(SCENARIOS, 1):
+    for n, s in enumerate(scenarios, 1):
+        # Длинный текст подрезаем под лимиты сервера: стенд проверяет
+        # границу, которую автор вопроса реально увидит в кабинете.
+        limit_q, limit_o = LIMITS[orientation_of(s.get("shot"))]
         fields = {
-            "text": s["text"],
-            "options": json.dumps(s["options"], ensure_ascii=False),
-            "correct": str(s["correct"]),
-            "scored": "0" if s["correct"] < 0 else "1",
+            "text": fit_text(s["text"], limit_q),
+            # правильный вариант не важен: кадр снимаем до голосования
+            "options": json.dumps(
+                [fit_text(o, limit_o) for o in s["options"]], ensure_ascii=False),
+            "correct": "0",
+            "scored": "1",
             "seconds": "0",
         }
         shot = s.get("shot")
-        if shot == "text-image":
-            img = figure(1200, 800, tmp / "text-inside.jpg", with_text=True)
-            st, body = call_file(f"{base}/api/moderator/quiz/add", fields, img)
-        elif shot:
+        if shot:
             w, h = shot
-            img = figure(w, h, tmp / f"fig-{w}x{h}.jpg")
+            img = figure(w, h, tmp / f"fig-{w}x{h}-{n}.jpg")
             st, body = call_file(f"{base}/api/moderator/quiz/add", fields, img)
         else:
             st, body = call(f"{base}/api/moderator/quiz/add", fields)
@@ -404,7 +365,6 @@ MEASURE = r"""
     b: Math.round(r.bottom), r: Math.round(r.right) }; };
   const play = document.getElementById('quizPlay');
   const body = document.getElementById('quizBody');
-  const head = document.getElementById('quizHead');
   const q = document.getElementById('quizQText');
   const opts = document.getElementById('quizOpts');
   const shot = document.getElementById('quizShot');
@@ -424,101 +384,166 @@ MEASURE = r"""
     const ir = idx ? R(idx) : null;
     const tr = txt ? R(txt) : null;
     const nr = num ? R(num) : null;
+    /* «100%» — самая широкая надпись, которая вообще может попасть в зону.
+       Ставим её на время замера и возвращаем прежний текст: если она
+       влезает в свою колонку, влезет и любое другое значение. */
+    let numFit = true;
+    if (num) {
+      const was = num.textContent;
+      const hidden = getComputedStyle(num).visibility === 'hidden';
+      num.style.visibility = 'visible';
+      const keep = num.classList.contains('is-blank');
+      num.classList.remove('is-blank');
+      num.textContent = '100%';
+      numFit = num.scrollWidth <= num.clientWidth + 1;
+      num.textContent = was;
+      if (keep) num.classList.add('is-blank');
+      if (hidden) num.style.visibility = '';
+    }
     if (ir && tr && rr(ir, tr)) overlaps.push('номер накладывается на текст');
     if (nr && tr && rr(nr, tr)) overlaps.push('процент накладывается на текст');
     items.push({
       rect: cr,
       idx: ir, text: tr, num: nr,
-      font: txt ? getComputedStyle(txt).fontSize : null,
+      font: txt ? parseFloat(getComputedStyle(txt).fontSize) : 0,
       lines: txt ? Math.round(txt.getBoundingClientRect().height
         / (parseFloat(getComputedStyle(txt).lineHeight) || 1)) : 0,
       clipped: txt ? txt.scrollHeight > txt.clientHeight + 1 : false,
-      hasNum: num ? getComputedStyle(num).visibility !== 'hidden' : false,
+      cardClipped: c.scrollHeight > c.clientHeight + 1,
+      hasNum: num ? true : false,
+      numFit,
       numText: num ? num.textContent : '',
     });
   }
 
-  /* Безопасная область: 5% по краям на эталонном макете, при другом
-     формате движок считает свои поля. Здесь проверяем, что ничего не
-     выходит за вьюпорт. */
-  const outside = [];
+  /* Область контента по ТЗ: 5% полей с каждой стороны и 1920 виртуальных
+     px по центру, если холст шире 16:9. Считаем ту же геометрию, что и
+     движок, и проверяем попадание в неё. */
   const vw = innerWidth, vh = innerHeight;
+  const k = Math.min(vw / 1920, vh / 1080);
+  const Cw = Math.min(vw * 0.9, 1920 * k);
+  const Ch = vh * 0.9;
+  const area = {
+    l: Math.round((vw - Cw) / 2), r: Math.round((vw + Cw) / 2),
+    t: Math.round((vh - Ch) / 2), b: Math.round((vh + Ch) / 2),
+  };
+
+  const outside = [];
   const check = (r, what) => {
     if (!r) return;
     if (r.l < -1 || r.t < -1 || r.r > vw + 1 || r.b > vh + 1) {
-      outside.push(what);
+      outside.push(what + ' за краем экрана');
+    } else if (r.l < area.l - 2 || r.r > area.r + 2
+            || r.t < area.t - 2 || r.b > area.b + 2) {
+      outside.push(what + ' за пределами области контента');
     }
   };
   check(R(q), 'вопрос');
   check(R(opts), 'ответы');
-  if (shot && !shot.hidden) check(R(img), 'изображение');
-  check(R(count), 'подпись');
+  if (shot && !shot.hidden && img.naturalWidth) check(R(img), 'изображение');
+  if (count && count.textContent) check(R(count), 'подпись');
   for (const it of items) check(it.rect, 'карточка');
 
   return JSON.stringify({
     viewport: [vw, vh],
-    layout: play.dataset.layout || null,
+    scale: +k.toFixed(4),
+    layoutV: play.dataset.layout || null,
     kind: body.dataset.kind || null,
-    question: (q.textContent || '').slice(0, 50),
-    questionRect: R(q),
-    questionFont: Math.round(parseFloat(getComputedStyle(q).fontSize)),
+    planLayout: (typeof quizPlayLayout !== 'undefined' && quizPlayLayout.plan)
+      ? quizPlayLayout.plan.layout : null,
+    questionFont: parseFloat(getComputedStyle(q).fontSize),
     questionClipped: q.scrollHeight > q.clientHeight + 1,
     image: (shot && !shot.hidden && img.naturalWidth)
       ? { rect: R(img), natural: [img.naturalWidth, img.naturalHeight],
+          upscale: +(R(img).w / img.naturalWidth).toFixed(3),
           share: +(R(img).h / vh).toFixed(3) }
       : null,
+    questionRect: R(q),
     opts: R(opts),
     count: R(count),
     cards: items,
     overlaps: [...new Set(overlaps)],
     outside: [...new Set(outside)],
     zoom: play.querySelector('.quiz-fit').style.zoom || '1',
+    warnings: (typeof quizPlayLayout !== 'undefined' && quizPlayLayout.plan)
+      ? (quizPlayLayout.plan.warnings || []) : [],
+    cardWidth: items.length ? items[0].rect.w : 0,
   });
 })()
 """
 
 
-def check_frame(m: dict) -> list[str]:
-    """Проверки раздела 18 ТЗ. Возвращает список проблем."""
-    problems = list(m["overlaps"]) + [f"за краем: {x}" for x in m["outside"]]
+def check_frame(m: dict, scenario: dict | None = None,
+                fmt: str | None = None) -> list[str]:
+    """Проверки раздела 10.3."""
+    problems = list(m["overlaps"]) + m["outside"]
+
+    if m["layoutV"] != "v3":
+        problems.append(f"раскладка {m['layoutV']}, а ожидалась v3")
     if m["questionClipped"]:
         problems.append("вопрос обрезан")
     if not m["cards"]:
         problems.append("нет карточек ответов")
+
     for i, c in enumerate(m["cards"], 1):
-        if c["clipped"]:
+        if c["clipped"] or c["cardClipped"]:
             problems.append(f"ответ {i} обрезан")
         if not c["rect"]["w"] or not c["rect"]["h"]:
             problems.append(f"ответ {i} нулевого размера")
-    fonts = [c["font"] for c in m["cards"] if c["font"]]
-    if fonts:
-        # Минимум по ТЗ (34 px) задан для эталона 1920x1080. На другом
-        # формате движок масштабирует его пропорционально, поэтому и
-        # проверка должна считать минимум от масштаба, а не жёстко 20.5.
-        cfg = {"ref": 1920}
-        vw, vh = m["viewport"]
-        scale = min(vw / 1920, vh / 1080)
-        min_ok = 34 * scale - 0.6
-        small = [f for f in fonts if float(f.replace("px", "")) < min_ok]
-        if small:
+        # Проценты должны влезать в свою зону; до показа их место занято
+        # невидимым «100%».
+        if c["num"] and c["num"]["w"] < 1:
+            problems.append(f"ответ {i}: нет зоны процента")
+        # «100%» — самая широкая надпись. Если она шире своей колонки,
+        # процент выедет на текст при любом реальном значении.
+        if c.get("numFit") is False:
+            problems.append(f"ответ {i}: «100%» не влезает в зону процента")
+
+    if m["cards"]:
+        fonts = [c["font"] for c in m["cards"]]
+        k = m["scale"]
+        if min(fonts) < 28 * k - 1:
             problems.append(
-                f"кегль ответа {small[0]} ниже минимума {min_ok:.1f}")
-    if m["questionFont"] < 24:
-        problems.append(f"кегль вопроса {m['questionFont']} < 24")
+                f"кегль ответа {min(fonts):.1f} ниже минимума {28 * k:.1f}")
+        if m["questionFont"] < 32 * k - 1:
+            problems.append(
+                f"кегль вопроса {m['questionFont']:.1f} ниже "
+                f"{32 * k:.1f}")
+        # Карточки одной группы одной ширины.
+        widths = {c["rect"]["w"] for c in m["cards"]}
+        if len(widths) > 1:
+            problems.append("карточки разной ширины")
+        # Компактность: короткий ответ не должен занимать пол-экрана.
+        if m["cardWidth"] > m["viewport"][0] * 0.72:
+            problems.append(
+                f"карточка {m['cardWidth']} px — больше 70% ширины")
+
     if m["image"]:
-        # Доля высоты проверяется только для режима «фото сверху»: в боковом
-        # режиме вертикальный снимок законно занимает почти всю высоту,
-        # потому что стоит рядом с текстом, а не над ним.
-        share = m["image"]["share"]
-        if m["kind"] != "image-side" and share > 0.55:
-            problems.append(f"фото занимает {round(share*100)}% кадра")
-        if m["kind"] == "image-side" and share > 0.92:
-            problems.append(f"фото занимает {round(share*100)}% кадра")
+        if m["image"]["upscale"] > 1.5 + 0.02:
+            problems.append(f"картинка увеличена в {m['image']['upscale']}×")
+        nw, nh = m["image"]["natural"]
+        rw = m["image"]["rect"]["w"] / max(1, m["image"]["rect"]["h"])
+        if abs(rw - nw / nh) > 0.03:
+            problems.append("картинка искажена")
+
+    for w in m["warnings"]:
+        if "обрезан" in w or "вне 4:3" in w:
+            problems.append(w)
+
+    # Схема кадра по разделу 4: квадрат уходит в две колонки только на
+    # достаточно широком холсте, на 4:3 остаётся стек. Это отдельный пункт
+    # проверки 10.3, и он ловит сдвиг порога squareSideRatio.
+    if scenario and scenario.get("shot_name") == "1x1":
+        expect = "B" if fmt in ("4x3",) else "C"
+        if m.get("planLayout") not in (None, expect):
+            problems.append(
+                f"квадрат дал схему {m['planLayout']}, ожидалась {expect}")
     return problems
 
 
-def run_stand(event: dict, formats, only: list[int], out: Path) -> list[dict]:
-    """Прогнать сценарии по форматам и собрать отчёт."""
+def run_stand(event: dict, scenarios: list[dict], formats, only,
+              out: Path) -> list[dict]:
+    """Прогнать сценарии по холстам и собрать отчёт."""
     chrome = find_chrome()
     rows = []
 
@@ -558,32 +583,40 @@ def run_stand(event: dict, formats, only: list[int], out: Path) -> list[dict]:
         cdp.send("Network.setCacheDisabled", cacheDisabled=True)
 
         qids = event["ids"]
+        screen_url = f"{BASE}{event['base']}/screen?d=" \
+                     f"{event['links']['screen'].split('d=')[-1]}"
+
         for w, h, fmt in formats:
             cdp.send("Emulation.setDeviceMetricsOverride",
                      width=w, height=h, deviceScaleFactor=1, mobile=False)
             (out / fmt).mkdir(parents=True, exist_ok=True)
-            for idx, s in enumerate(SCENARIOS):
+            for idx, s in enumerate(scenarios):
                 n = idx + 1
                 if only and n not in only:
+                    continue
+                # Сокращённый набор — только на неосновных холстах.
+                if s["small"] and fmt == "16x9":
+                    continue
+                if not s["small"] and fmt != "16x9":
                     continue
                 qid = qids[idx] if idx < len(qids) else None
                 if not qid:
                     rows.append({"fmt": fmt, "n": n, "name": s["name"],
-                                 "label": s["label"], "error": "нет вопроса"})
+                                 "label": s["label"], "error": "нет вопроса",
+                                 "small": s["small"]})
                     continue
                 post(f"{event['base']}/api/moderator/quiz/control",
                      {"action": "open", "question_id": str(qid)})
-                cdp.send("Page.navigate",
-                         url=f"{BASE}{event['base']}/screen?d="
-                             f"{event['links']['screen'].split('d=')[-1]}")
-                time.sleep(1.3)
+                cdp.send("Page.navigate", url=screen_url)
+                time.sleep(1.4)
                 raw = cdp.js(MEASURE)
                 if not raw:
                     rows.append({"fmt": fmt, "n": n, "name": s["name"],
-                                 "label": s["label"], "error": "нет данных"})
+                                 "label": s["label"], "error": "нет данных",
+                                 "small": s["small"]})
                     continue
                 m = json.loads(raw)
-                problems = check_frame(m)
+                problems = check_frame(m, s, fmt)
 
                 shot = cdp.send("Page.captureScreenshot", format="png")
                 b64 = shot.get("result", {}).get("data")
@@ -591,42 +624,46 @@ def run_stand(event: dict, formats, only: list[int], out: Path) -> list[dict]:
                     (out / fmt / f"{s['name']}.png").write_bytes(
                         base64.b64decode(b64))
 
-                # Сценарий с голосованием: закрываем и показываем проценты,
-                # геометрия не должна измениться.
-                reveals = None
-                if s.get("voting"):
-                    before = cdp.js(MEASURE)
-                    post(f"{event['base']}/api/moderator/quiz/control",
-                         {"action": "close"})
-                    time.sleep(0.9)
-                    post(f"{event['base']}/api/moderator/quiz/control",
-                         {"action": "reveal"})
-                    time.sleep(1.1)
-                    after = cdp.js(MEASURE)
-                    shifted = geometry_diff(
-                        json.loads(before), json.loads(after))
-                    reveals = {"before": json.loads(before),
-                               "after": json.loads(after),
-                               "shifted": shifted}
+                # Распределение: показываем «100%» во всех карточках (раздел
+                # 10.3 — процент не должен наезжать на текст) и убеждаемся,
+                # что геометрия не поехала.
+                after = None
+                post(f"{event['base']}/api/moderator/quiz/control",
+                     {"action": "close"})
+                time.sleep(0.7)
+                cdp.js("document.querySelectorAll('#quizOpts .quiz-s-num')"
+                       ".forEach(n => { n.classList.remove('is-blank'); "
+                       "n.textContent = '100%'; }); 0")
+                time.sleep(0.4)
+                after_raw = cdp.js(MEASURE)
+                if after_raw:
+                    after = json.loads(after_raw)
+                    shifted = geometry_diff(m, after)
                     if shifted:
-                        problems.append("после голосования: " + ", ".join(shifted))
+                        problems.append("после голосования: "
+                                        + ", ".join(shifted))
                     shot2 = cdp.send("Page.captureScreenshot", format="png")
                     if shot2.get("result", {}).get("data"):
                         (out / fmt / f"{s['name']}-results.png").write_bytes(
                             base64.b64decode(shot2["result"]["data"]))
+                post(f"{event['base']}/api/moderator/quiz/control",
+                     {"action": "reset"})
 
                 rows.append({
                     "fmt": fmt, "n": n, "name": s["name"],
                     "label": s["label"], "problems": problems,
                     "questionFont": m["questionFont"],
-                    "answerFont": [c["font"] for c in m["cards"]],
-                    "imageShare": m["image"]["share"] if m["image"] else None,
+                    "answerFont": m["cards"][0]["font"] if m["cards"] else 0,
+                    "scale": m["scale"],
                     "kind": m["kind"], "zoom": m["zoom"],
+                    "cardWidth": m["cardWidth"],
+                    "imageUpscale": m["image"]["upscale"] if m["image"] else None,
                     "cards": len(m["cards"]),
-                    "voting": reveals,
+                    "warnings": m["warnings"],
+                    "small": s["small"],
                 })
                 state = "ок" if not problems else ", ".join(problems)
-                print(f"  {fmt:<5} {n:>2}. {s['label'][:46]:<46} {state}")
+                print(f"  {fmt:<9} {n:>2}. {s['label'][:44]:<44} {state}")
         return rows
     finally:
         proc.terminate()
@@ -637,22 +674,17 @@ def run_stand(event: dict, formats, only: list[int], out: Path) -> list[dict]:
 
 
 def geometry_diff(a: dict, b: dict) -> list[str]:
-    """Что поехало между двумя замерами одного кадра."""
+    """Что поехало между приёмом ответов и распределением."""
     diff = []
-    if a["image"] and b["image"]:
-        if a["image"]["rect"] != b["image"]["rect"]:
-            diff.append("изображение")
+    if a["image"] and b["image"] and a["image"]["rect"] != b["image"]["rect"]:
+        diff.append("изображение")
     if a["questionRect"] != b["questionRect"]:
         diff.append("вопрос")
     if a["opts"] != b["opts"]:
         diff.append("блок ответов")
-    ca = [c["rect"] for c in a["cards"]]
-    cb = [c["rect"] for c in b["cards"]]
-    if ca != cb:
+    if [c["rect"] for c in a["cards"]] != [c["rect"] for c in b["cards"]]:
         diff.append("карточки")
-    fa = [c["font"] for c in a["cards"]]
-    fb = [c["font"] for c in b["cards"]]
-    if fa != fb:
+    if [c["font"] for c in a["cards"]] != [c["font"] for c in b["cards"]]:
         diff.append("кегли")
     if a["zoom"] != b["zoom"]:
         diff.append("масштаб")
@@ -661,7 +693,7 @@ def geometry_diff(a: dict, b: dict) -> list[str]:
 
 def write_report(rows: list[dict], out: Path, event: dict) -> None:
     """Отчёт в HTML: таблица и ссылки на скриншоты."""
-    formats = sorted({r["fmt"] for r in rows})
+    formats = [f[2] for f in FORMATS if any(r["fmt"] == f[2] for r in rows)]
     by_n: dict[int, dict] = {}
     for r in rows:
         by_n.setdefault(r["n"], {"label": r["label"]})[r["fmt"]] = r
@@ -673,27 +705,28 @@ def write_report(rows: list[dict], out: Path, event: dict) -> None:
             return f'<td class="bad">{r["error"]}</td>'
         bad = r["problems"]
         cls = "bad" if bad else "ok"
-        img = f'<a href="{r["fmt"]}/{r["name"]}.png">скрин</a>'
-        if r.get("voting"):
-            img += f' · <a href="{r["fmt"]}/{r["name"]}-results.png">итог</a>'
-        txt = f"{r['questionFont']}/{[x for x in r['answerFont']][0] if r['answerFont'] else '—'}"
+        img = f'<a href="{r["fmt"]}/{r["name"]}.png">скрин</a>' \
+              f' · <a href="{r["fmt"]}/{r["name"]}-results.png">итог</a>'
+        txt = f"{r['questionFont']:.0f}/{r['answerFont']:.0f}"
         note = " · ".join(bad) if bad else "ок"
-        return f'<td class="{cls}"><b>{note}</b><br>{img}<br>кегли {txt}</td>'
+        return (f'<td class="{cls}"><b>{note}</b><br>{img}<br>'
+                f'кегли {txt} · карточка {r["cardWidth"]} px</td>')
 
+    bad_count = sum(1 for r in rows if r.get("problems"))
     html = [
         "<!doctype html><meta charset='utf-8'>",
         "<title>Стенд раскладки квиза</title>",
         "<style>",
         "body{font:15px/1.5 system-ui,sans-serif;background:#0f1320;color:#e8ecf8;"
-        "margin:24px;max-width:1400px}",
+        "margin:24px;max-width:1500px}",
         "h1{font-size:22px}table{border-collapse:collapse;width:100%}"
         "th,td{border:1px solid #2a3350;padding:8px 10px;vertical-align:top;"
         "text-align:left}th{background:#182036}",
         "td.ok{background:#10271c}td.bad{background:#2b1418}",
-        "a{color:#8ab4ff}.n{width:210px}",
+        "a{color:#8ab4ff}.n{width:260px}",
         "</style>",
-        f"<h1>Стенд раскладки: {len(by_n)} сценариев, "
-        f"{len(formats)} форматов</h1>",
+        f"<h1>Стенд раскладки: {len(rows)} кадров, "
+        f"с замечаниями {bad_count}</h1>",
         "<p>Событие: <a href='" + BASE + event["links"]["screen"] + "'>экран</a>"
         f" · <a href='{BASE}{event['base']}/moderator'>кабинет</a>"
         f" · пароль <code>{MOD_PASSWORD}</code></p>",
@@ -712,7 +745,7 @@ def write_report(rows: list[dict], out: Path, event: dict) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser(description="стенд раскладки квиза")
     ap.add_argument("--only", help="номера сценариев через запятую")
-    ap.add_argument("--formats", help="форматы: 16x9,4x3,1x1")
+    ap.add_argument("--formats", help="холсты: 16x9,16x10,5x3,4x3,1280x720")
     ap.add_argument("--out", default="layout-stand", help="папка результатов")
     ap.add_argument("--rebuild", action="store_true",
                     help="пересоздать событие (иначе используется готовое)")
@@ -721,30 +754,28 @@ def main() -> int:
     only = [int(x) for x in args.only.split(",")] if args.only else []
     wanted = {x.strip() for x in args.formats.split(",")} if args.formats else None
     formats = [f for f in FORMATS if not wanted or f[2] in wanted]
+
+    scenarios = full_matrix() + small_set()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
 
-    print("Готовлю событие со сценариями…")
-    event = build_event()
+    print(f"Готовлю событие: {len(scenarios)} вопросов…")
+    event = build_event(scenarios)
     print(f"\nСобытие: {event['slug']}, вопросов: {len(event['ids'])}")
     print(f"Экран: {event['links'].get('screen')}\n")
 
     print("Прогон:")
-    rows = run_stand(event, formats, only, out)
+    rows = run_stand(event, scenarios, formats, only, out)
     write_report(rows, out, event)
 
     bad = [r for r in rows if r.get("problems")]
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"Всего кадров: {len(rows)}, с замечаниями: {len(bad)}")
-    if bad:
-        print("\nЗамечания:")
-        for r in bad:
-            print(f"  {r['fmt']} {r['n']:>2}. {r['label'][:40]}: "
-                  + ", ".join(r["problems"]))
-    print(f"\nОтчёт: {(out / 'report.html').resolve()}")
-    print(f"Скриншоты: {out.resolve()}")
-    return 0 if not bad else 1
+    for r in bad:
+        print(f"  {r['fmt']:<9} {r['n']:>2}. {r['label'][:40]}: "
+              + "; ".join(r["problems"]))
+    return 1 if bad else 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())

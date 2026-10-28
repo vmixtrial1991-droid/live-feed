@@ -326,15 +326,49 @@ function fitQuizActive(force = false) {
     return;
   }
 
-  const plan = buildQuizPlan(quizPlay);
-  if (!plan) return;
+  /* План считается по метрикам canvas, а браузер переносит текст сам
+     (`text-wrap: pretty` может увести слово на новую строку). Поэтому
+     после применения проверяем реальную высоту тела кадра и, если оно
+     вылезло, пересчитываем с уменьшенной доступной высотой. Две попытки
+     хватает: каждая честно меряет то, что получилось. */
+  let extra = 0;
+  let plan = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    plan = buildQuizPlan(quizPlay, extra);
+    if (!plan) return;
+    quizPlayLayout.plan = plan;
+    applyQuizPlan(quizPlay, quizPlayLayout);
+    const overflow = quizOverflow(quizPlay);
+    if (overflow <= 1) break;
+    extra += overflow;
+  }
   quizPlayLayout.key = key;
-  quizPlayLayout.plan = plan;
-  applyQuizPlan(quizPlay, quizPlayLayout);
 }
 
-/* Собрать план для текущего содержимого кадра. */
-function buildQuizPlan(block) {
+/* Насколько тело кадра выше отведённого места. 0 — влезло.
+
+   Меряем по фактическим прямоугольникам детей, а не по scrollHeight:
+   .quiz-fit центрирует содержимое флексом, и при переполнении лишнее
+   уходит и вверх, и вниз — scrollHeight ловит только низ. */
+function quizOverflow(block) {
+  const fit = block.querySelector(".quiz-fit");
+  if (!fit) return 0;
+  const box = fit.getBoundingClientRect();
+  if (!box.height) return 0;
+  let over = 0;
+  for (const el of fit.querySelectorAll("*")) {
+    const r = el.getBoundingClientRect();
+    if (!r.height) continue;
+    over = Math.max(over, box.top - r.top, r.bottom - box.bottom);
+  }
+  return Math.max(0, Math.round(over));
+}
+
+/* Собрать план для текущего содержимого кадра.
+   extra — сколько пикселей уже не хватило по факту (см. fitQuizActive):
+   эта величина вычитается из доступной высоты, чтобы следующий расчёт
+   честно уложился в кадр. */
+function buildQuizPlan(block, extra = 0) {
   const body = block.querySelector(".quiz-body");
   if (!body) return null;
   const qEl = block.querySelector(".quiz-q");
@@ -355,38 +389,46 @@ function buildQuizPlan(block) {
     ? { width: img.naturalWidth, height: img.naturalHeight }
     : null;
 
-  /* Масштаб: всё в конфигурации задано для 1920×1080. На другом окне
-     пересчитываем пропорционально, но по меньшей стороне — иначе на 4:3
-     шрифт вырастет и не влезет. */
-  const vw = window.innerWidth;
-  const vh = window.innerHeight;
-  const cfg = window.quizLayout.config;
-  const scale = Math.min(vw / cfg.referenceWidth, vh / cfg.referenceHeight);
+  /* Область контента считаем от самого блока, а не от .quiz-fit: высота
+     .quiz-fit зависит от содержимого (он растягивается под него), и мерить
+     её до применения плана — значит получить размер, который сейчас же
+     изменится. У блока геометрия постоянная: height 100% плюс поля, шапка
+     вопроса и зазор между ними.
 
-  /* Безопасная область кадра. Но содержимое живёт не во всём кадре: сверху
-     шапка вопроса (номер и таймер) и внутренние отступы блока. Поэтому
-     реальная высота под кадр меньше, и план должен считать от неё, иначе
-     масштаб не срабатывает и подпись уезжает за край. */
-  const headEl = document.querySelector("#quizPlay .quiz-head");
-  const headH = headEl ? headEl.getBoundingClientRect().height : 0;
+     Если блок скрыт (идёт смена кадра), размеров нет — движок посчитает
+     область по ТЗ: поля 5%, ширина не больше 1920 виртуальных px. */
   const screenEl = document.getElementById("quizPlay");
   const scs = screenEl ? getComputedStyle(screenEl) : null;
+  const headEl = document.querySelector("#quizPlay .quiz-head");
+  const headH = headEl ? headEl.getBoundingClientRect().height : 0;
   const padY = scs
     ? parseFloat(scs.paddingTop) + parseFloat(scs.paddingBottom) : 0;
+  const padX = scs
+    ? parseFloat(scs.paddingLeft) + parseFloat(scs.paddingRight) : 0;
   const framePad = scs ? parseFloat(scs.rowGap) || 0 : 0;
-  const usableH = Math.max(0, vh - headH - padY - framePad);
+  const blockH = screenEl ? screenEl.clientHeight : 0;
+  const blockW = screenEl ? screenEl.clientWidth : 0;
+  const usableH = Math.max(0, (blockH > 0
+    ? blockH - padY - headH - framePad
+    : window.innerHeight - headH - padY - framePad) - extra);
+  const usableW = blockW > 0 ? blockW - padX : 0;
 
   const plan = window.quizLayout.plan({
     question: qText,
     answers,
     image,
-    viewport: { width: vw, height: vh },
-    scale,
+    viewport: { width: window.innerWidth, height: window.innerHeight },
     usableHeight: usableH,
+    usableWidth: usableW,
   });
 
   const check = window.quizLayout.validate(plan);
   plan.problems = check.problems;
+  /* Что движок не смог — в консоль экрана. Проектор без консоли, но при
+     разборе жалобы «мелко» или «обрезано» сразу видно, на чём упёрлись. */
+  if (plan.warnings.length || plan.problems.length) {
+    console.warn("[quiz-layout]", plan.layout, plan.warnings, plan.problems);
+  }
   return plan;
 }
 
@@ -399,67 +441,59 @@ function applyQuizPlan(block, stored) {
   const opts = block.querySelector(".quiz-opts");
   if (!body || !opts) return;
 
-  block.dataset.layout = "v2";
-  /* Режим фото: классы для CSS (в них только направление колонок). */
-  body.dataset.kind = plan.kind;
+  block.dataset.layout = "v3";
+  /* Схема кадра: A — колонка, B — стек с фото сверху, C — фото слева.
+     В CSS на эти имена завязано только направление колонок. */
+  body.dataset.kind = plan.mode;
   const shot = block.querySelector(".quiz-shot");
   if (shot) {
-    if (plan.kind === "text-only") {
+    if (plan.mode === "text-only") {
       shot.hidden = true;
     } else {
       shot.hidden = false;
-      shot.style.setProperty("--ql-shot-w", `${Math.round(plan.image.boxWidth)}px`);
-      shot.style.setProperty("--ql-shot-h", `${Math.round(plan.image.boxHeight)}px`);
+      shot.style.setProperty("--ql-shot-w", `${Math.round(plan.image.width)}px`);
+      shot.style.setProperty("--ql-shot-h", `${Math.round(plan.image.height)}px`);
+      shot.style.setProperty("--ql-shot-box-w", `${Math.round(plan.image.boxWidth)}px`);
+      shot.style.setProperty("--ql-shot-box-h", `${Math.round(plan.image.boxHeight)}px`);
     }
   }
 
-  /* Вопрос. */
+  /* Вопрос: кегль и предел ширины из плана (в схеме C — ширина правой
+     колонки, в A — не шире 75% холста). */
   block.style.setProperty("--ql-q-size", `${plan.question.font.toFixed(1)}px`);
-  /* Ширина текстовой колонки в боковом режиме — из плана. */
+  block.style.setProperty("--ql-q-w", `${Math.round(plan.question.maxWidth)}px`);
+
+  /* Правая колонка схемы C. */
   if (plan.textColumnWidth) {
     block.style.setProperty("--ql-text-w", `${Math.round(plan.textColumnWidth)}px`);
+    block.style.setProperty("--ql-side-gap", `${Math.round(plan.sideGap)}px`);
   } else {
     block.style.removeProperty("--ql-text-w");
+    block.style.removeProperty("--ql-side-gap");
   }
 
-  /* Ответы: сетка и карточки. Ширину колонки задаём числом из плана:
-     иначе `1fr` растягивает колонки независимо, и в ряду из трёх карточек
-     последняя оказывается другой ширины. */
-  opts.style.setProperty("--ql-col-w",
-    `${Math.floor(plan.answers.cardWidth)}px`);
+  /* Ответы. Ширину карточки и всей группы задаём числами из плана: иначе
+     `1fr` растягивает колонки независимо, и короткое «Да» занимает
+     пол-экрана — ровно то, чего ТЗ не велит. */
   opts.style.setProperty("--ql-cols",
     `repeat(${plan.answers.cols}, ${Math.floor(plan.answers.cardWidth)}px)`);
-  opts.style.setProperty("--ql-group-w",
-    `${Math.round(plan.answers.totalWidth)}px`);
-  block.style.setProperty("--ql-answer-size",
-    `${plan.answers.font.toFixed(1)}px`);
-  block.style.setProperty("--ql-answer-number",
-    `${(plan.answers.font * 0.9).toFixed(1)}px`);
-  block.style.setProperty("--ql-answer-percent",
-    `${(plan.answers.font * 0.9).toFixed(1)}px`);
-  block.style.setProperty("--ql-card-h", `${plan.answers.cardH}px`);
+  opts.style.setProperty("--ql-group-w", `${Math.round(plan.answers.groupWidth)}px`);
+  block.style.setProperty("--ql-answer-size", `${plan.answers.font.toFixed(1)}px`);
   block.style.setProperty("--ql-card-gap-x", `${Math.round(plan.answers.gapX)}px`);
   block.style.setProperty("--ql-card-gap-y", `${Math.round(plan.answers.gapY)}px`);
-  block.style.setProperty("--ql-q-gap",
-    `${Math.round(window.quizLayout.config.frame.questionToAnswers * plan.scale)}px`);
+  /* Подпись «ответили»: её кегль из плана. clamp в CSS не знает про масштаб
+     кадра, и на 4:3 подпись выходила крупнее расчётной — группа вылезала за
+     нижнюю границу ровно на эту разницу. */
+  block.style.setProperty("--ql-caption-size",
+    `${plan.captionHeight ? (plan.captionHeight / 1.4).toFixed(1) : 24}px`);
+  block.style.setProperty("--ql-q-gap", `${Math.round(plan.gap)}px`);
 
-  /* Ширины зон карточки: фиксированные, чтобы процент и номер не наезжали
-     на текст и не двигались при появлении результатов. */
-  const cfg = window.quizLayout.config.answerCard;
-  block.style.setProperty("--ql-number-col", `${Math.round(cfg.numberColumn * plan.scale)}px`);
-  block.style.setProperty("--ql-percent-col", `${Math.round(cfg.percentColumn * plan.scale)}px`);
-  block.style.setProperty("--ql-number-gap", `${Math.round(cfg.numberToTextGap * plan.scale)}px`);
-  block.style.setProperty("--ql-text-percent-gap", `${Math.round(cfg.textToPercentGap * plan.scale)}px`);
-  block.style.setProperty("--ql-card-pad-x", `${Math.round(cfg.paddingX * plan.scale)}px`);
-  block.style.setProperty("--ql-card-pad-y", `${Math.round(cfg.paddingY * plan.scale)}px`);
-  block.style.setProperty("--ql-card-min-h", `${Math.round(cfg.minHeight * plan.scale)}px`);
-
-  /* Если содержимое всё же не влезло в безопасную область, добираем
-     общим масштабом — но не мельче предела. Движок уже старался этого
-     избежать, поэтому это редкий случай. */
+  /* Если содержимое всё же не влезло в область контента, добираем общим
+     масштабом — но план уже старался этого избежать, поэтому это редкий
+     случай и признак того, что какая-то проверка не сработала. */
   const inner = block.querySelector(".quiz-fit");
   if (inner) {
-    const safeH = plan.safe.height;
+    const safeH = plan.area.height;
     const need = plan.totalHeight;
     if (need > safeH && need > 0) {
       const z = Math.max(0.6, safeH / need);
@@ -469,6 +503,7 @@ function applyQuizPlan(block, stored) {
     }
   }
 }
+
 
 /* Сохранённая подгонка текущего вопроса. */
 const quizPlayLayout = { key: null, zoom: "1", vars: null, cards: null };

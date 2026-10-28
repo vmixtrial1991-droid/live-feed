@@ -736,28 +736,37 @@ check("quiz-layout.js: текст меряется реальными метри
       "quizTextMeasurer" in layout_js and "measureText" in layout_js)
 check("quiz-layout.js: все размеры в одном конфиге",
       "quizLayoutConfig" in layout_js and "answerCard" in layout_js
-      and "typography" in layout_js and "safeArea" in layout_js)
-check("quiz-layout.js: компоновка выбирается перебором кандидатов",
+      and "typography" in layout_js and "layout:" in layout_js)
+check("quiz-layout.js: схему кадра выбирает раздел 4 ТЗ",
+      "function chooseLayout" in layout_js
+      and '"landscape"' in layout_js and '"portrait"' in layout_js
+      and "squareSideRatio" in layout_js)
+check("quiz-layout.js: число колонок ответов задаёт схема",
       "function chooseAnswersLayout" in layout_js
       and '"grid2"' in layout_js and '"column"' in layout_js)
-check("quiz-layout.js: есть проверка безопасной области",
+check("quiz-layout.js: есть проверка плана",
       "function validateQuizPlan" in layout_js
-      and "safeArea" in layout_js)
+      and "imageUpscaleMax" in layout_js)
 check("quiz-layout.js: место под проценты зарезервировано в конфиге",
       "percentColumn" in layout_js and "textToPercentGap" in layout_js)
-check("screen.css: карточка v2 — три зоны сеткой",
-      re.search(r"\.quiz-block\[data-layout=\"v2\"\] \.quiz-s-opt\s*\{[^}]*grid-template-columns:\s*\n\s*var\(--ql-number-col\)\s*\n\s*minmax\(0, 1fr\)\s*\n\s*var\(--ql-percent-col\)",
-                screen_css, re.S) is not None)
+check("screen.css: карточка v3 — три зоны в em от кегля ответа",
+      re.search(r"\.quiz-block\[data-layout=\"v3\"\] \.quiz-s-opt,\s*\n[\s\S]{0,400}?"
+                r"grid-template-columns:\s*1\.4em minmax\(0, 1fr\) 3\.2em",
+                screen_css) is not None)
 check("screen.css: процент не позиционируется поверх текста",
       "position: absolute" not in
-      re.search(r"\.quiz-block\[data-layout=\"v2\"\] \.quiz-s-num\s*\{([^}]*)\}",
+      re.search(r"\.quiz-block\[data-layout=\"v3\"\] \.quiz-s-num\s*\{([^}]*)\}",
                 screen_css, re.S).group(1))
 check("screen.js: использует движок раскладки",
       "window.quizLayout.plan" in screen_js
-      and "function applyQuizPlan" in screen_js)
-check("screen.css: высота карточек одна и без картинки",
-      re.search(r"\.quiz-opts > \.quiz-s-opt\s*\{[^}]*height:\s*var\(--quiz-card-h",
-                screen_css, re.S) is not None)
+      and "function applyQuizPlan" in screen_js
+      and "function quizOverflow" in screen_js,
+      "план проверяется по фактической геометрии: canvas и браузер переносят по-разному")
+check("screen.css: в схеме B фото стоит под вопросом",
+      re.search(r"\.quiz-body\[data-kind=\"image-top\"\] \.quiz-shot\s*\{[^}]*order:\s*2",
+                screen_css, re.S) is not None
+      and re.search(r"\.quiz-body\[data-kind=\"image-top\"\] \.quiz-q\s*\{[^}]*order:\s*1",
+                    screen_css, re.S) is not None)
 check("screen.js: распределение набирается плавно",
       "function playShares" in screen_js and "requestAnimationFrame(step)" in screen_js)
 check("screen.css: правильный ответ проявляется зеленью постепенно",
@@ -860,7 +869,7 @@ check("screen.js: при смене размера окна игра перес�
       "fitQuizActive(true)" in screen_js,
       "на другом экране старый zoom уже не подходит")
 check("quiz-layout.js: масштаб считается от меньшей стороны окна",
-      "Math.min(vw / cfg.referenceWidth, vh / cfg.referenceHeight)" in screen_js,
+      "Math.min(width / cfg.referenceWidth, height / cfg.referenceHeight)" in layout_js,
       "по большей стороне шрифт на 4:3 вырастал и не влезал")
 check("screen.css: у вопроса и ответов один размер и с фото, и без",
       "--ql-q-size" in screen_css and "--ql-answer-size" in screen_css
@@ -868,7 +877,8 @@ check("screen.css: у вопроса и ответов один размер и 
       and re.search(r"\.quiz-body:not\(\.has-image\) \.quiz-q\s*\{[^}]*font-size", screen_css, re.S) is None,
       "вопрос с фото был 25 px, без фото 53 px — зал видел два разных экрана")
 check("quiz-layout.js: допуск на округление при проверке высоты",
-      "<= availH + 1" in layout_js or "availH + 1" in layout_js,
+      "frame.Ch + L.tolerance" in layout_js
+      or "+ L.tolerance" in layout_js,
       "без допуска разница в доли пикселя считалась переполнением")
 
 check("screen.css: длинное слово не вылезает за край проектора",

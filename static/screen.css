@@ -879,45 +879,52 @@
 .quiz-s-row.is-hero .quiz-s-score { font-size: 1.15em; }
 
 /* ------------------------------------------------------------------ */
-/* Раскладка v2: размеры приходят из quiz-layout.js                     */
+/* Раскладка v3: размеры приходят из quiz-layout.js                    */
 /* ------------------------------------------------------------------ */
 
 /* Всё, что движок посчитал, приходит в CSS-переменные на #quizPlay.
    Правила ниже используют их, поэтому JS не пишет инлайн-стили каждому
    элементу — только один набор переменных на кадр.
 
-   Это позволяет держать геометрию в одном месте: поменял --ql-* и кадр
-   перестроился целиком. */
+   Отличие от v2: карточка меряется в em от кегля ответа (ТЗ, раздел 5),
+   поэтому её внутренности масштабируются вместе с текстом и не «плывут»
+   при смене кегля. Ширину карточки по-прежнему задаёт план числом — иначе
+   короткое «Да» растянулось бы на пол-экрана. */
 
-.quiz-block[data-layout="v2"] {
-  --ql-q-size: 52px;
+.quiz-block[data-layout="v3"] {
+  --ql-q-size: 56px;
+  --ql-q-w: 1440px;
   --ql-answer-size: 40px;
-  --ql-answer-number: 36px;
-  --ql-answer-percent: 36px;
-  --ql-number-col: 56px;
-  --ql-percent-col: 128px;
-  --ql-card-pad-x: 26px;
-  --ql-card-pad-y: 20px;
-  --ql-card-gap-x: 18px;
-  --ql-card-gap-y: 18px;
-  --ql-card-min-h: 84px;
-  --ql-q-gap: 34px;
+  --ql-card-gap-x: 20px;
+  --ql-card-gap-y: 20px;
+  --ql-q-gap: 32px;
+  /* Область контента по ТЗ: поля 5% с каждой стороны, ширина не больше
+     1920 виртуальных px. В пикселях экрана 1920·k = min(100vw, 177.78vh),
+     значит 90% ширины — это min(90vw, 177.78vh). */
+  width: min(90vw, 177.78vh);
+  margin: 0 auto;
+  padding: 5vh 0;
+  gap: calc(var(--ql-q-gap) * .35);
 }
 
-/* Шапка: номер вопроса и таймер, не участвуют в подгонке. */
-.quiz-block[data-layout="v2"] .quiz-q {
+/* Вопрос: кегль из плана, ширина — предел схемы (в A не шире 75% холста,
+   в C — ширина правой колонки). balance вместо обычного переноса: короткая
+   вторая строка из одного слова выглядит обрывом. */
+.quiz-block[data-layout="v3"] .quiz-q {
   font-size: var(--ql-q-size);
-  line-height: 1.18;
+  line-height: 1.2;
   font-weight: 700;
-  max-width: 1600px;
+  max-width: var(--ql-q-w, none);
   margin: 0 auto;
   text-align: center;
+  text-wrap: balance;
   overflow-wrap: break-word;
 }
 
-/* Тело кадра — колонка: фото (если есть), вопрос, ответы, подпись.
+/* Тело кадра — колонка: вопрос, фото (если есть), ответы, подпись.
    Никакой сетки с растяжением: размеры уже посчитаны движком. */
-.quiz-block[data-layout="v2"] .quiz-body {
+.quiz-block[data-layout="v3"] .quiz-body,
+.quiz-block[data-layout="v3"] .quiz-body.has-image {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -925,195 +932,246 @@
   gap: var(--ql-q-gap);
   width: 100%;
   min-height: 0;
+  max-height: none;
+  text-align: center;
 }
 
-/* Подпись «ответили» — всегда внизу, своим размером. */
-.quiz-block[data-layout="v2"] .quiz-count {
-  font-size: clamp(.9rem, 2vw, 1.4rem);
+/* .quiz-ask в v3 — обычная колонка, а не display:contents из старой
+   раскладки: иначе вопрос и ответы выпадали из потока. */
+.quiz-block[data-layout="v3"] .quiz-ask {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ql-q-gap);
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  flex: 0 1 auto;
+}
+
+/* Подпись «ответили» — своим размером, геометрию карточек не трогает.
+   Кегль приходит из плана: clamp в CSS не знает про масштаб кадра, и на
+   4:3 подпись выходила крупнее расчётной, из-за чего группа вылезала за
+   нижнюю границу области контента. */
+.quiz-block[data-layout="v3"] .quiz-count {
+  font-size: var(--ql-caption-size, 1.1rem);
   margin: 0;
+  text-align: center;
+  line-height: 1.4;
 }
 
 /* Фото: контейнер получает точные размеры из плана, картинка вписывается
-   с сохранением пропорций (object-fit: contain по ТЗ). */
-.quiz-block[data-layout="v2"] .quiz-shot {
+   с сохранением пропорций (object-fit: contain по ТЗ, без обрезки). */
+.quiz-block[data-layout="v3"] .quiz-shot {
   flex: 0 0 auto;
+  /* По центру, а не растяжением: в колонке схема B ставит снимок под
+     вопросом, и stretch прижимал его к левому краю кадра. */
+  align-self: center;
   width: var(--ql-shot-w, auto);
   height: var(--ql-shot-h, auto);
-  min-width: var(--ql-shot-w, auto);
-  min-height: var(--ql-shot-h, auto);
+  min-width: 0;
+  min-height: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  overflow: hidden;
+  overflow: visible;
 }
-.quiz-block[data-layout="v2"] .quiz-shot img {
+.quiz-block[data-layout="v3"] .quiz-shot img {
+  display: block;
   max-width: 100%;
   max-height: 100%;
-  width: auto;
-  height: auto;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
+  border: 1px solid rgba(170, 190, 255, .18);
+  border-radius: 16px;
+  box-shadow: 0 16px 42px rgba(0, 0, 0, .32);
 }
 
-/* Режим «фото слева»: две колонки, текст справа.
+/* Схема B: «вопрос → картинка → ответы», как в разделе 4.5. В разметке
+   снимок стоит первым, поэтому .quiz-ask раскрывается, а порядок задаётся
+   явными order: иначе картинка оказывалась над вопросом. */
+.quiz-block[data-layout="v3"] .quiz-body[data-kind="image-top"] .quiz-ask {
+  display: contents;
+}
+.quiz-block[data-layout="v3"] .quiz-body[data-kind="image-top"] .quiz-q {
+  order: 1;
+}
+.quiz-block[data-layout="v3"] .quiz-body[data-kind="image-top"] .quiz-shot {
+  order: 2;
+}
+.quiz-block[data-layout="v3"] .quiz-body[data-kind="image-top"] .quiz-opts {
+  order: 3;
+}
+.quiz-block[data-layout="v3"] .quiz-body[data-kind="image-top"] .quiz-count {
+  order: 4;
+}
 
-   Колонке текста даём фиксированную долю ширины из плана, а не «сколько
-   останется»: иначе группа ответов сжимается по самой длинной карточке,
-   и вся композиция прижимается к левому краю вместо центра. */
-.quiz-block[data-layout="v2"] .quiz-body[data-kind="image-side"] {
+/* Схема C: фото слева, вопрос и ответы справа.
+   Ширина правой колонки — из плана: без неё группа ответов сжимается по
+   самой длинной карточке, и композиция прижимается к фото. */
+.quiz-block[data-layout="v3"] .quiz-body[data-kind="image-side"] {
   flex-direction: row;
   align-items: center;
   justify-content: center;
-  gap: clamp(1.4rem, 3.4vw, 2.6rem);
-  width: 100%;
+  /* Зазор между фото и текстом — из плана, в пикселях экрана. Жёсткие
+     64px здесь расходились с расчётом на любом масштабе кроме 1:0 при
+     k < 1 группа вылезала за область контента. */
+  gap: var(--ql-side-gap, 64px);
 }
-.quiz-block[data-layout="v2"] .quiz-body[data-kind="image-side"] .quiz-shot {
+.quiz-block[data-layout="v3"] .quiz-body[data-kind="image-side"] .quiz-ask {
   flex: 0 0 auto;
-}
-.quiz-block[data-layout="v2"] .quiz-body[data-kind="image-side"] .quiz-ask {
-  flex: 0 1 auto;
-  min-width: 0;
+  width: var(--ql-text-w, auto);
   max-width: var(--ql-text-w, none);
-  display: flex;
-  flex-direction: column;
-  gap: var(--ql-q-gap);
-  /* Содержимое правой колонки — по центру её ширины: вопрос и карточки
-     смотрятся единой группой. При выравнивании влево группа липла к
-     фото, а справа оставалась пустота. */
-  align-items: center;
+  align-items: flex-start;
+  text-align: left;
 }
-.quiz-block[data-layout="v2"] .quiz-body[data-kind="image-side"] .quiz-q {
-  text-align: center;
+.quiz-block[data-layout="v3"] .quiz-body[data-kind="image-side"] .quiz-q {
+  text-align: left;
   margin: 0;
-  width: 100%;
+  max-width: 100%;
+}
+.quiz-block[data-layout="v3"] .quiz-body[data-kind="image-side"] .quiz-count {
+  text-align: left;
 }
 
-/* Сетка ответов: колонки и число строк задаёт план. */
-.quiz-block[data-layout="v2"] .quiz-opts {
+/* Сетка ответов: число колонок и ширина карточки — из плана. */
+.quiz-block[data-layout="v3"] .quiz-opts,
+.quiz-block[data-layout="v3"] .quiz-body.has-image .quiz-opts {
   display: grid;
   grid-template-columns: var(--ql-cols, 1fr);
+  grid-auto-rows: auto;
   gap: var(--ql-card-gap-y) var(--ql-card-gap-x);
-  width: var(--ql-group-w, 100%);
+  width: var(--ql-group-w, auto);
   max-width: 100%;
   margin: 0;
   justify-content: center;
   align-content: center;
+  align-items: stretch;
+  justify-items: stretch;
+  height: auto;
 }
 
-/* Карточка: три зоны фиксированной ширины, текст в середине.
-   Ширины зон — из конфигурации, поэтому номер и процент не могут
-   наехать на текст и не двигаются при появлении результатов. */
-.quiz-block[data-layout="v2"] .quiz-s-opt {
+/* Карточка: три зоны. Все размеры в em от кегля ответа — так карточка
+   масштабируется вместе с текстом (ТЗ, раздел 5).
+
+   Бейдж 1.4em, зазоры по .6em, зона процента 3.2em. Процент живёт в своей
+   колонке сетки, поэтому текст физически не может под него заехать, а
+   невидимый «100%» держит место до показа результатов. */
+.quiz-block[data-layout="v3"] .quiz-s-opt,
+.quiz-block[data-layout="v3"] .quiz-body:not(.has-image) .quiz-s-opt,
+.quiz-block[data-layout="v3"] .quiz-body.has-image .quiz-s-opt {
+  position: relative;
   display: grid;
-  grid-template-columns:
-    var(--ql-number-col)
-    minmax(0, 1fr)
-    var(--ql-percent-col);
+  grid-template-columns: 1.4em minmax(0, 1fr) 3.2em;
   align-items: center;
-  gap: 0 var(--ql-number-gap);
+  gap: 0 .6em;
   box-sizing: border-box;
   width: 100%;
-  min-height: var(--ql-card-min-h);
-  height: var(--ql-card-h, auto);
-  padding: var(--ql-card-pad-y) var(--ql-card-pad-x);
+  max-width: 100%;
+  height: auto;
+  min-height: 2.2em;
+  /* Высота карточки — по тексту. По ТЗ (§5.1) по высоте выравнивается ряд
+     сетки, а в колонке каждый ответ — свой ряд; жёсткая общая высота резала
+     текст, который браузер переносил на строку больше расчётного. */
+  min-height: 2.2em;
+  height: auto;
+  padding: .5em .7em;
   font-size: var(--ql-answer-size);
-  line-height: 1.17;
+  line-height: 1.2;
+  font-weight: 600;
   text-align: left;
+  overflow: hidden;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: none;
   border: 1px solid rgba(137, 158, 210, .2);
   border-radius: 16px;
   background: linear-gradient(145deg, rgba(255, 255, 255, .035), transparent 72%), var(--bg-soft);
   box-shadow: 0 8px 22px rgba(0, 0, 0, .12), inset 0 1px rgba(255, 255, 255, .025);
-  position: relative;
-  overflow: hidden;
 }
 
-/* Номер — кружок, размер от своего кегля. */
-.quiz-block[data-layout="v2"] .quiz-s-idx {
+/* Бейдж с номером: круг 1.4em ровно по колонке сетки. */
+.quiz-block[data-layout="v3"] .quiz-s-idx {
   position: relative;
-  width: calc(var(--ql-answer-number) * 1.5);
-  height: calc(var(--ql-answer-number) * 1.5);
+  width: 1.4em;
+  height: 1.4em;
   display: grid;
   place-items: center;
   border: 1px solid rgba(91, 140, 255, .3);
   border-radius: 50%;
   background: rgba(91, 140, 255, .11);
   color: #a9c3ff;
-  font-size: var(--ql-answer-number);
+  font-size: .8em;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
 
-/* Текст: середина, перенос по словам, не вылезает за колонку.
-   padding-right не нужен: процент живёт в своей колонке сетки, и место
-   под него уже вычтено при расчёте ширины текста. Лишний отступ съедал
-   24 px и заставлял слово «Квадрат» рваться.
-
-   hyphens: none — переносы внутри слова не нужны: ширина текста уже
-   посчитана по самому длинному слову, и слово должно влезать целиком.
-   Если не влезает — виноват расчёт, и это должна ловить проверка, а не
-   рваный текст в кадре. */
-.quiz-block[data-layout="v2"] .quiz-s-text {
+/* Текст: только своя зона, перенос по словам. narrow — pretty, чтобы
+   последняя строка не оставалась одним словом. */
+.quiz-block[data-layout="v3"] .quiz-s-text {
   position: relative;
   min-width: 0;
-  overflow-wrap: normal;
-  word-break: normal;
-  hyphens: none;
+  text-wrap: pretty;
 }
 
-/* Процент: своя колонка справа, ширина зарезервирована всегда. */
-.quiz-block[data-layout="v2"] .quiz-s-num {
+/* Процент: своя колонка справа, ширина зарезервирована всегда.
+   Появляется плавно, место при этом занято с самого начала. */
+.quiz-block[data-layout="v3"] .quiz-s-num {
   position: relative;
-  width: var(--ql-percent-col);
+  width: 100%;
   text-align: right;
   color: var(--muted);
   opacity: .8;
-  font-size: var(--ql-answer-percent);
+  font-size: 1em;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  transition: opacity .25s ease;
 }
-.quiz-block[data-layout="v2"] .quiz-s-num.is-blank { visibility: hidden; }
+.quiz-block[data-layout="v3"] .quiz-s-num.is-blank {
+  visibility: hidden;
+  opacity: 0;
+}
 
 /* Полоса результатов — отдельный слой под текстом, геометрию не меняет. */
-.quiz-block[data-layout="v2"] .quiz-s-fill {
+.quiz-block[data-layout="v3"] .quiz-s-fill {
   position: absolute;
   inset: 0 auto 0 0;
   background: rgba(91, 140, 255, .18);
   transition: none;
   will-change: width;
 }
-.quiz-block[data-layout="v2"] .quiz-s-opt.is-bar.is-right .quiz-s-fill {
+.quiz-block[data-layout="v3"] .quiz-s-opt.is-bar.is-right .quiz-s-fill {
   background: rgba(51, 201, 138, .22);
 }
 
-/* Правильный ответ: зелёная рамка и галочка, размеры не меняются. */
-.quiz-block[data-layout="v2"] .quiz-s-opt.is-right {
+/* Правильный ответ: зелёная рамка и бейдж, размеры не меняются. */
+.quiz-block[data-layout="v3"] .quiz-s-opt.is-right {
   border-color: var(--ok);
   box-shadow: 0 0 0 1px rgba(51, 201, 138, .1), 0 8px 24px rgba(0, 0, 0, .16);
   transition: border-color .5s ease, box-shadow .5s ease;
 }
-.quiz-block[data-layout="v2"] .quiz-s-check {
-  position: absolute;
-  right: var(--ql-percent-col);
-  top: 50%;
-  transform: translateY(-50%);
-  visibility: hidden;
+.quiz-block[data-layout="v3"] .quiz-s-opt.is-right .quiz-s-idx {
+  border-color: var(--ok);
   color: var(--ok);
-  font-weight: 800;
-  font-size: var(--ql-answer-size);
-  pointer-events: none;
+  background: rgba(51, 201, 138, .16);
+  transition: border-color .5s ease, color .5s ease, background-color .5s ease;
 }
-.quiz-block[data-layout="v2"] .quiz-s-opt.is-right .quiz-s-check {
-  visibility: visible;
+.quiz-block[data-layout="v3"] .quiz-s-opt.is-right .quiz-s-num {
+  color: var(--ok);
+  opacity: 1;
 }
 
-/* Скрытая колонка галочки в разметке: место под неё держит отступ
-   процента, поэтому отдельной ячейки не нужно. */
-.quiz-block[data-layout="v2"] .quiz-s-check { display: none; }
+/* Галочка не нужна: правильный ответ показывает цвет бейджа и процента.
+   Правило держит её скрытой, чтобы старая разметка не всплыла в кадре. */
+.quiz-block[data-layout="v3"] .quiz-s-check { display: none; }
 
-/* Старые правила «третий ответ по центру» и прочие из первой версии
-   раскладки не должны доставать до v2: там карточки всегда делят сетку
-   поровну. Перебиваем их тут, у нас выше специфичность. */
-.quiz-block[data-layout="v2"] .quiz-body.has-image .quiz-opts > .quiz-s-opt:last-child:nth-child(3),
-.quiz-block[data-layout="v2"] .quiz-opts > .quiz-s-opt:last-child:nth-child(3) {
+/* Старое правило «третий ответ по центру» из первой раскладки до v3 не
+   должно доставать: в схемах A и B третий ответ стоит в своей колонке. */
+.quiz-block[data-layout="v3"] .quiz-body.has-image .quiz-opts > .quiz-s-opt:last-child:nth-child(3),
+.quiz-block[data-layout="v3"] .quiz-opts > .quiz-s-opt:last-child:nth-child(3) {
   grid-column: auto;
   justify-self: stretch;
   width: 100%;
@@ -1129,6 +1187,6 @@
   .quiz-s-opt.is-right,
   .quiz-s-opt.is-right .quiz-s-idx,
   .quiz-s-opt.is-bar.is-right .quiz-s-fill { transition: none; }
-  .quiz-block[data-layout="v2"] .quiz-s-opt,
-  .quiz-block[data-layout="v2"] .quiz-s-opt .quiz-s-idx { transition: none; }
+  .quiz-block[data-layout="v3"] .quiz-s-opt,
+  .quiz-block[data-layout="v3"] .quiz-s-opt .quiz-s-idx { transition: none; }
 }

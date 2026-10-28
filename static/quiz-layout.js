@@ -1,94 +1,124 @@
-/* Движок раскладки экранного квиза.
+/* Движок раскладки экранного квиза — по ТЗ «Вёрстка экрана квиза».
 
-   Задача: для каждого вопроса выбрать компоновку и посчитать размеры так,
-   чтобы зал с 5-15 метров прочитал текст. Один шаблон не подходит: короткие
-   ответы должны давать компактные карточки, длинные — место для чтения.
+   Задача: любой вопрос с 2–4 ответами и картинкой любой ориентации должен
+   читаться с дальних рядов, а короткий ответ не должен растягиваться на
+   пол-экрана. Один шаблон этого не даёт: размеры зависят от текста, картинки
+   и пропорций холста.
 
-   Модули (по ТЗ):
-     quizLayoutConfig     — все числа в одном месте;
-     TextMeasurer         — реальные метрики текста, не «символы × ширина»;
-     ImageLayoutCalculator— режим фото и размеры контейнера;
-     AnswerLayoutCalculator — ширина, высота и строки карточек;
-     QuestionLayoutEngine — перебор кандидатов и выбор лучшего;
-     LayoutValidator      — проверка безопасной области и перекрытий.
+   Устройство:
 
-   Движок ничего не знает про DOM экрана: он получает текст, метрики фото и
-   размер viewport, а возвращает план. Применяет план отдельный код. Так
-   раскладку можно проверить тестами и стендом без браузера. */
+     quizLayoutConfig   — все числа в одном месте (см. раздел 6 ТЗ);
+     quizTextMeasurer   — реальные метрики через canvas.measureText;
+     computeFrame       — виртуальный холст, поля, область контента;
+     classifyImage      — landscape / square / portrait;
+     chooseLayout       — A / B / C по разделу 4;
+     chooseAnswersLayout— сколько колонок у ответов при этой схеме;
+     planQuizFrame      — кегли, карточки, картинка, подгонка (раздел 7);
+     validateQuizPlan   — проверки области контента, кеглей и строк.
+
+   Движок не знает про DOM экрана: получает текст, размеры фото и viewport,
+   возвращает план. Применяет план screen.js. Так раскладку можно проверить
+   стендом и тестами без вёрстки.
+
+   Всё считается в виртуальных пикселях: ширина холста всегда 1920, на более
+   высоком экране растёт только высота. Поэтому кегли от пропорции экрана не
+   зависят — 16:9, 16:10, 5:3 и 4:3 дают одинаковые шрифты. */
 
 /* ------------------------------------------------------------------ */
 /* Конфигурация                                                        */
 /* ------------------------------------------------------------------ */
 
-/* Все числа — для эталона 1920×1080. При другом размере окна движок
-   пересчитывает их пропорционально (scale), кроме тех, где задан диапазон
-   в пикселях: минимальный кегль не должен становиться нечитаемым на
-   маленьком экране. */
 const quizLayoutConfig = {
   referenceWidth: 1920,
   referenceHeight: 1080,
 
-  safeArea: { horizontal: 80, vertical: 48 },
-
-  /* Типографика. base — для эталона, min/max — жёсткие границы читаемости.
-     Значения в CSS px эталонного макета. */
+  /* Типографика. Числа — виртуальные px, стартовая точка из таблиц
+     раздела 6; окончательный размер даёт подгонка (раздел 7). */
   typography: {
-    question: { base: 52, min: 42, max: 62, lineHeight: 1.18, weight: 700 },
-    answer: { base: 40, min: 34, max: 44, lineHeight: 1.17, weight: 550 },
-    answerNumber: { base: 36, min: 32, max: 40, weight: 700 },
-    votePercent: { base: 36, min: 32, max: 40, weight: 700 },
-    caption: { base: 24, min: 22, max: 26, weight: 500 },
+    question: {
+      weight: 700,
+      lineHeight: 1.2,
+      min: 32,
+      /* [максимум символов, кегль] — первая подходящая строка таблицы. */
+      table: [[40, 64], [80, 56], [140, 48], [220, 40], [320, 34], [Infinity, 32]],
+      withImage: [[40, 56], [80, 48], [140, 42], [220, 36], [320, 32], [Infinity, 32]],
+    },
+    answer: {
+      weight: 600,
+      lineHeight: 1.2,
+      min: 28,
+      table: [[15, 44], [30, 40], [50, 36], [80, 32], [Infinity, 28]],
+      /* Если ответов четыре и есть картинка — на 4 px меньше. */
+      fourWithImagePenalty: 4,
+      /* Кегль ответа всегда не больше 0.9 кегля вопроса. */
+      maxOfQuestion: 0.9,
+    },
+    /* Подпись «ответили» под карточками. Она есть в кадре всегда, поэтому
+       её высота обязана входить в расчёт: без неё содержимое вылезало за
+       нижнюю границу ровно на её высоту. */
+    caption: { font: 24, lineHeight: 1.4 },
   },
 
-  /* Карточка ответа: три зоны. Ширины в px эталона. */
+  /* Карточка ответа. Все размеры в em от кегля ответа — так карточка
+     масштабируется вместе с текстом и её внутренности не «плывут».
+     overhead = 0.7*2 + 1.4 + 0.6 + 0.6 + 3.2 = 7.2em (раздел 5.1). */
   answerCard: {
-    numberColumn: 56,
-    percentColumn: 128,
-    numberToTextGap: 18,
-    textToPercentGap: 24,
-    paddingX: 26,
-    paddingY: 20,
-    minHeight: 84,
-    maxHeight: 260,
-    gapX: 18,
-    gapY: 18,
-    radius: 16,
+    paddingX: 0.7,
+    paddingY: 0.5,
+    numberColumn: 1.4,
+    numberToTextGap: 0.6,
+    textToPercentGap: 0.6,
+    percentColumn: 3.2,
+    minTextEm: 8,
+    minHeightEm: 2.2,
   },
 
-  /* Изображение: ограничения контейнера по ориентации. */
-  image: {
-    fit: "contain",
-    /* maxWidth/maxHeight — из ТЗ как ограничения контейнера. Но для
-       горизонтального фото на 16:9 они конфликтуют с долей 46% кадра:
-       420 < 497. Доля важнее — зал должен видеть снимок, — поэтому
-       maxHeight работает как «не больше 420 ИЛИ не меньше 46% кадра»:
-       фактическое значение берётся как max(420, доля). */
-    wide: { maxWidth: 1100, maxHeight: 460 },
-    square: { maxWidth: 480, maxHeight: 480 },
-    tall: { maxWidth: 340, maxHeight: 460 },
-    /* Режим «фото слева»: доля ширины и минимальный зазор. */
-    side: { minShare: 0.28, maxShare: 0.35, gap: 32 },
-  },
-
-  /* Общая композиция. */
-  frame: {
-    questionMaxWidth: 1600,
-    questionToAnswers: 34,
-    /* Зона вопроса не должна съедать ответы: предел доли кадра. */
-    questionMaxShare: 0.22,
-    /* Доля высоты кадра под горизонтальное фото в режиме «сверху». */
-    wideShotShare: 0.46,
-    wideShotShareMin: 0.40,
-    wideShotShareMax: 0.48,
-  },
-
+  /* Композиция и пределы раскладок. */
   layout: {
-    adaptiveColumns: true,
-    preserveGeometryAfterVoting: true,
-    preventTextClipping: true,
-    /* Пробовать сетку 2×2 только если ответ в неё влезает не более чем
-       в столько строк. Иначе лучше колонка. */
-    gridMaxLines: 2,
+    /* Поля по 5% с каждой стороны дают область контента 90% кадра. Это
+       запасной расчёт: обычно экран присылает фактическую область, а CSS
+       задаёт поля сам (см. LAYOUT.md, раздел 2). */
+    contentShare: 0.9,
+    /* Шире 16:9 контент не разъезжается: 1920 виртуальных px по центру. */
+    contentMaxWidth: 1920,
+
+    gapBase: 32,
+    gapSlope: 0.04,
+    gapMax: 48,
+    cardGap: 20,
+    cardGapGrid: 24,
+    sideGap: 64,
+
+    /* Вопрос. */
+    questionMaxWidthA: 0.75,
+    questionMaxShareA: 0.30,
+    questionMaxShareB: 0.16,
+    questionMaxLinesB: 3,
+
+    /* Ответы: предел ширины группы в схемах A и B. */
+    answersMaxWidth: 0.70,
+
+    /* Картинка. */
+    imageUpscaleMax: 1.5,
+    imageWidthShareB: 0.80,
+    panoramaRatio: 2.2,
+    imageMinShareB: 0.30,
+    imageMaxShareSquareB: 0.45,
+    imagePortraitWidthShare: 0.30,
+    imageSquareWidthShare: 0.36,
+
+    /* Квадрат уходит в «две колонки» только на достаточно широком холсте. */
+    squareSideRatio: 1.55,
+
+    /* Лимиты строк: при крупном кегле строк меньше — мельче кегль,
+       строк можно больше (раздел 6). */
+    questionLines: { big: 4, small: 6, bigFrom: 40 },
+    answerLines: { big: 2, small: 3, bigFrom: 36 },
+
+    /* Подгонка: шаг и число итераций (раздел 7). */
+    fontStep: 2,
+    maxIterations: 20,
+    tolerance: 1,
   },
 };
 
@@ -109,15 +139,15 @@ const quizTextMeasurer = (() => {
     return `${weight} ${px}px ${family}`;
   }
 
-  /* Ширина строки в пикселях. */
+  /* Ширина строки. */
   function width(text, px, weight) {
     ctx.font = font(px, weight);
     return ctx.measureText(text).width;
   }
 
-  /* Разбить текст на строки по максимальной ширине. Возвращает массив
-     строк. Слова не рвём, если слово само шире строки — оставляем его
-     отдельной строкой (перенос внутри слова делает CSS). */
+  /* Разбить текст на строки по максимальной ширине. Слова не рвём; слово,
+     которое само шире строки, остаётся отдельной строкой — CSS его перенесёт
+     внутри, и это ловит validateQuizPlan по числу строк. */
   function wrap(text, maxWidth, px, weight) {
     ctx.font = font(px, weight);
     const words = String(text || "").split(/\s+/).filter(Boolean);
@@ -126,18 +156,13 @@ const quizTextMeasurer = (() => {
     let line = words[0];
     for (let i = 1; i < words.length; i++) {
       const next = line + " " + words[i];
-      if (ctx.measureText(next).width <= maxWidth) {
-        line = next;
-      } else {
-        lines.push(line);
-        line = words[i];
-      }
+      if (ctx.measureText(next).width <= maxWidth) line = next;
+      else { lines.push(line); line = words[i]; }
     }
     lines.push(line);
     return lines;
   }
 
-  /* Сколько строк займёт текст при данной ширине. */
   function lineCount(text, maxWidth, px, weight) {
     return wrap(text, maxWidth, px, weight).length;
   }
@@ -156,399 +181,558 @@ const quizTextMeasurer = (() => {
 })();
 
 /* ------------------------------------------------------------------ */
-/* ImageLayoutCalculator                                               */
+/* Холст                                                               */
 /* ------------------------------------------------------------------ */
 
-/* Что делать с картинкой: режим и размеры контейнера.
+/* Масштаб вывода: k = min(W / 1920, H / 1080).
 
-   wide   — фото над ответами (горизонтальное или квадратное, когда места
-            хватает);
-   side   — фото слева, текст справа (вертикальное при достаточной ширине);
-   none   — картинки нет.
+   На 16:9 и более узком холсте решает ширина, и виртуальная ширина всегда
+   1920. На экране шире 16:9 опорной становится высота: иначе кегли выросли
+   бы вместе с шириной, а контент всё равно ограничен 1920 px по центру
+   (ТЗ, раздел 2.2). */
+function computeScale(width, height) {
+  const cfg = quizLayoutConfig;
+  const ratio = width / height;
+  const reference = cfg.referenceWidth / cfg.referenceHeight;
+  const k = Math.min(width / cfg.referenceWidth, height / cfg.referenceHeight);
+  return { k, wide: ratio > reference + 1e-6, ratio };
+}
 
-   Возвращает { mode, boxWidth, boxHeight, share }. boxWidth/boxHeight —
-   контейнер, в который фото вписывается с сохранением пропорций. */
-function computeImageLayout(img, frameW, frameH, scale, viewportH, opts) {
-  const cfg = quizLayoutConfig.image;
-  if (!img || !img.width || !img.height) {
-    return { mode: "none", boxWidth: 0, boxHeight: 0, share: 0 };
+/* Геометрия холста: виртуальные размеры, поля и область контента. */
+function computeFrame(viewport, usableHeight, warnings, usableWidth) {
+  const cfg = quizLayoutConfig;
+  const width = Math.max(1, viewport.width);
+  const height = Math.max(1, viewport.height);
+  const { k, wide, ratio } = computeScale(width, height);
+
+  const Wv = width / k;
+  const Hv = height / k;
+
+  /* Область контента. Экран присылает её фактическими размерами — так
+     расчёт совпадает с тем, что реально видно: поля, шапку вопроса и
+     отступы блока считает CSS, и повторять их здесь в уме значит
+     разойтись с ним на несколько пикселей.
+
+     Если экран размеров не прислал, берём их из ТЗ: поля 5%, ширина не
+     больше 1920 виртуальных px. */
+  const fallbackW = Math.min(Wv * cfg.layout.contentShare,
+    cfg.layout.contentMaxWidth);
+  const fallbackH = Hv * cfg.layout.contentShare;
+  const Cw = usableWidth > 0 ? Math.min(fallbackW, usableWidth / k) : fallbackW;
+  const Ch = usableHeight > 0 ? Math.min(fallbackH, usableHeight / k) : fallbackH;
+
+  const gap = Math.min(cfg.layout.gapMax,
+    cfg.layout.gapBase + (Hv - cfg.referenceHeight) * cfg.layout.gapSlope);
+
+  /* Пропорция вне 4:3 – 16:9: работаем, но говорим об этом. */
+  if (ratio < 4 / 3 - 1e-3 || ratio > 16 / 9 + 1e-3) {
+    warnings.push(`пропорция холста ${ratio.toFixed(2)} вне 4:3–16:9`);
   }
-  const ratio = img.width / img.height;
-  const landscape = ratio >= 1.2;
-  const portrait = ratio <= 0.85;
-  const cap = landscape ? cfg.wide : portrait ? cfg.tall : cfg.square;
-
-  /* frameW/frameH — безопасная область. Долю фото считаем от полного
-     кадра (viewportH): ТЗ говорит «46% высоты экрана», а безопасная
-     область меньше на поля, и 46% от неё давали 43% кадра. */
-  const frameVH = viewportH || frameH;
-  const availW = frameW * 0.94;
-  const availH = frameH * 0.94;
-
-  /* Режим «слева» — для квадрата и вертикали по умолчанию, для
-     горизонтали — по требованию (когда сверху ответам не хватает места).
-
-     По ТЗ горизонтальное фото стоит сверху: оно хорошо использует ширину.
-     Квадратное и вертикальное — слева: справа остаётся цельная композиция
-     «вопрос + ответы» и больше вертикального места под варианты. */
-  const forceSide = !!(opts && opts.forceSide);
-  if (portrait || !landscape || forceSide) {
-    const sideWidth = Math.min(frameW * cfg.side.maxShare,
-      Math.max(frameW * cfg.side.minShare, frameVH * 0.34));
-    const textW = frameW - sideWidth - cfg.side.gap * scale;
-    const minCardW = quizLayoutConfig.answerCard.numberColumn * scale
-      + quizLayoutConfig.answerCard.percentColumn * scale
-      + quizLayoutConfig.answerCard.textToPercentGap * scale
-      + quizLayoutConfig.answerCard.numberToTextGap * scale
-      + 160 * scale;                       // минимум на текст
-    if (textW >= minCardW) {
-      /* Высота — по фактической ширине, но не больше кадра. */
-      const boxH = Math.min(availH, frameVH * 0.9, sideWidth / ratio);
-      const boxW = boxH * ratio;
-      return { mode: "side", boxWidth: boxW, boxHeight: boxH,
-               share: boxH / frameVH };
-    }
+  if (wide) {
+    warnings.push(`холст шире 16:9: контент ${Math.round(Cw)} px по центру`);
   }
 
-  /* Режим «сверху»: фото ограничено и по ширине, и по высоте.
-     Целевая доля высоты кадра — из конфига (46%). Потолок по высоте не
-     должен её перебивать: берём большее из «потолок» и «доля кадра». */
-  const shareH = frameVH * quizLayoutConfig.frame.wideShotShare;
-  const capH = cap.maxHeight * scale;
-  let boxH = Math.min(Math.max(capH, shareH), availH);
-  let boxW = boxH * ratio;
-  /* По ширине тоже ограничиваем: очень широкое фото иначе упрётся в
-     края и станет низкой полоской. */
-  if (boxW > availW) {
-    boxW = availW;
-    boxH = boxW / ratio;
-  }
-  return { mode: "wide", boxWidth: boxW, boxHeight: boxH,
-           share: boxH / frameVH };
+  return { k, wide, ratio, Wv, Hv, Cw, Ch, gap, viewport: { width, height } };
 }
 
 /* ------------------------------------------------------------------ */
-/* AnswerLayoutCalculator                                              */
+/* Картинка                                                            */
 /* ------------------------------------------------------------------ */
 
-/* Размеры одной карточки и всей группы.
-
-   naturalWidth   — сколько нужно по содержимому (номер + текст + процент);
-   textWidth      — сколько остаётся тексту после зон номера и процента;
-   lines          — сколько строк займёт ответ;
-   cardHeight     — высота карточки;
-   groupHeight    — высота всей группы с зазорами.
-*/
-function measureAnswerCard(text, fontPx, opts) {
-  const cfg = quizLayoutConfig.answerCard;
-  const s = opts.scale;
-  const numW = cfg.numberColumn * s;
-  const pctW = cfg.percentColumn * s;
-  const gap1 = cfg.numberToTextGap * s;
-  const gap2 = cfg.textToPercentGap * s;
-  const padX = cfg.paddingX * s;
-  const padY = cfg.paddingY * s;
-  const chrome = numW + pctW + gap1 + gap2 + padX * 2;
-
-  const longest = quizTextMeasurer.longestWord(
-    text, fontPx, quizLayoutConfig.typography.answer.weight);
-  /* Минимальная ширина текстовой области: самое длинное слово целиком.
-     Ниже неё слово начнёт рваться. */
-  const minTextW = Math.max(longest, 120 * s);
-  const naturalWidth = chrome + minTextW;
-
-  return { chrome, numW, pctW, gap1, gap2, padX, padY,
-           minTextW, naturalWidth };
+/* Тип снимка по пропорции (раздел 3). */
+function classifyImage(image) {
+  if (!image || !image.width || !image.height) return "none";
+  const r = image.width / image.height;
+  if (r >= 1.2) return "landscape";
+  if (r <= 0.83) return "portrait";
+  return "square";
 }
 
-/* Высота карточки для заданной ширины текста и числа строк. */
-function cardHeightFor(lines, fontPx, opts) {
-  const cfg = quizLayoutConfig.answerCard;
-  const s = opts.scale;
-  const lh = quizLayoutConfig.typography.answer.lineHeight;
-  const padY = cfg.paddingY * s;
-  const textH = lines * fontPx * lh;
-  return Math.max(cfg.minHeight * s, Math.ceil(textH + padY * 2));
+/* Схема кадра по разделу 4. */
+function chooseLayout(image, frame) {
+  const cfg = quizLayoutConfig.layout;
+  const kind = classifyImage(image);
+  if (kind === "none") return "A";
+  if (kind === "landscape") return "B";
+  if (kind === "portrait") return "C";
+  /* Квадрат: на 16:9, 16:10 и 5:3 — две колонки, на 4:3 — стек. */
+  return frame.ratio >= cfg.squareSideRatio ? "C" : "B";
 }
 
-/* Полный расчёт варианта компоновки ответов.
+/* Сколько колонок у ответов в этой схеме (раздел 4).
+   A: 2–3 — колонка, 4 — сетка 2×2;
+   B: 2 — в один ряд, 3 — колонка, 4 — сетка 2×2;
+   C: всегда колонка. */
+function chooseAnswersLayout(layout, count) {
+  if (layout === "C") return { mode: "column", cols: 1 };
+  if (layout === "B" && count === 2) return { mode: "row", cols: 2 };
+  if (count === 4) return { mode: "grid2", cols: 2 };
+  return { mode: "column", cols: 1 };
+}
 
-   mode: "row" (все в строку), "grid2" (2×2), "column" (один столбец).
-   Возвращает null, если вариант заведомо не проходит (кегль ниже минимума,
-   слово не влезает, высота больше доступной). */
-function computeAnswersLayout(texts, mode, availW, availH, opts) {
+/* Вписать снимок в бокс с сохранением пропорций.
+   Больше чем в 1.5× от оригинала не увеличиваем — иначе картинка мылится.
+   Возвращает размеры в виртуальных px. */
+function fitImage(image, boxW, boxH, k) {
+  const maxW = Math.min(boxW,
+    quizLayoutConfig.layout.imageUpscaleMax * image.width / k);
+  const maxH = Math.min(boxH,
+    quizLayoutConfig.layout.imageUpscaleMax * image.height / k);
+  const r = image.width / image.height;
+  let w = Math.min(maxW, maxH * r);
+  let h = w / r;
+  if (h > maxH) { h = maxH; w = h * r; }
+  return { width: Math.max(0, w), height: Math.max(0, h), ratio: r };
+}
+
+/* ------------------------------------------------------------------ */
+/* Кегли                                                               */
+/* ------------------------------------------------------------------ */
+
+/* Кегль по таблице «символы → кегль». */
+function tableFont(table, textLength) {
+  for (const [limit, size] of table) {
+    if (textLength <= limit) return size;
+  }
+  return table[table.length - 1][1];
+}
+
+/* Стартовые кегли из таблиц раздела 6 с поправками. */
+function startFonts(question, answers, image) {
+  const typo = quizLayoutConfig.typography;
+  const hasImage = classifyImage(image) !== "none";
+  const qLen = String(question || "").length;
+  const aLen = answers.reduce((m, t) => Math.max(m, String(t || "").length), 0);
+
+  const qTable = hasImage ? typo.question.withImage : typo.question.table;
+  let q = tableFont(qTable, qLen);
+  let a = tableFont(typo.answer.table, aLen);
+  if (hasImage && answers.length === 4) {
+    a -= typo.answer.fourWithImagePenalty;
+  }
+  q = Math.max(q, typo.question.min);
+  a = Math.max(a, typo.answer.min);
+  a = Math.min(a, q * typo.answer.maxOfQuestion);
+  return { q, a };
+}
+
+/* ------------------------------------------------------------------ */
+/* Карточки ответов                                                    */
+/* ------------------------------------------------------------------ */
+
+/* Сколько em занимает всё, кроме текста: паддинги, бейдж, зазоры, процент. */
+function cardOverhead(fontPx) {
+  const c = quizLayoutConfig.answerCard;
+  return (c.paddingX * 2 + c.numberColumn + c.numberToTextGap
+    + c.textToPercentGap + c.percentColumn) * fontPx;
+}
+
+/* Карточка при заданном кегле и пределе ширины (раздел 5.1).
+
+   cardW = overhead + clamp(ширина самого длинного ответа в одну строку,
+                            8em, maxTextW)
+
+   То есть короткое «Да» даёт компактную карточку, а длинный ответ упирается
+   в предел группы и переносится по словам. */
+function measureCards(texts, fontPx, maxGroupW, cols) {
   const cfg = quizLayoutConfig.answerCard;
-  const s = opts.scale;
   const typo = quizLayoutConfig.typography.answer;
-  const n = texts.length;
-  const gapX = cfg.gapX * s;
-  const gapY = cfg.gapY * s;
+  const overhead = cardOverhead(fontPx);
 
-  let cols;
-  if (mode === "row") cols = n;
-  else if (mode === "grid2") cols = 2;
-  else cols = 1;
-  const rows = Math.ceil(n / cols);
+  /* Предел одной карточки: если колонок две — половина группы минус зазор. */
+  const maxCardW = cols > 1
+    ? (maxGroupW - quizLayoutConfig.layout.cardGapGrid * (cols - 1)) / cols
+    : maxGroupW;
 
-  /* Ширина колонки: делим доступное место. Но не больше естественной
-     ширины самого длинного ответа — иначе короткие карточки растянутся
-     на полэкрана. */
-  const bySpace = (availW - gapX * (cols - 1)) / cols;
-
-  /* Кегль начинаем с базового и уменьшаем, пока текст не влезет по ширине.
-     Минимум — typography.answer.min: ниже зал не прочитает. Проверяем с
-     допуском 0.5 px на округление: 20.8 при минимуме 21 — это тот же
-     минимум после пересчёта масштаба, и отбраковывать его нельзя. */
-  let font = typo.base * s;
-  const minFont = typo.min * s;
-  let metrics = null;
-  let lastResort = null;
-
-  while (font >= minFont - 0.5) {
-    /* Сколько нужно по содержимому при этом кегле. */
-    let needW = 0;
-    const parts = texts.map((t) => {
-      const m = measureAnswerCard(t, font, opts);
-      needW = Math.max(needW, m.naturalWidth);
-      return m;
-    });
-    /* Колонка: не шире нужного и не шире доступного. */
-    const colW = Math.min(bySpace, Math.max(needW, cfg.minWidth ? cfg.minWidth * s : 0));
-    const textW = colW - parts[0].chrome;
-    if (textW > 0) {
-      const lines = texts.map((t) => quizTextMeasurer.lineCount(
-        t, textW, font, typo.weight));
-      const maxLines = Math.max(...lines);
-      const cardH = cardHeightFor(maxLines, font, opts);
-      const groupH = rows * cardH + gapY * (rows - 1);
-      /* Высота влезает и ни одно слово не рвётся. */
-      const wordsFit = texts.every((t) => quizTextMeasurer.longestWord(
-        t, font, typo.weight) <= textW + 1);
-      if (wordsFit && groupH <= availH + 1 && cardH <= cfg.maxHeight * s + 1) {
-        metrics = { font, lines, maxLines, cardH, groupH, colW, textW };
-        break;
-      }
-      /* Запоминаем лучший «впритык»: пригодится, если идеального нет.
-         Это вариант на минимальном кегле, где сходится ширина, но высота
-         может чуть превышать — его потом ужмёт общий масштаб кадра. */
-      if (font <= minFont + 0.5 && wordsFit && textW > 0 && !lastResort) {
-        lastResort = { font, lines, maxLines, cardH, groupH, colW, textW };
-      }
-    }
-    font -= 1 * s;
+  let widestLine = 0;
+  for (const t of texts) {
+    widestLine = Math.max(widestLine,
+      quizTextMeasurer.width(String(t || ""), fontPx, typo.weight));
   }
-  if (!metrics) metrics = lastResort;
-  if (!metrics) return null;
+  /* Запас на перенос: canvas отдаёт ширину строки, а браузер решает по
+     своей сетке и с `text-wrap: pretty` может увести слово на строку ниже.
+     Без запаса текст ровно в ширину зоны давал две строки в кадре и одну
+     в расчёте — карточка вырастала, подпись уезжала за кадр. */
+  const wrapSafety = Math.max(2, fontPx * 0.06);
+  const maxTextW = Math.max(0, maxCardW - overhead - wrapSafety);
+  const textW = Math.min(maxTextW,
+    Math.max(widestLine + wrapSafety, cfg.minTextEm * fontPx));
+  const cardW = Math.min(maxCardW, overhead + textW);
+  const innerTextW = Math.max(1, cardW - overhead - wrapSafety);
+
+  const lines = texts.map((t) => quizTextMeasurer.lineCount(
+    t, innerTextW, fontPx, typo.weight));
+  /* Высота карточки: строки текста, вертикальные паддинги и рамка 2px.
+     Рамка входит в border-box, и без неё расчёт был на 2px ниже каждой
+     карточки — на трёх ответах это давало 5px переполнения кадра. */
+  const heights = lines.map((n) => Math.max(
+    cfg.minHeightEm * fontPx,
+    n * fontPx * typo.lineHeight + cfg.paddingY * 2 * fontPx + 2));
 
   return {
-    mode, cols, rows, ...metrics,
-    cardWidth: metrics.colW,
-    totalWidth: metrics.colW * cols + gapX * (cols - 1),
-    gapX, gapY,
+    cardW, textW: innerTextW, lines, heights, overhead, maxCardW,
+  };
+}
+
+/* Собрать группу карточек: строки, высоты рядов, общая высота.
+
+   По ТЗ (§5.1) по высоте выравнивается ряд: в сетке 2×2 карточки одной
+   строки становятся одной высоты, а в колонке каждая карточка — свой ряд и
+   растёт по своему тексту. Поэтому высоту задаёт grid, а не общая цифра:
+   одна высота на всю колонку резала ответ, который браузер переносил на
+   строку больше расчётного. */
+function buildGroup(cards, count, cols) {
+  const cfg = quizLayoutConfig.layout;
+  const rows = Math.ceil(count / cols);
+  const gapX = cols > 1 ? cfg.cardGapGrid : 0;
+  const gapY = cfg.cardGap;
+  const rowHeights = [];
+  for (let r = 0; r < rows; r++) {
+    let h = 0;
+    for (let c = 0; c < cols; c++) {
+      const i = r * cols + c;
+      if (i < count) h = Math.max(h, cards.heights[i]);
+    }
+    rowHeights.push(h);
+  }
+  const groupH = rowHeights.reduce((s, h) => s + h, 0) + gapY * (rows - 1);
+  const groupW = cards.cardW * cols + gapX * (cols - 1);
+  return {
+    rows, cols, gapX, gapY, rowHeights, groupH, groupW,
+    cardW: cards.cardW, textW: cards.textW, lines: cards.lines,
+    heights: cards.heights,
   };
 }
 
 /* ------------------------------------------------------------------ */
-/* QuestionLayoutEngine                                                */
+/* Один вариант кадра                                                  */
 /* ------------------------------------------------------------------ */
 
-/* Перебрать кандидатов и выбрать лучшего.
+/* Посчитать кадр при заданных кеглях. Возвращает геометрию и проблемы:
+   пустой список проблем значит «влезает».
 
-   Порядок предпочтения (по ТЗ): компактная группа с крупным шрифтом.
-   Кандидаты:
-     • 2 ответа   — «рядом» или «колонкой»;
-     • 3 ответа   — «в строку» (если короткие), «колонкой»;
-     • 4 ответа   — «2×2» (если короткие), «колонкой».
+   Здесь же считается картинка: в схеме B ей достаётся всё, что осталось
+   по высоте (не меньше 30% Ch), в схеме C — левый бокс по лимитам раздела
+   4.3, в схеме A её нет. */
+function evaluateFrame(input, fonts, frame) {
+  const cfg = quizLayoutConfig;
+  const L = cfg.layout;
+  const hasImage = input.image && input.image.width && input.image.height;
+  const layout = chooseLayout(input.image, frame);
+  const answers = (input.answers || []).filter((t) => String(t || "").trim());
+  const count = answers.length || 1;
+  const arrangement = chooseAnswersLayout(layout, count);
+  const problems = [];
 
-   Оценка: сначала кегль (крупнее — лучше), при равном кегле — меньшая
-   высота группы (компактнее). Вариант с переносом слов отбрасывается
-   внутри computeAnswersLayout. */
-function chooseAnswersLayout(texts, availW, availH, opts) {
-  const n = texts.length;
-  const gridMaxLines = quizLayoutConfig.layout.gridMaxLines;
-  const candidates = [];
+  /* Ширина вопроса и ответов. Схема C отдаёт всю ширину правой колонке:
+     ширина полосы под картинку считается ниже, но вопрос и ответы живут
+     справа, поэтому считаем от полного контента минус минимум под снимок. */
+  let qWidth = frame.Cw;
+  let answersMaxW = frame.Cw;
+  let imageBox = null;
 
-  if (n === 2) candidates.push("row", "column");
-  if (n === 3) candidates.push("row", "grid2", "column");
-  if (n === 4) candidates.push("grid2", "column");
-  if (n === 1) candidates.push("row");
-
-  const scored = [];
-  for (const mode of candidates) {
-    const m = computeAnswersLayout(texts, mode, availW, availH, opts);
-    if (!m) continue;
-    /* Сетку 2×2 не берём, если ответ в ней всё равно ломается на много
-       строк: колонка даст то же самое, но шире. */
-    if (mode === "grid2" && m.maxLines > gridMaxLines) continue;
-    scored.push(m);
+  if (layout === "A") {
+    qWidth = Math.min(frame.Cw, frame.Wv * L.questionMaxWidthA);
+    answersMaxW = Math.min(frame.Cw, frame.Wv * L.answersMaxWidth);
+  } else if (layout === "B") {
+    /* Ответы во всю ширину контента, если они в ряд: двум карточкам нужна
+       ширина. Колонкой — предел 70%, иначе короткий ответ растянется. */
+    qWidth = frame.Cw;
+    answersMaxW = arrangement.cols > 1
+      ? frame.Cw
+      : Math.min(frame.Cw, frame.Wv * L.answersMaxWidth);
+  } else {
+    /* Первая оценка полосы под снимок — по лимиту ширины. Точная высота
+       картинки от текста не зависит, поэтому считаем её сразу. */
+    const kind = classifyImage(input.image);
+    const widthShare = kind === "square"
+      ? L.imageSquareWidthShare : L.imagePortraitWidthShare;
+    const boxW = frame.Wv * widthShare;
+    const fitted = fitImage(input.image, boxW, frame.Ch, frame.k);
+    imageBox = { ...fitted, boxW, boxH: frame.Ch };
+    qWidth = Math.max(frame.Cw * 0.35,
+      frame.Cw - imageBox.width - L.sideGap);
+    answersMaxW = qWidth;
   }
-  if (!scored.length) {
-    /* Ничего не прошло — берём колонку с минимальным кеглем, пусть даже
-       придётся ужимать весь кадр масштабом. */
-    const fallback = computeAnswersLayout(texts, "column", availW, availH,
-      { ...opts, forceMinFont: true });
-    return fallback;
+
+  /* Вопрос. */
+  const typo = cfg.typography.question;
+  const qLines = quizTextMeasurer.wrap(input.question, qWidth,
+    fonts.q, typo.weight);
+  const qHeight = qLines.length * fonts.q * typo.lineHeight;
+
+  /* Предел строк вопроса: крупный кегль — 4 строки, мелкий — 6. */
+  const qLineLimit = fonts.q >= L.questionLines.bigFrom
+    ? L.questionLines.big : L.questionLines.small;
+  if (qLines.length > qLineLimit) {
+    problems.push(`строк вопроса ${qLines.length} > ${qLineLimit}`);
   }
-  scored.sort((a, b) => (b.font - a.font) || (a.groupH - b.groupH));
-  return scored[0];
+  if (layout === "A" && qHeight > frame.Ch * L.questionMaxShareA + L.tolerance) {
+    problems.push("вопрос выше 30% области");
+  }
+  if (layout === "B") {
+    if (qHeight > frame.Ch * L.questionMaxShareB + L.tolerance) {
+      problems.push("вопрос выше 16% области");
+    }
+    if (qLines.length > L.questionMaxLinesB) {
+      problems.push(`строк вопроса ${qLines.length} > ${L.questionMaxLinesB}`);
+    }
+  }
+
+  /* Ответы. */
+  const cards = measureCards(answers, fonts.a, answersMaxW,
+    arrangement.cols);
+  const group = buildGroup(cards, count, arrangement.cols);
+  const aLineLimit = fonts.a >= L.answerLines.bigFrom
+    ? L.answerLines.big : L.answerLines.small;
+  const worstLines = Math.max(...group.lines);
+  if (worstLines > aLineLimit) {
+    problems.push(`строк ответа ${worstLines} > ${aLineLimit}`);
+  }
+  /* Слово шире текстовой зоны — оно порвётся внутри. Это видно в кадре,
+     поэтому считаем ошибкой раскладки, а не мелочью. */
+  const brokenWord = answers.some((t) => quizTextMeasurer.longestWord(
+    t, fonts.a, cfg.typography.answer.weight) > group.textW + 1);
+  if (brokenWord) problems.push("слово ответа шире карточки");
+
+  /* Картинка и итоговая высота. Подпись «ответили» стоит под карточками и
+     входит в сумму: без неё расчёт «влезает» сходился, а на деле подпись
+     уезжала за нижнюю границу.
+
+     В схеме C вопрос и ответы живут в правой колонке отдельно от снимка,
+     поэтому её высота считается сама по себе, а общая — как большая из
+     двух: колонки стоят рядом, а не друг под другом. */
+  const captionH = cfg.typography.caption.font * cfg.typography.caption.lineHeight;
+  const textColumnH = qHeight + frame.gap + group.groupH + frame.gap + captionH;
+  let imageHeight = 0;
+  let totalHeight = 0;
+  if (layout === "A") {
+    totalHeight = textColumnH;
+  } else if (layout === "B") {
+    const free = frame.Ch - qHeight - group.groupH - captionH - frame.gap * 3;
+    const maxW = input.image.width / input.image.height > L.panoramaRatio
+      ? frame.Cw : frame.Cw * L.imageWidthShareB;
+    const fitted = fitImage(input.image, maxW, Math.max(0, free), frame.k);
+    imageHeight = fitted.height;
+    /* Квадрат на 4:3 не должен занимать больше 45% области: под ним ещё
+       ответы. */
+    if (classifyImage(input.image) === "square"
+      && imageHeight > frame.Ch * L.imageMaxShareSquareB + L.tolerance) {
+      const capped = frame.Ch * L.imageMaxShareSquareB;
+      imageHeight = capped;
+      imageBox = { ...fitted, height: capped, width: capped * fitted.ratio };
+    } else {
+      imageBox = fitted;
+    }
+    imageBox.boxH = Math.max(0, free);
+    if (free + L.tolerance < frame.Ch * L.imageMinShareB) {
+      problems.push("картинке остаётся меньше 30% области");
+    }
+    totalHeight = qHeight + frame.gap + imageHeight + frame.gap
+      + group.groupH + frame.gap + captionH;
+  } else {
+    imageHeight = imageBox.height;
+    totalHeight = Math.max(imageHeight, textColumnH);
+    if (imageHeight > frame.Ch + L.tolerance) {
+      problems.push("фото выше области контента");
+    }
+    if (textColumnH > frame.Ch + L.tolerance) {
+      problems.push("правая колонка выше области контента");
+    }
+  }
+
+  if (totalHeight > frame.Ch + L.tolerance) {
+    problems.push(`содержимое ${Math.round(totalHeight)} > области `
+      + `${Math.round(frame.Ch)}`);
+  }
+  if (group.groupW > frame.Cw + L.tolerance) {
+    problems.push("ответы шире области контента");
+  }
+
+  return {
+    layout, arrangement, problems,
+    question: {
+      font: fonts.q, lines: qLines, width: qWidth, height: qHeight,
+      textWidth: qWidth,
+    },
+    answers: {
+      ...group, font: fonts.a, count,
+      maxWidth: answersMaxW,
+    },
+    image: imageBox,
+    imageHeight,
+    totalHeight,
+    contentWidth: layout === "C"
+      ? imageBox.width + L.sideGap + group.groupW
+      : Math.max(qWidth, group.groupW),
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* Подгонка (раздел 7)                                                 */
+/* ------------------------------------------------------------------ */
+
+/* Обрезать самый длинный текст с «…» — шаг 3е: минимумы достигнуты, а кадр
+   всё равно не сходится. Что именно обрезали, попадает в предупреждения. */
+function truncateLongest(question, answers, warnings) {
+  const q = String(question || "");
+  const list = answers.map((t) => String(t || ""));
+  const longest = list.reduce((m, t, i) => (t.length > list[m].length ? i : m), 0);
+  if (list.length && list[longest].length > 3
+    && list[longest].length >= q.length) {
+    const t = list[longest];
+    const cut = Math.max(1, Math.round(t.length * 0.12));
+    list[longest] = t.slice(0, Math.max(1, t.length - cut)).trimEnd() + "…";
+    warnings.push(`ответ ${longest + 1} обрезан до «${list[longest]}»`);
+    return { question: q, answers: list, changed: true };
+  }
+  if (q.length > 3) {
+    const cut = Math.max(1, Math.round(q.length * 0.12));
+    const next = q.slice(0, Math.max(1, q.length - cut)).trimEnd() + "…";
+    warnings.push(`вопрос обрезан до «${next}»`);
+    return { question: next, answers: list, changed: true };
+  }
+  return { question: q, answers: list, changed: false };
 }
 
 /* Полный план кадра.
 
    Вход:
      question — текст вопроса;
-     answers  — массив текстов;
-     image    — { width, height } или null;
-     viewport — { width, height };
-     opts     — { scale, safe }.
+     answers  — тексты вариантов (пустые отбрасываются);
+     image    — { width, height } в пикселях файла или null;
+     viewport — { width, height } окна;
+     usableHeight — высота под содержимое (кадр минус шапка), необязательно.
 
-   Выход — план, который применяет applyQuizLayout():
-     { kind, question:{font,lines,width,height}, image:{mode,...},
-       answers:{...}, totalHeight, scale } */
+   Выход — план, который применяет applyQuizPlan() в screen.js. Размеры в
+   плане уже умножены на k, то есть в пикселях экрана. */
 function planQuizFrame(input) {
-  const cfg = quizLayoutConfig;
-  const { question, answers, image, viewport } = input;
-  const scale = input.scale || 1;
-  const safe = input.safe || {
-    left: cfg.safeArea.horizontal * scale,
-    right: cfg.safeArea.horizontal * scale,
-    top: cfg.safeArea.vertical * scale,
-    bottom: cfg.safeArea.vertical * scale,
-  };
+  const warnings = [];
+  const frame = computeFrame(input.viewport, input.usableHeight, warnings,
+    input.usableWidth);
 
-  const safeW = viewport.width - safe.left - safe.right;
-  const safeH = viewport.height - safe.top - safe.bottom;
-  /* Реальная высота под содержимое: кадр минус шапка, отступы и зазор.
-     Если экран передал её, считаем от неё — иначе план «влезает» по
-     расчёту, а на деле упирается в шапку. */
-  const roomH = Math.min(safeH, input.usableHeight || safeH);
+  let question = String(input.question || "");
+  let answers = (input.answers || [])
+    .filter((t) => String(t || "").trim())
+    .map((t) => String(t));
+  if (!answers.length) answers = [""];
 
-  /* Изображение: режим и контейнер. Для горизонтального фото сначала
-     считаем «сверху»; если ответам не хватает высоты — пересчитываем
-     со снимком слева (см. ниже). */
-  const img = computeImageLayout(image, safeW, safeH, scale, viewport.height);
+  const fonts = startFonts(question, answers, input.image);
+  let fsQ = fonts.q;
+  let fsA = fonts.a;
 
-  /* Вопрос: ширина ограничена, кегль от длины и от зоны. */
-  const qTypo = cfg.typography.question;
-  const qMaxW = Math.min(cfg.frame.questionMaxWidth * scale, safeW);
-  /* В режиме «слева» вопрос живёт в правой колонке. */
-  const sideTextW = img.mode === "side"
-    ? safeW - img.boxWidth - cfg.image.side.gap * scale
-    : qMaxW;
-  const qWidth = Math.min(qMaxW, sideTextW);
+  let best = null;
+  let result = evaluateFrame({ ...input, question, answers }, { q: fsQ, a: fsA },
+    frame);
+  let turn = "answers";
 
-  /* Зона вопроса: доля кадра, но не больше нужного. */
-  const qZoneMax = roomH * cfg.frame.questionMaxShare;
-  let qFont = qTypo.base * scale;
-  let qLines = 1;
-  for (let f = qTypo.max * scale; f >= qTypo.min * scale - 0.01; f -= 1 * scale) {
-    const lines = quizTextMeasurer.lineCount(question, qWidth, f, qTypo.weight);
-    const h = lines * f * qTypo.lineHeight;
-    if (h <= qZoneMax + 1) {
-      qFont = f;
-      qLines = lines;
-      break;
+  for (let i = 0; i < quizLayoutConfig.layout.maxIterations; i++) {
+    if (!result.problems.length) { best = result; break; }
+    /* Запоминаем последний вариант, который хотя бы посчитался: если
+       минимумы не помогли, покажем его с предупреждениями. */
+    best = result;
+    const step = quizLayoutConfig.layout.fontStep;
+    if (turn === "answers") {
+      const next = Math.max(quizLayoutConfig.typography.answer.min, fsA - step);
+      if (next === fsA) { turn = "question"; continue; }
+      fsA = next;
+      turn = "question";
+    } else {
+      const next = Math.max(quizLayoutConfig.typography.question.min, fsQ - step);
+      if (next === fsQ) { turn = "answers"; continue; }
+      fsQ = next;
+      turn = "answers";
     }
-  }
-  const qHeight = qLines * qFont * qTypo.lineHeight;
-
-  /* Сколько осталось на ответы.
-
-     Считаем от безопасной области, но вычитаем фактическую высоту фото —
-     она задана долей ПОЛНОГО кадра (46%), а не области. На 1:1 разница
-     между кадром и областью большая, и раньше сумма частей превышала
-     кадр: подпись уезжала за нижний край. */
-  const imgH = img.mode === "none" ? 0 : img.boxHeight;
-  const gapQ = cfg.frame.questionToAnswers * scale;
-  const gapImg = img.mode === "none" ? 0 : gapQ;
-  const captionH = cfg.typography.caption.base * scale * 1.6;
-  const availForAnswers = Math.max(0,
-    roomH - imgH - qHeight - gapQ - gapImg - captionH);
-
-  /* Если ответам не осталось места, уменьшаем фото: текст важнее (ТЗ,
-     раздел 3). Уступаем вплоть до SHOT_SHARE_MIN, но не больше. */
-  let imgFinal = img;
-  if (img.mode !== "none" && availForAnswers < cfg.answerCard.minHeight * scale) {
-    const minShareH = frameVH * cfg.frame.wideShotShareMin;
-    const extra = cfg.answerCard.minHeight * scale - availForAnswers;
-    const newH = Math.max(minShareH, img.boxHeight - extra);
-    if (newH < img.boxHeight) {
-      imgFinal = { ...img, boxHeight: newH,
-                   boxWidth: newH * (img.boxWidth / img.boxHeight),
-                   share: newH / frameVH };
-    }
+    /* Ответ никогда не крупнее 0.9 вопроса. */
+    fsA = Math.min(fsA,
+      fsQ * quizLayoutConfig.typography.answer.maxOfQuestion);
+    result = evaluateFrame({ ...input, question, answers },
+      { q: fsQ, a: fsA }, frame);
+    if (!result.problems.length) { best = result; break; }
+    best = result;
   }
 
-  /* Ширина под ответы: в боковом режиме — правая колонка, иначе вся. */
-  const answersW = img.mode === "side"
-    ? safeW - img.boxWidth - cfg.image.side.gap * scale
-    : safeW;
-
-  const answersPlan = chooseAnswersLayout(answers, answersW, availForAnswers,
-    { scale });
-
-  /* Если фото сверху, а ответы в него не влезли — пробуем снимок слева:
-     там справа есть и ширина, и высота. Это лучший вариант, чем ужимать
-     кегль до предела или гнать фото вниз (вопрос 11 стенда: четыре
-     длинных ответа под горизонтальным фото). */
-  if (img.mode === "wide" && (!answersPlan
-      || answersPlan.font < typo.answer.min * scale + 0.6)) {
-    const sideImg = computeImageLayout(image, safeW, safeH, scale,
-      viewport.height, { forceSide: true });
-    if (sideImg.mode === "side") {
-      const sideTextW = safeW - sideImg.boxWidth - cfg.image.side.gap * scale;
-      const sideAvailH = roomH - captionH - gapQ;
-      const sideAnswers = chooseAnswersLayout(answers, sideTextW, sideAvailH,
-        { scale });
-      if (sideAnswers && (answersPlan == null
-          || sideAnswers.font > answersPlan.font + 0.6)) {
-        /* В боковом режиме вопрос живёт в правой колонке. */
-        const sideQWidth = Math.min(cfg.frame.questionMaxWidth * scale,
-          sideTextW);
-        let sideQFont = qTypo.base * scale;
-        for (let f = qTypo.max * scale;
-             f >= qTypo.min * scale - 0.01; f -= 1 * scale) {
-          const lines = quizTextMeasurer.lineCount(question, sideQWidth, f,
-            qTypo.weight);
-          if (lines * f * qTypo.lineHeight <= roomH * cfg.frame.questionMaxShare + 1) {
-            sideQFont = f;
-            break;
-          }
-        }
-        const sideQLines = quizTextMeasurer.lineCount(question, sideQWidth,
-          sideQFont, qTypo.weight);
-        const sideQH = sideQLines * sideQFont * qTypo.lineHeight;
-        return {
-          kind: "image-side",
-          image: sideImg,
-          question: { font: sideQFont, lines: sideQLines,
-                      width: sideQWidth, height: sideQH },
-          answers: sideAnswers,
-          textColumnWidth: sideTextW,
-          totalHeight: sideQH + gapQ + captionH + sideAnswers.groupH,
-          safe: { width: safeW, height: roomH, left: safe.left, top: safe.top },
-          scale,
-        };
-      }
-    }
+  /* Минимумы достигнуты, а кадр не сходится — обрезаем текст, как требует
+     раздел 7, шаг 3е, и пишем в лог. */
+  let guard = 0;
+  while (best.problems.length && guard < 40) {
+    const atMinimums = fsQ <= quizLayoutConfig.typography.question.min
+      && fsA <= quizLayoutConfig.typography.answer.min;
+    if (!atMinimums) break;
+    const cut = truncateLongest(question, answers, warnings);
+    if (!cut.changed) break;
+    question = cut.question;
+    answers = cut.answers;
+    best = evaluateFrame({ ...input, question, answers },
+      { q: fsQ, a: fsA }, frame);
+    guard += 1;
   }
+
+  for (const p of best.problems) warnings.push(p);
+
+  const k = frame.k;
+  const answersPlan = best.answers;
+  const questionPlan = best.question;
+  const imagePlan = best.image;
 
   return {
-    kind: img.mode === "none" ? "text-only" : imgFinal.mode === "side" ? "image-side" : "image-top",
-    image: imgFinal,
-    question: { font: qFont, lines: qLines, width: qWidth, height: qHeight },
-    answers: answersPlan,
-    /* Ширина текстовой колонки в боковом режиме: CSS фиксирует её, иначе
-       группа ответов сжимается по содержимому и композиция уезжает влево. */
-    textColumnWidth: img.mode === "side" ? answersW : 0,
-    /* Полная высота кадра: фото, вопрос, ответы, подпись и все зазоры.
-       Раньше подпись не входила, и масштаб не срабатывал: содержимое
-       выходило за край на её высоту (16:9, квадратное фото). */
-    totalHeight: (imgFinal.boxHeight || 0) + qHeight
-      + (imgFinal.boxHeight ? gapQ : 0) + gapQ
-      + (answersPlan ? answersPlan.groupH : 0) + captionH,
-    safe: { width: safeW, height: roomH, left: safe.left, top: safe.top },
-    scale,
+    layout: best.layout,
+    mode: best.layout === "A" ? "text-only"
+      : best.layout === "B" ? "image-top" : "image-side",
+    scale: k,
+    frame: {
+      Wv: frame.Wv, Hv: frame.Hv, Cw: frame.Cw, Ch: frame.Ch,
+      gap: frame.gap, wide: frame.wide, ratio: frame.ratio,
+    },
+    question: {
+      font: questionPlan.font * k,
+      lines: questionPlan.lines,
+      lineCount: questionPlan.lines.length,
+      width: questionPlan.width * k,
+      height: questionPlan.height * k,
+      maxWidth: questionPlan.textWidth * k,
+    },
+    answers: {
+      font: answersPlan.font * k,
+      cols: answersPlan.cols,
+      rows: answersPlan.rows,
+      mode: best.arrangement.mode,
+      cardWidth: answersPlan.cardW * k,
+      textWidth: answersPlan.textW * k,
+      groupWidth: answersPlan.groupW * k,
+      groupHeight: answersPlan.groupH * k,
+      rowHeights: answersPlan.rowHeights.map((h) => h * k),
+      gapX: answersPlan.gapX * k,
+      gapY: answersPlan.gapY * k,
+      lines: answersPlan.lines,
+      count: answersPlan.count,
+    },
+    image: imagePlan ? {
+      width: imagePlan.width * k,
+      height: imagePlan.height * k,
+      ratio: imagePlan.ratio,
+      boxWidth: (imagePlan.boxW || imagePlan.width) * k,
+      boxHeight: (imagePlan.boxH || imagePlan.height) * k,
+      naturalWidth: input.image ? input.image.width : 0,
+      naturalHeight: input.image ? input.image.height : 0,
+      upscale: input.image && input.image.width
+        ? +((imagePlan.width * k) / input.image.width).toFixed(2) : 0,
+    } : null,
+    textColumnWidth: best.layout === "C"
+      ? (frame.Cw - (best.image ? best.image.width : 0)
+        - quizLayoutConfig.layout.sideGap) * k
+      : 0,
+    captionHeight: quizLayoutConfig.typography.caption.font
+      * quizLayoutConfig.typography.caption.lineHeight * k,
+    totalHeight: best.totalHeight * k,
+    content: { width: best.contentWidth * k, height: best.totalHeight * k },
+    area: { width: frame.Cw * k, height: frame.Ch * k },
+    gap: frame.gap * k,
+    answersText: answers,
+    questionText: question,
+    problems: [],
+    warnings,
+    sideGap: quizLayoutConfig.layout.sideGap * k,
   };
 }
 
@@ -556,32 +740,34 @@ function planQuizFrame(input) {
 /* LayoutValidator                                                     */
 /* ------------------------------------------------------------------ */
 
-/* Проверки по ТЗ: всё внутри безопасной области, ничего не перекрывается,
-   текст не обрезан, кегли не ниже минимума. Работает по плану, без DOM.
-
-   Возвращает { ok, problems: [] }. */
+/* Проверки по ТЗ, раздел 10.3: всё внутри области контента, кегли не ниже
+   минимумов, ничего не обрезано, картинка не увеличена больше 1.5×.
+   Работает по плану, без DOM. */
 function validateQuizPlan(plan) {
   const cfg = quizLayoutConfig;
   const problems = [];
   if (!plan) return { ok: false, problems: ["плана нет"] };
+  const k = plan.scale || 1;
 
-  const minAnswer = cfg.typography.answer.min * plan.scale;
-  if (plan.answers && plan.answers.font < minAnswer - 0.5) {
-    problems.push(`кегль ответа ${plan.answers.font.toFixed(1)} < ${minAnswer.toFixed(1)}`);
+  const minA = cfg.typography.answer.min * k;
+  const minQ = cfg.typography.question.min * k;
+  if (plan.answers && plan.answers.font < minA - 0.5) {
+    problems.push(`кегль ответа ${plan.answers.font.toFixed(1)} < ${minA.toFixed(1)}`);
   }
-  if (plan.question.font < cfg.typography.question.min * plan.scale - 0.5) {
-    problems.push(`кегль вопроса ${plan.question.font.toFixed(1)} ниже минимума`);
+  if (plan.question.font < minQ - 0.5) {
+    problems.push(`кегль вопроса ${plan.question.font.toFixed(1)} < ${minQ.toFixed(1)}`);
   }
-  if (plan.answers && plan.answers.totalWidth > plan.safe.width + 1) {
-    problems.push("ответы шире безопасной области");
+  if (plan.answers && plan.answers.groupWidth > plan.area.width + 1) {
+    problems.push("ответы шире области контента");
   }
-  if (plan.totalHeight > plan.safe.height + 1) {
-    problems.push("содержимое выше безопасной области");
+  if (plan.totalHeight > plan.area.height + 1) {
+    problems.push("содержимое выше области контента");
   }
-  if (plan.image && plan.image.mode !== "none") {
-    if (plan.image.boxHeight > plan.safe.height * 0.9 + 1) {
-      problems.push("фото выше безопасной области");
-    }
+  if (plan.image && plan.image.upscale > cfg.layout.imageUpscaleMax + 0.01) {
+    problems.push(`картинка увеличена в ${plan.image.upscale}×`);
+  }
+  if (plan.textColumnWidth && plan.textColumnWidth <= 0) {
+    problems.push("правой колонке не осталось ширины");
   }
   return { ok: problems.length === 0, problems };
 }
@@ -593,5 +779,6 @@ window.quizLayout = {
   plan: planQuizFrame,
   validate: validateQuizPlan,
   chooseAnswers: chooseAnswersLayout,
-  computeImage: computeImageLayout,
+  classifyImage,
+  computeFrame,
 };

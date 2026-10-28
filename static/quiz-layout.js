@@ -320,11 +320,19 @@ function startFonts(question, answers, image) {
 /* Карточки ответов                                                    */
 /* ------------------------------------------------------------------ */
 
-/* Сколько em занимает всё, кроме текста: паддинги, бейдж, зазоры, процент. */
+/* Сколько пикселей занимает всё, кроме текста: паддинги, бейдж, зазоры,
+   процент и рамка.
+
+   Рамка входит в border-box, поэтому её ширина отнимает место у текста
+   ровно так же, как паддинг. Без неё расчёт давал зону текста на 2px шире
+   настоящей, и слово, помещавшееся «впритык», в браузере уходило на вторую
+   строку — карточка вырастала уже после расчёта. */
+const CARD_BORDER_PX = 2;
+
 function cardOverhead(fontPx) {
   const c = quizLayoutConfig.answerCard;
   return (c.paddingX * 2 + c.numberColumn + c.numberToTextGap
-    + c.textToPercentGap + c.percentColumn) * fontPx;
+    + c.textToPercentGap + c.percentColumn) * fontPx + CARD_BORDER_PX;
 }
 
 /* Карточка при заданном кегле и пределе ширины (раздел 5.1).
@@ -351,14 +359,18 @@ function measureCards(texts, fontPx, maxGroupW, cols) {
   }
   /* Запас на перенос: canvas отдаёт ширину строки, а браузер решает по
      своей сетке и с `text-wrap: pretty` может увести слово на строку ниже.
-     Без запаса текст ровно в ширину зоны давал две строки в кадре и одну
-     в расчёте — карточка вырастала, подпись уезжала за кадр. */
+     Без запаса ответ ровно в ширину зоны давал две строки в кадре и одну
+     в расчёте — карточка вырастала и вытесняла подпись.
+
+     Запас именно добавляется к нужной ширине и остаётся в текстовой зоне:
+     cardW → зона текста, а строки считаются по этой зоне. Раньше он
+     вычитался из ширины при подсчёте строк, то есть съедался самим
+     расчётом и ни от чего не защищал. */
   const wrapSafety = Math.max(2, fontPx * 0.06);
-  const maxTextW = Math.max(0, maxCardW - overhead - wrapSafety);
-  const textW = Math.min(maxTextW,
-    Math.max(widestLine + wrapSafety, cfg.minTextEm * fontPx));
-  const cardW = Math.min(maxCardW, overhead + textW);
-  const innerTextW = Math.max(1, cardW - overhead - wrapSafety);
+  const wantTextW = Math.max(widestLine + wrapSafety, cfg.minTextEm * fontPx);
+  const cardW = Math.min(maxCardW, overhead + wantTextW);
+  const innerTextW = Math.max(1, cardW - overhead);
+  const maxTextW = Math.max(0, maxCardW - overhead);
 
   const lines = texts.map((t) => quizTextMeasurer.lineCount(
     t, innerTextW, fontPx, typo.weight));

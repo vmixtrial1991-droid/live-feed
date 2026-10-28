@@ -125,6 +125,12 @@ a:hover { text-decoration: underline; }
 
 .field { display: flex; flex-direction: column; gap: .45rem; }
 .field > span { font-size: .9rem; color: var(--muted); font-weight: 500; }
+/* Предел текста в редакторе квиза: до рекомендуемого — обычно, между
+   рекомендуемым и жёстким — предупреждение (текст пройдёт, но шрифт
+   станет мельче), выше жёсткого не пустит maxlength. */
+.field > span.is-long { color: var(--warn); }
+.field > span.is-over { color: var(--warn); font-weight: 700; }
+.q-opt-input.is-long { border-color: var(--warn); }
 .counter { font-size: .8rem; color: var(--muted); text-align: right; }
 .counter b { color: var(--text); }
 /* счётчик предупреждает заранее, а не в момент отказа сервера */

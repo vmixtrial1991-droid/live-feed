@@ -266,15 +266,17 @@ if files:
     with _Image.open(path) as im:
         check("сервер пережал картинку до 1600 px", max(im.size) <= 1600, str(im.size))
 
+# Пределы с картинкой из раздела 12 ТЗ: вопрос 240, ответ при двух
+# вариантах 85. Берём на знак больше каждого.
 st, _ = upload("/api/moderator/quiz/add", {
-    "text": "Очень длинный вопрос " * 5,
+    "text": ("Очень длинный вопрос " * 12)[:241],
     "options": json.dumps(["а", "б"], ensure_ascii=False),
     "correct": "0", "scored": "1",
 }, "image", "shape.jpg", sample_jpeg(), expect=400)
 check("с картинкой длинный текст вопроса отклоняется", True)
 st, _ = upload("/api/moderator/quiz/add", {
     "text": "Коротко",
-    "options": json.dumps(["а" * 60, "б"], ensure_ascii=False),
+    "options": json.dumps(["а" * 86, "б"], ensure_ascii=False),
     "correct": "0", "scored": "1",
 }, "image", "shape.jpg", sample_jpeg(), expect=400)
 check("с картинкой длинный вариант отклоняется", True)
@@ -304,6 +306,74 @@ call("POST", "/api/moderator/quiz/delete", {"question_id": qimg})
 _, h = call("GET", "/api/moderator/quiz")
 check("после проверки картинки колода снова из двух вопросов",
       len(h["questions"]) == 2, str([q["id"] for q in h["questions"]]))
+
+print("\n=== Пределы длины текста (раздел 12 ТЗ) ===")
+_, h = call("GET", "/api/moderator/quiz")
+tl = h.get("text_limits") or {}
+check("панель получает таблицу пределов",
+      tl.get("question", {}).get("none") == {"recommended": 300, "hard": 350}
+      and tl.get("question", {}).get("image") == {"recommended": 200, "hard": 240},
+      str(tl.get("question")))
+check("пределы ответа зависят от числа вариантов",
+      tl.get("answer", {}).get("none", {}).get("4") ==
+      {"recommended": 80, "hard": 100}
+      and tl.get("answer", {}).get("none", {}).get("2") ==
+      {"recommended": 100, "hard": 120},
+      str(tl.get("answer", {}).get("none")))
+
+# Рекомендуемый предел и жёсткий: между ними текст принимается, выше — нет.
+q_ok = ("Слово " * 70)[:350]
+st, r = call("POST", "/api/moderator/quiz/add", {
+    "text": q_ok, "options": json.dumps(["а", "б"], ensure_ascii=False),
+    "correct": "0", "scored": "1"})
+long_id = (r.get("question") or {}).get("id")
+check("вопрос на жёстком пределе (350) принят", st == 200, str(r)[:100])
+st, r = call("POST", "/api/moderator/quiz/add", {
+    "text": ("Слово " * 71)[:351],
+    "options": json.dumps(["а", "б"], ensure_ascii=False),
+    "correct": "0", "scored": "1"}, expect=400)
+check("вопрос длиннее жёсткого предела отклонён", st == 400)
+check("в отказе сказано, на сколько сократить",
+      "Сократите" in (r.get("detail") or ""), r.get("detail"))
+if long_id:
+    call("POST", "/api/moderator/quiz/delete", {"question_id": long_id})
+
+st, r = call("POST", "/api/moderator/quiz/add", {
+    "text": "Короткий вопрос",
+    "options": json.dumps([("слово " * 21)[:101], "б", "в", "г"],
+                          ensure_ascii=False),
+    "correct": "0", "scored": "1"}, expect=400)
+check("ответ длиннее предела для четырёх вариантов отклонён", st == 400,
+      r.get("detail", "")[:80])
+st, r = call("POST", "/api/moderator/quiz/add", {
+    "text": "Короткий вопрос",
+    "options": json.dumps([("слово " * 20)[:100], "б", "в"],
+                          ensure_ascii=False),
+    "correct": "0", "scored": "1"})
+wide_id = (r.get("question") or {}).get("id")
+check("тот же ответ при трёх вариантах проходит", st == 200, str(r)[:100])
+
+# Правка проверяется по итоговому состоянию: картинка делает предел строже.
+st, _ = upload("/api/moderator/quiz/add", {
+    "text": "Что на картинке?",
+    "options": json.dumps(["Круг", "Квадрат"], ensure_ascii=False),
+    "correct": "0", "scored": "1",
+}, "image", "limit.jpg", sample_jpeg())
+_, h = call("GET", "/api/moderator/quiz")
+pic = next((q for q in h["questions"] if q.get("image")), None)
+if pic:
+    st, _ = call("POST", "/api/moderator/quiz/update",
+                 {"question_id": pic["id"], "text": ("Слово " * 50)[:250]},
+                 expect=400)
+    check("правка роняет длинный текст под предел с картинкой", st == 400)
+    st, _ = call("POST", "/api/moderator/quiz/update",
+                 {"question_id": pic["id"], "drop_image": "1"})
+    st, _ = call("POST", "/api/moderator/quiz/update",
+                 {"question_id": pic["id"], "text": ("Слово " * 50)[:250]})
+    check("без картинки тот же текст принимается", st == 200, str(st))
+    call("POST", "/api/moderator/quiz/delete", {"question_id": pic["id"]})
+if wide_id:
+    call("POST", "/api/moderator/quiz/delete", {"question_id": wide_id})
 
 st, _ = call("POST", "/api/moderator/quiz/move",
              {"question_id": q2, "direction": "up"})

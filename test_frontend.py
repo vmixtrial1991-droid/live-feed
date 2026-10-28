@@ -778,10 +778,18 @@ check("screen.js: пропорции фото определяются по на
       "function markShotShape" in screen_js and "on-shot-wide" in screen_js)
 check("screen.css: номер вопроса вынесен из сжимаемого блока",
       ".quiz-head" in screen_css and 'class="quiz-head"' in screen_html)
-check("quiz-panel.js: лимиты текста зависят от ориентации картинки",
-      "wideText: 65" in quiz_panel_js and "wideOption: 35" in quiz_panel_js
-      and "sideText: 90" in quiz_panel_js and "sideOption: 35" in quiz_panel_js
-      and "function currentLimits" in quiz_panel_js)
+check("quiz-panel.js: пределы текста приходят с сервера, а не зашиты",
+      "quizState.text_limits" in quiz_panel_js
+      and "function limitsTable" in quiz_panel_js
+      and "function currentLimits" in quiz_panel_js,
+      "свои числа во фронтенде обещали бы автору не то, что примет сервер")
+check("quiz-panel.js: предел ответа зависит от числа заполненных вариантов",
+      "function editorOptionCount" in quiz_panel_js
+      and "answer[key][String(editorOptionCount())]" in quiz_panel_js)
+check("quiz-panel.js: длинный текст даёт предупреждение, а не отказ",
+      "Текст длинный, шрифт на экране будет уменьшен" in quiz_panel_js
+      and "is-long" in quiz_panel_js,
+      "между рекомендуемым и жёстким пределом текст принимается")
 check("moderator.html: поле названия игры на вкладке «Квиз»",
       'id="quizTitleInput"' in mod_html and 'id="quizTitleSave"' in mod_html)
 check("quiz-panel.js: название игры уходит на сервер и подставляет событие подсказкой",

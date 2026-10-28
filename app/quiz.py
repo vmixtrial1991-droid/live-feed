@@ -42,6 +42,106 @@ BACK_PHASES = ("lobby", "open", "closed", "reveal")
 STEP_BACK = {"open": "lobby", "closed": "open", "reveal": "closed"}
 
 
+# --------------------------------------------------------------------------
+# Лимиты длины текста (ТЗ «Вёрстка экрана квиза», раздел 12)
+# --------------------------------------------------------------------------
+# У вопроса и ответа не один предел, а два:
+#
+#   recommended — до него экран укладывается штатно, крупным кеглем;
+#   hard        — за ним текст уже не помещается никак, редактор обязан
+#                 не дать сохранить.
+#
+# Между пределами текст принимается: подгонка уменьшит кегль до минимумов
+# (вопрос 32, ответ 28), а редактор предупредит автора, что шрифт будет
+# мельче. Выше жёсткого предела — отказ, а если такой текст всё же оказался
+# на экране, рендер обрезает его с «…» и пишет в лог.
+#
+# Пределы зависят от двух вещей, и обе — про геометрию, а не про вкус:
+#
+#   есть ли картинка — с ней вопросу достаётся меньше места (в схеме B
+#                      только 16% области, в схеме C — узкая правая колонка);
+#   сколько ответов    — четыре встают сеткой 2×2, и колонка вдвое уже.
+#
+# Таблица одна на весь проект: сервер проверяет по ней, редактор показывает
+# по ней же счётчик и предупреждение. Разойдясь, они обещали бы разное.
+
+QUIZ_QUESTION_LIMITS = {
+    # False — картинки нет, True — есть.
+    False: {"recommended": 300, "hard": 350},
+    True: {"recommended": 200, "hard": 240},
+}
+
+# Ключ — (есть картинка, число ответов).
+QUIZ_OPTION_LIMITS = {
+    (False, 2): {"recommended": 100, "hard": 120},
+    (False, 3): {"recommended": 100, "hard": 120},
+    (False, 4): {"recommended": 80, "hard": 100},
+    (True, 2): {"recommended": 70, "hard": 85},
+    (True, 3): {"recommended": 70, "hard": 85},
+    (True, 4): {"recommended": 60, "hard": 75},
+}
+
+
+def question_limits(has_image: bool) -> dict:
+    """Пределы вопроса: {recommended, hard}."""
+    return QUIZ_QUESTION_LIMITS[bool(has_image)]
+
+
+def option_limits(has_image: bool, count: int) -> dict:
+    """Пределы ответа для вопроса с таким числом вариантов.
+
+    Считаем по фактическому числу заполненных вариантов: пустые строки
+    сервер отбрасывает, и вопрос «на четыре» с тремя заполненными на экране
+    будет колонкой, а не сеткой 2×2 — значит, и предел у него мягче.
+    """
+    n = min(4, max(2, int(count or 2)))
+    return QUIZ_OPTION_LIMITS[(bool(has_image), n)]
+
+
+def text_limits(has_image: bool, option_count: int = 2) -> dict:
+    """Все пределы кадра одной структурой — её отдают и API, и редактор.
+
+    {
+      "question": {"recommended": .., "hard": ..},
+      "answer":   {"recommended": .., "hard": ..},
+      "has_image": bool,
+      "answers": n,
+    }
+    """
+    return {
+        "question": question_limits(has_image),
+        "answer": option_limits(has_image, option_count),
+        "has_image": bool(has_image),
+        "answers": min(4, max(2, int(option_count or 2))),
+    }
+
+
+def text_limits_table() -> dict:
+    """Вся таблица пределов — для редактора.
+
+    Редактору нужны все комбинации сразу: автор ставит картинку, меняет
+    число вариантов и должен видеть предел без похода на сервер. Поэтому
+    отдаём таблицу целиком, а не один расчёт: она маленькая, а лишний
+    запрос на каждое нажатие «+ вариант» был бы лишним.
+
+    Формат: {"question": {"none": {...}, "image": {...}},
+             "answer": {"none": {"2": {...}, "3": {...}, "4": {...}},
+                        "image": {...}}}
+    """
+    return {
+        "question": {
+            "none": dict(QUIZ_QUESTION_LIMITS[False]),
+            "image": dict(QUIZ_QUESTION_LIMITS[True]),
+        },
+        "answer": {
+            "none": {str(n): dict(QUIZ_OPTION_LIMITS[(False, n)])
+                     for n in (2, 3, 4)},
+            "image": {str(n): dict(QUIZ_OPTION_LIMITS[(True, n)])
+                      for n in (2, 3, 4)},
+        },
+    }
+
+
 def prev_phase(screen: ScreenController, store: EventStore) -> str | None:
     """Куда ведёт кнопка «←» — на один шаг назад, или None.
 
@@ -287,6 +387,11 @@ def host_state(event: Event, store: EventStore, screen: ScreenController) -> dic
         # события значением нельзя, иначе ведущий не отличит своё от чужого
         "quiz_title": str(event.get("quiz_title", "")).strip(),
         "event_title": event.get("title", ""),
+        # Пределы длины текста одной таблицей — по ним редактор рисует
+        # счётчик и предупреждение. Считаются на месте (раздел 12 ТЗ):
+        # дублировать числа во фронтенде значит обещать автору не то,
+        # что примет сервер.
+        "text_limits": text_limits_table(),
     }
     if screen.quiz_phase == "open" and screen.quiz_question:
         q = store.quiz_get_question(screen.quiz_question)

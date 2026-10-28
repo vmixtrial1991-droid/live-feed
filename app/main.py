@@ -1169,12 +1169,10 @@ async def api_rotate_invite(slug: str, request: Request):
 # --------------------------------------------------------------------------
 # Квиз (5.0): панель ведущего — вопросы и управление стадиями
 # --------------------------------------------------------------------------
-# Лимиты свои, отдельные от ленты, и это не придирка: вопрос читают с
-# дальних рядов зала, поэтому слишком длинный текст уже теряется,
+# Пределы квиза свои, отдельные от ленты, и это не придирка: вопрос читают
+# с дальних рядов зала, поэтому слишком длинный текст уже теряется,
 # а четыре варианта — потолок: с пятью строками ответов на проекторе
 # становятся мелкими, и зал перестаёт их различать.
-#
-# Значения зависят от картинки — см. quiz_text_limits ниже.
 
 MIN_OPTIONS = 2
 MAX_OPTIONS = 4
@@ -1183,52 +1181,37 @@ MAX_TIMER = 600
 # название игры на холле: оно стоит крупно над QR, длинное не влезает
 MAX_QUIZ_TITLE_LEN = 60
 
-# Вопрос с картинкой: картинка съедает часть кадра, и длинный текст рядом
-# с ней уже не читается. Лимиты зависят от ориентации снимка, потому что
-# от неё зависит раскладка:
+# Длина текста. Таблица живёт в app/quiz.py (раздел 12 ТЗ «Вёрстка экрана
+# квиза»): там у вопроса и ответа по два предела — рекомендуемый и жёсткий,
+# и они зависят от того, есть ли картинка и сколько ответов. Здесь только
+# проверка приёма; редактор показывает те же числа из того же места.
 #
-#   горизонтальное — всегда сверху во всю ширину: оно хорошо использует
-#                    ширину экрана, но делит с текстом высоту;
-#   квадратное     — слева: справа остаётся место под вопрос и ответы,
-#                    а вертикального пространства больше, чем при «сверху»;
-#   вертикальное   — тоже слева: занимает меньше ширины и оставляет
-#                    справа всю ширину под текст.
-#
-# Ответы короткие во всех режимах: длинная строка в карточке рвётся на
-# 2-3 строки и вытесняет остальные варианты.
-#
-# Без картинки места больше всего — и вопросу, и ответам.
-NO_IMAGE_Q_LEN = 90
-NO_IMAGE_O_LEN = 45
-WIDE_IMAGE_Q_LEN = 65
-WIDE_IMAGE_O_LEN = 35
-SQUARE_IMAGE_Q_LEN = 90
-SQUARE_IMAGE_O_LEN = 35
-TALL_IMAGE_Q_LEN = 90
-TALL_IMAGE_O_LEN = 35
-
-# Значения по умолчанию для старых вызовов: без картинки.
-MAX_QUESTION_LEN = NO_IMAGE_Q_LEN
-MAX_OPTION_LEN = NO_IMAGE_O_LEN
+# Почему не одна пара чисел на всё: четыре ответа встают сеткой 2×2, и
+# колонка вдвое уже той, что у трёх ответов в столбик. Один предел на оба
+# случая либо резал бы короткие вопросы зря, либо пропускал нечитаемое.
 
 
-def quiz_text_limits(orientation: str | None) -> tuple[int, int]:
-    """Лимиты вопроса и ответа для ориентации картинки.
+def _quiz_text_problem(text: str, limits: dict, what: str) -> str | None:
+    """Нарушение предела длины или None.
 
-    orientation: None — картинки нет, иначе "wide", "square" или "tall".
-    Возвращает (длина вопроса, длина ответа).
-
-    Квадрат и вертикаль стоят слева, поэтому справа остаётся полная ширина
-    под вопрос — им доступно столько же знаков, сколько вопросу без фото.
-    Горизонтальное фото занимает верх и делит высоту, поэтому лимит жёстче.
+    Возвращает текст ошибки для ответа 400. Между рекомендуемым и жёстким
+    пределом — не ошибка: подгонка уменьшит кегль, и текст прочитается.
     """
-    if not orientation:
-        return NO_IMAGE_Q_LEN, NO_IMAGE_O_LEN
-    if orientation == "wide":
-        return WIDE_IMAGE_Q_LEN, WIDE_IMAGE_O_LEN
-    if orientation == "square":
-        return SQUARE_IMAGE_Q_LEN, SQUARE_IMAGE_O_LEN
-    return TALL_IMAGE_Q_LEN, TALL_IMAGE_O_LEN
+    over = len(text) - limits["hard"]
+    if over > 0:
+        return (f"{what} длиннее {limits['hard']} знаков — на экране он "
+                f"не поместится даже минимальным шрифтом. "
+                f"Сократите на {over}.")
+    return None
+
+
+def _quiz_text_warning(text: str, limits: dict) -> bool:
+    """Текст длиннее рекомендуемого, но в пределах жёсткого.
+
+    Такой текст принимается, шрифт на экране будет мельче обычного.
+    Редактор пишет об этом автору заранее.
+    """
+    return limits["recommended"] < len(text) <= limits["hard"]
 
 # метка «поле не трогать» для формы правки: пустая строка слишком нужна
 # для «стереть», а выдуманное слово никто случайно не пришлёт
@@ -1277,11 +1260,16 @@ async def _quiz_image(event: Event, upload: UploadFile | None) -> str | None:
         raise HTTPException(status_code=400, detail=str(exc))
 
 
-def _quiz_options(raw: str, limit: int = MAX_OPTION_LEN) -> list[str]:
+def _quiz_options(raw: str, has_image: bool = False) -> list[str]:
     """Варианты из формы: список прилетает JSON-ом, пустые отсекаем.
 
-    limit в вопросе с картинкой меньше: два столбца вариантов должны
-    читаться с дальних рядов рядом с фотографией, а не спорить с ней.
+    Предел ответа зависит от того, есть ли у вопроса картинка, и от числа
+    заполненных вариантов (четыре встают сеткой 2×2 — колонка вдвое уже).
+    Поэтому пределы считаются здесь, после отбрасывания пустых строк:
+    раньше вызвать их нельзя, числа ещё не из чего взять.
+
+    Длинный вариант не обрезаем молча: ведущий не увидит, что часть текста
+    пропала, и зал прочитает другое.
     """
     try:
         parsed = json.loads(raw or "")
@@ -1289,24 +1277,21 @@ def _quiz_options(raw: str, limit: int = MAX_OPTION_LEN) -> list[str]:
         raise HTTPException(status_code=400, detail="Варианты должны быть списком")
     if not isinstance(parsed, list):
         raise HTTPException(status_code=400, detail="Варианты должны быть списком")
-    # длинный вариант при картинке не обрезаем молча: ведущий не увидит,
-    # что часть текста пропала, и зал прочитает другое
-    for raw_opt in parsed:
-        clean_opt = " ".join(str(raw_opt).split())
-        if len(clean_opt) > limit:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Вариант длиннее {limit} символов не поместится рядом "
-                       f"с картинкой. Сократите на {len(clean_opt) - limit}.",
-            )
-    options = [" ".join(str(o).split())[:limit] for o in parsed]
-    options = [o for o in options if o]
-    if not (MIN_OPTIONS <= len(options) <= MAX_OPTIONS):
+
+    clean = [" ".join(str(o).split()) for o in parsed]
+    clean = [o for o in clean if o]
+    if not (MIN_OPTIONS <= len(clean) <= MAX_OPTIONS):
         raise HTTPException(
             status_code=400,
             detail=f"Вариантов должно быть от {MIN_OPTIONS} до {MAX_OPTIONS}",
         )
-    return options
+
+    lim = quizmod.option_limits(has_image, len(clean))
+    for opt in clean:
+        problem = _quiz_text_problem(opt, lim, "Вариант ответа")
+        if problem:
+            raise HTTPException(status_code=400, detail=problem)
+    return clean
 
 
 @app.get("/e/{slug}/api/moderator/quiz")
@@ -1354,9 +1339,11 @@ async def api_mod_quiz_add(
 ):
     """Новый вопрос встаёт в конец очереди; порядок правится кнопками.
 
-    Картинка необязательна. Лимиты текста зависят от её ориентации:
-    горизонтальная стоит сверху и делит высоту, квадратная и вертикальная —
-    слева, оставляя справа всю ширину под вопрос и ответы.
+    Картинка необязательна. Пределы текста зависят от того, есть ли она:
+    с картинкой вопросу достаётся меньше места (схема B отдаёт ему 16%
+    области, схема C — узкую правую колонку). Таблица пределов — в
+    app/quiz.py, раздел 12 ТЗ «Вёрстка экрана квиза».
+
     Файл проходит тот же путь, что и фото ленты, — пережимается сервером
     до 1600 px по длинной стороне и сохраняется в uploads события.
     """
@@ -1364,20 +1351,15 @@ async def api_mod_quiz_add(
     _require_moderator(request, event)
 
     stored = await _quiz_image(event, image)
-    orientation = (images.image_orientation(stored, event.uploads_dir)
-                   if stored else None)
-    text_limit, option_limit = quiz_text_limits(orientation)
+    q_limits = quizmod.question_limits(bool(stored))
 
     text = " ".join((text or "").split())
     if not text:
         raise HTTPException(status_code=400, detail="Напишите текст вопроса")
-    if len(text) > text_limit:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Вопрос с картинкой — до {text_limit} символов. "
-                   f"Сократите на {len(text) - text_limit}.",
-        )
-    opts = _quiz_options(options, option_limit)
+    problem = _quiz_text_problem(text, q_limits, "Вопрос")
+    if problem:
+        raise HTTPException(status_code=400, detail=problem)
+    opts = _quiz_options(options, has_image=bool(stored))
     graded = str(scored).lower() in ("1", "true", "on", "yes")
     if graded and not (0 <= correct < len(opts)):
         raise HTTPException(status_code=400, detail="Отметьте правильный вариант")
@@ -1414,6 +1396,12 @@ async def api_mod_quiz_update(
 
     Картинка: новую присылают файлом, `drop_image=1` убирает прежнюю.
     Ни того, ни другого — картинка остаётся как была.
+
+    Пределы текста проверяются по итоговому состоянию вопроса, а не только
+    по присланным полям: правка может уронить уже сохранённый текст под
+    новый предел. Добавили картинку — вопросу стало теснее; стало меньше
+    вариантов — ответам стало шире. Смотреть только на форму значит
+    пропустить оба случая.
     """
     event = _event_or_404(slug)
     _require_moderator(request, event)
@@ -1424,22 +1412,12 @@ async def api_mod_quiz_update(
     new_image = await _quiz_image(event, image)
     drop = str(drop_image).lower() in ("1", "true", "on", "yes")
     final_image = new_image if new_image else (None if drop else old.get("image"))
-    orientation = (images.image_orientation(final_image, event.uploads_dir)
-                   if final_image else None)
-    text_limit, option_limit = quiz_text_limits(orientation)
 
     fields: dict = {}
     if text.strip():
-        clean_text = " ".join(text.split())
-        if len(clean_text) > text_limit:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Вопрос с картинкой — до {text_limit} символов. "
-                       f"Сократите на {len(clean_text) - text_limit}.",
-            )
-        fields["text"] = clean_text
+        fields["text"] = " ".join(text.split())
     if options.strip():
-        fields["options"] = _quiz_options(options, option_limit)
+        fields["options"] = _quiz_options(options, has_image=bool(final_image))
     if scored != "":
         graded = str(scored).lower() in ("1", "true", "on", "yes")
         fields["scored"] = graded
@@ -1461,6 +1439,25 @@ async def api_mod_quiz_update(
     final_correct = fields.get("correct", old["correct"])
     if final_scored and not (0 <= final_correct < len(final_options)):
         raise HTTPException(status_code=400, detail="Отметьте правильный вариант")
+
+    # Правка может уронить уже сохранённый текст под новый предел: добавили
+    # картинку — вопросу стало теснее; убрали вариант — ответам, наоборот,
+    # шире. Проверяем итоговое состояние, а не только присланные поля: иначе
+    # вопрос на 250 знаков молча остался бы с картинкой, под которую он уже
+    # не помещается.
+    final_text = fields.get("text", old["text"])
+    q_limits = quizmod.question_limits(bool(final_image))
+    problem = _quiz_text_problem(final_text, q_limits, "Вопрос")
+    if problem:
+        detail = problem
+        if final_image:
+            detail += " Уберите картинку или сократите текст."
+        raise HTTPException(status_code=400, detail=detail)
+    o_limits = quizmod.option_limits(bool(final_image), len(final_options))
+    for opt in final_options:
+        problem = _quiz_text_problem(opt, o_limits, "Вариант ответа")
+        if problem:
+            raise HTTPException(status_code=400, detail=problem)
 
     question = event.store.quiz_update_question(question_id, **fields)
     runtime = _runtime(event)

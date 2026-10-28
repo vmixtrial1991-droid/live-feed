@@ -62,34 +62,52 @@ let qImageRemove = false;      // просьба убрать прежнюю к�
    слева — мягче). null значит «ещё не знаем». */
 let imgOrientation = null;
 
-/* Пределы текста. Зависят от ориентации картинки, потому что от неё
-   зависит раскладка: горизонтальная стоит сверху и делит высоту,
-   квадратная и вертикальная — слева, оставляя справа всю ширину под
-   вопрос и ответы. Значения повторяют серверные (quiz_text_limits):
-   сервер всё равно проверит, а здесь они нужны, чтобы ведущий видел
-   предел до отправки. */
-const LIMITS = {
-  text: 90,
-  option: 45,
-  wideText: 65,
-  wideOption: 35,
-  sideText: 90,
-  sideOption: 35,
+/* Пределы длины текста. Живут на сервере одной таблицей (app/quiz.py,
+   раздел 12 ТЗ «Вёрстка экрана квиза»): у вопроса и ответа по два
+   предела — рекомендуемый и жёсткий, и они зависят от того, есть ли
+   картинка и сколько вариантов.
+
+   Здесь только запасной вариант на случай, если панель ещё не получила
+   таблицу с сервера. Дублировать числа сознательно не хочется: разойдясь,
+   редактор обещал бы автору не то, что примет сервер. */
+const LIMITS_FALLBACK = {
+  question: { none: { recommended: 300, hard: 350 },
+              image: { recommended: 200, hard: 240 } },
+  answer: {
+    none: { 2: { recommended: 100, hard: 120 },
+            3: { recommended: 100, hard: 120 },
+            4: { recommended: 80, hard: 100 } },
+    image: { 2: { recommended: 70, hard: 85 },
+             3: { recommended: 70, hard: 85 },
+             4: { recommended: 60, hard: 75 } },
+  },
 };
 
-/* Лимиты для текущей картинки в редакторе.
+/* Таблица с сервера приходит в каждом ответе панели (text_limits). */
+function limitsTable() {
+  return (quizState && quizState.text_limits) || LIMITS_FALLBACK;
+}
 
-   Ориентацию знаем по натуральным размерам загруженного файла: квадрат
-   и вертикаль движок ставит слева, горизонталь — сверху. Пока файл не
-   прочитан (или его нет), берём лимиты без картинки — они самые щедрые,
-   а сервер всё равно пересчитает по фактической ориентации. */
+/* Сколько вариантов сейчас в редакторе — по заполненным строкам.
+   Пустые строки сервер отбрасывает, и предел считается по фактическому
+   числу: вопрос «на четыре» с тремя заполненными на экране встанет
+   колонкой, а не сеткой 2×2, и предел у него мягче. */
+function editorOptionCount() {
+  if (!qOptions) return 2;
+  const filled = [...qOptions.querySelectorAll('.q-opt-input')]
+    .filter((inp) => inp.value.trim()).length;
+  return Math.min(4, Math.max(2, filled || 2));
+}
+
+/* Пределы для текущего состояния редактора: {question, answer} —
+   каждый {recommended, hard}. */
 function currentLimits() {
-  const hasImg = qImageFile || (qImageExisting && !qImageRemove);
-  if (!hasImg) return { text: LIMITS.text, option: LIMITS.option };
-  if (imgOrientation === 'wide') {
-    return { text: LIMITS.wideText, option: LIMITS.wideOption };
-  }
-  return { text: LIMITS.sideText, option: LIMITS.sideOption };
+  const table = limitsTable();
+  const key = hasImage() ? 'image' : 'none';
+  return {
+    question: table.question[key],
+    answer: table.answer[key][String(editorOptionCount())],
+  };
 }
 
 /* ---------------- Стадия и кнопки ---------------- */
@@ -390,21 +408,29 @@ quizList.addEventListener('click', async (e) => {
    что всё равно не примут. */
 const MAX_OPTIONS = 4;
 
-/* Предел текста варианта зависит от ориентации картинки: рядом с
-   горизонтальным фото сервер принимает 35 знаков, рядом с квадратным или
-   вертикальным — столько же, сколько без фото. Поле должно честно
-   показывать тот же предел, а не давать набрать лишнее. */
-function optionLimit() {
-  return currentLimits().option;
+/* Жёсткий предел варианта — тот, выше которого сервер откажет. */
+function optionHardLimit() {
+  return currentLimits().answer.hard;
 }
 
+/* Поле варианта: набрать выше жёсткого предела нельзя (maxlength), а выше
+   рекомендуемого — можно, но с предупреждением. Иначе автор либо терял бы
+   хвост молча на границе, либо не узнавал, что шрифт станет мельче. */
 function syncOptionLimits() {
-  const lim = optionLimit();
-  const short = lim < LIMITS.option;
+  const lim = optionHardLimit();
   [...qOptions.querySelectorAll('.q-opt-input')].forEach((inp) => {
     inp.maxLength = lim;
-    inp.placeholder = short
-      ? `Вариант ответа (до ${lim})` : 'Вариант ответа';
+    inp.placeholder = `Вариант ответа (до ${lim})`;
+  });
+  markLongOptions();
+}
+
+/* Помечает варианты длиннее рекомендуемого: они пройдут, но мельче. */
+function markLongOptions() {
+  const { recommended, hard } = currentLimits().answer;
+  [...qOptions.querySelectorAll('.q-opt-input')].forEach((inp) => {
+    const n = inp.value.trim().length;
+    inp.classList.toggle('is-long', n > recommended && n <= hard);
   });
 }
 
@@ -462,17 +488,16 @@ function openEditor(question) {
   clearImageChoice();
   qImageExisting = question && question.image ? question.image : null;
   if (qImageExisting) showImageState(qImageExisting);
-  /* Ориентацию известной картинки узнаём по натуральным размерам: от неё
-     зависят лимиты. До загрузки считаем неизвестной, и лимиты будут
-     мягкие — сервер всё равно пересчитает по файлу. */
+  /* Ориентацию известной картинки узнаём по натуральным размерам: она
+     нужна подсказке о том, как встанет кадр (пределы от неё больше не
+     зависят — с картинкой предел один на все ориентации). */
   imgOrientation = null;
   if (qImageExisting) {
     const probe = new Image();
     probe.onload = () => {
       const ratio = probe.naturalWidth / probe.naturalHeight;
       imgOrientation = ratio >= 1.2 ? 'wide' : ratio <= 0.85 ? 'tall' : 'square';
-      syncOptionLimits();
-      applyTextLimit();
+      syncTextLimits();
     };
     probe.src = ev(`/media/${encodeURIComponent(qImageExisting)}?w=320`);
   }
@@ -522,24 +547,47 @@ function hasImage() {
   return !!qImageFile || (!!qImageExisting && !qImageRemove);
 }
 
+/* Предел поля вопроса: maxlength — жёсткий, счётчик показывает
+   рекомендуемый. Набрать выше жёсткого нельзя, поэтому «/350» — это
+   граница поля, а предупреждение появляется между 300 и 350. */
+function applyTextLimit() {
+  const lim = currentLimits();
+  qText.maxLength = lim.question.hard;
+  qTextMax.textContent = String(lim.question.hard);
+  qText.dataset.recommended = String(lim.question.recommended);
+}
+
 function syncTextLimits() {
   const withImg = hasImage();
-  const lim = currentLimits();
-  qText.maxLength = lim.text;
-  qTextMax.textContent = String(lim.text);
+  applyTextLimit();
   qImageHint.hidden = !withImg;
+  if (withImg) {
+    const q = currentLimits();
+    qImageHint.textContent =
+      `С картинкой вопрос — до ${q.question.hard} знаков `
+      + `(читаемо до ${q.question.recommended}), варианты — до `
+      + `${q.answer.hard} (читаемо до ${q.answer.recommended}).`;
+  }
   qImageName.textContent = qImageFile
     ? qImageFile.name
     : (qImageExisting && !qImageRemove ? qImageExisting : 'нет картинки — вопрос текстовый');
   syncOptionLimits();
 }
 
-/* Пересчитать только предел вопроса: вызывается, когда ориентация
-   картинки стала известна после загрузки. */
-function applyTextLimit() {
+/* «Текст длинный, шрифт будет уменьшен» — между рекомендуемым и жёстким
+   пределом. Выше жёсткого не пустит maxlength, так что третьего случая
+   в редакторе не бывает. */
+function updateLongHints() {
   const lim = currentLimits();
-  qText.maxLength = lim.text;
-  qTextMax.textContent = String(lim.text);
+  const qLen = qText.value.trim().length;
+  const qLong = qLen > lim.question.recommended && qLen <= lim.question.hard;
+  qStatus.dataset.long = qLong ? '1' : '';
+  if (qLong && !qStatus.textContent) {
+    qStatus.textContent = 'Текст длинный, шрифт на экране будет уменьшен';
+  } else if (!qLong && qStatus.dataset.long === '1') {
+    qStatus.textContent = '';
+  }
+  markLongOptions();
 }
 
 qImage.addEventListener('change', () => {
@@ -551,8 +599,8 @@ qImage.addEventListener('change', () => {
   qImagePreview.hidden = false;
   qImageName.textContent = file.name;
   qImageDrop.hidden = false;
-  /* Ориентацию нового файла узнаём сразу: от неё зависят лимиты.
-     До загрузки — мягкие, после onload станут точными. */
+  /* Ориентация больше не влияет на пределы (с картинкой предел один на
+     все ориентации), но подсказка о том, как кадр встанет, от неё зависит. */
   imgOrientation = null;
   syncTextLimits();
   const probe = new Image();
@@ -577,15 +625,24 @@ qImageDrop.addEventListener('click', () => {
   updateQTextCount();
 });
 
+/* Счётчик «N/300»: показывает жёсткий предел и подсвечивает переход
+   через рекомендуемый — это и есть «текст длинный, шрифт будет уменьшен». */
 function updateQTextCount() {
   qTextCount.textContent = String(qText.value.length);
-  const lim = qText.maxLength > 0 ? qText.maxLength : LIMITS.text;
-  qTextCount.parentElement.classList.toggle('is-over', qText.value.length > lim);
+  const lim = currentLimits().question;
+  const n = qText.value.length;
+  qTextCount.parentElement.classList.toggle('is-over', n > lim.hard);
+  qTextCount.parentElement.classList.toggle(
+    'is-long', n > lim.recommended && n <= lim.hard);
+  updateLongHints();
 }
 qText.addEventListener('input', updateQTextCount);
 qAddOption.addEventListener('click', () => {
   if (qOptions.children.length >= MAX_OPTIONS) return;   // кнопка и так погашена
   addOptionRow().querySelector('input[type=text]').focus();
+  // вариантов стало больше — предел ответа стал строже
+  syncOptionLimits();
+  markLongOptions();
 });
 
 qSave.addEventListener('click', async () => {
@@ -613,20 +670,21 @@ qSave.addEventListener('click', async () => {
     qStatus.textContent = 'Отметьте правильный вариант кружком слева';
     return;
   }
-  // предел длины проверяем здесь же: сервер откажет, но ведущему лучше
-  // узнать до отправки, а не потерять набранное на ошибке
-  const textLim = currentLimits().text;
-  if (qText.value.trim().length > textLim) {
-    qStatus.textContent = `Вопрос — до ${textLim} знаков, `
-      + `сейчас ${qText.value.trim().length}`;
+  /* Пределы проверяем здесь же: сервер откажет, но ведущему лучше узнать
+     до отправки, а не потерять набранное на ошибке. Выше жёсткого предела
+     сохранить нельзя; выше рекомендуемого — можно, шрифт станет мельче. */
+  const lim = currentLimits();
+  const qLen = qText.value.trim().length;
+  if (qLen > lim.question.hard) {
+    qStatus.textContent = `Вопрос — до ${lim.question.hard} знаков, `
+      + `сейчас ${qLen}`;
     qText.focus();
     return;
   }
-  const optLim = optionLimit();
-  const longOpt = kept.find((r) => r.text.length > optLim);
+  const longOpt = kept.find((r) => r.text.length > lim.answer.hard);
   if (longOpt) {
-    qStatus.textContent = `Вариант длиннее ${optLim} знаков не поместится `
-      + `в карточке — сократите`;
+    qStatus.textContent = `Вариант — до ${lim.answer.hard} знаков, `
+      + `сейчас ${longOpt.text.length}`;
     return;
   }
   const fields = {

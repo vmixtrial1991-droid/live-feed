@@ -104,28 +104,20 @@ LONG_ANSWERS = {
     ],
 }
 
-# Пределы сервера (app/main.py, quiz_text_limits). Держим копию здесь,
-# чтобы стенд не тянул FastAPI ради двух чисел; расхождение ловится тем,
-# что сервер отвечает 400 и сценарий падает в отчёте.
-LIMITS = {
-    None: (90, 45),
-    "wide": (65, 35),
-    "square": (90, 35),
-    "tall": (90, 35),
-}
+def limits_for(shot, count: int) -> tuple[int, int]:
+    """Пределы вопроса и ответа для этого сценария.
 
+    Берём их из той же таблицы, что и сервер (app/quiz.py, раздел 12 ТЗ):
+    копия чисел в стенде разошлась бы с приложением молча, и стенд начал
+    бы снимать кадры, которые в кабинете не набираются. Импорт безопасный:
+    app.quiz не тянет FastAPI, это чистые функции.
+    """
+    from app import quiz as quizmod
 
-def orientation_of(shot) -> str | None:
-    """Ориентация по пропорции снимка — как image_orientation в app/images.py."""
-    if not shot:
-        return None
-    w, h = shot
-    ratio = w / h
-    if ratio >= 1.2:
-        return "wide"
-    if ratio <= 0.85:
-        return "tall"
-    return "square"
+    has_image = bool(shot)
+    q = quizmod.question_limits(has_image)["hard"]
+    o = quizmod.option_limits(has_image, count)["hard"]
+    return q, o
 
 
 def fit_text(text: str, limit: int) -> str:
@@ -327,9 +319,9 @@ def build_event(scenarios: list[dict]) -> dict:
 
     ids = []
     for n, s in enumerate(scenarios, 1):
-        # Длинный текст подрезаем под лимиты сервера: стенд проверяет
+        # Длинный текст подрезаем под пределы сервера: стенд проверяет
         # границу, которую автор вопроса реально увидит в кабинете.
-        limit_q, limit_o = LIMITS[orientation_of(s.get("shot"))]
+        limit_q, limit_o = limits_for(s.get("shot"), len(s["options"]))
         fields = {
             "text": fit_text(s["text"], limit_q),
             # правильный вариант не важен: кадр снимаем до голосования

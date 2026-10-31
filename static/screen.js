@@ -719,13 +719,29 @@ function setQuizImage(src) {
   quizShot.hidden = !has;
   if (!has) {
     quizBody.classList.remove('on-shot-wide', 'on-shot-tall', 'on-shot-square');
+    quizShotImg.classList.remove('is-ready');
     if (quizShotImg.getAttribute('src')) quizShotImg.removeAttribute('src');
     return;
   }
   if (quizShotImg.getAttribute('src') !== src) {
-    // адрес приходит с ключом экрана и без кэша на сервере; грузим сразу,
-    // а не после первого кадра, чтобы фото успело появиться к вопросу
+    /* Смена картинки между вопросами.
+
+       Наивное «просто подставить новый src» давало вспышку: браузер держит
+       на экране прежний битмап, пока не загрузит новый файл. Ведущий уже
+       видел вопрос 12, а зал смотрел на снимок от вопроса 11 — тем дольше,
+       чем медленнее сеть в зале.
+
+       Поэтому старую картинку прячем сразу (is-ready снимается), новый
+       файл грузим и показываем только по событию load. Пустой блок с уже
+       правильным зазором лучше, чем чужой кадр под правильным вопросом. */
+    quizShotImg.classList.remove('is-ready');
     quizShotImg.src = src;
+    // из кэша браузер может отдать готовую картинку, не дожидаясь load
+    if (quizShotImg.complete && quizShotImg.naturalWidth) {
+      quizShotImg.classList.add('is-ready');
+    }
+  } else if (quizShotImg.complete && quizShotImg.naturalWidth) {
+    quizShotImg.classList.add('is-ready');
   }
   markShotShape();
 }
@@ -746,8 +762,11 @@ function markShotShape() {
 }
 
 /* Размеры картинки приходят асинхронно: до загрузки naturalWidth = 0,
-   поэтому раскладываем ещё раз, когда файл догрузился */
+   поэтому раскладываем ещё раз, когда файл догрузился.
+   Здесь же показываем сам снимок: до этого он скрыт, чтобы между
+   вопросами не мелькал кадр от предыдущего. */
 quizShotImg.addEventListener('load', () => {
+  quizShotImg.classList.add('is-ready');
   markShotShape();
   fitQuizActive();
 });

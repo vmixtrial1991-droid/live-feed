@@ -1,11 +1,11 @@
-# Как развернуть «Живая ленту» 5.1 на любом Ubuntu-сервере
+# Как развернуть «Живая ленту» 5.1.1 на любом Ubuntu-сервере
 
 Два файла в папке `dist/`:
 
 | Файл | Размер | Что это |
 |---|---|---|
-| `livefeed-5.1-source.tar.gz` | 210 КБ | Код приложения, скрипты установки и проверки |
-| `livefeed-5.1-images.tar.gz` | 84 МБ | Готовые образы Docker: приложение и nginx |
+| `livefeed-5.1.1-source.tar.gz` | 210 КБ | Код приложения, скрипты установки и проверки |
+| `livefeed-5.1.1-images.tar.gz` | 84 МБ | Готовые образы Docker: приложение и nginx |
 | `SHA256SUMS.txt` | 400 Б | Контрольные суммы, сверять после копирования |
 
 С ними сервер поднимается **без доступа в интернет**: код на месте, образы
@@ -13,8 +13,8 @@
 
 Комплект лежит на машине разработчика в `dist/`, и его достаточно для любого
 сервера — Docker на этой машине не нужен. Архив образов при этом проверяется
-загрузкой: `docker load -i livefeed-5.1-images.tar.gz` обязан напечатать
-`Loaded image: livefeed:5.1` и `Loaded image: nginx:1.27-alpine`.
+загрузкой: `docker load -i livefeed-5.1.1-images.tar.gz` обязан напечатать
+`Loaded image: livefeed:5.1.1` и `Loaded image: nginx:1.27-alpine`.
 
 ---
 
@@ -22,12 +22,12 @@
 
 ```bash
 # 1. На своей машине положить оба файла на сервер
-scp dist/livefeed-5.1-source.tar.gz dist/livefeed-5.1-images.tar.gz root@АДРЕС:/tmp/
+scp dist/livefeed-5.1.1-source.tar.gz dist/livefeed-5.1.1-images.tar.gz root@АДРЕС:/tmp/
 
 # 2. На сервере
 ssh root@АДРЕС
 cd /tmp
-tar -xzf livefeed-5.1-source.tar.gz -C /tmp/lf
+tar -xzf livefeed-5.1.1-source.tar.gz -C /tmp/lf
 ADMIN_PASSWORD=ВАШ_ПАРОЛЬ bash /tmp/lf/deploy.sh
 
 # 3. Открыть http://АДРЕС/admin и войти паролем
@@ -57,7 +57,7 @@ ADMIN_PASSWORD=ВАШ_ПАРОЛЬ bash /tmp/lf/deploy.sh
 ### Шаг 1. Положить файлы на сервер
 
 ```bash
-scp dist/livefeed-5.1-source.tar.gz dist/livefeed-5.1-images.tar.gz root@АДРЕС:/tmp/
+scp dist/livefeed-5.1.1-source.tar.gz dist/livefeed-5.1.1-images.tar.gz root@АДРЕС:/tmp/
 scp "C:\Users\9900x\.ssh\livefeed_deploy" root@АДРЕС:~/.ssh/authorized_keys   # необязательно
 ```
 
@@ -66,8 +66,8 @@ scp "C:\Users\9900x\.ssh\livefeed_deploy" root@АДРЕС:~/.ssh/authorized_keys
 ```bash
 ssh root@АДРЕС
 cd /tmp
-tar -xzf livefeed-5.1-source.tar.gz -C /tmp/lf
-cp livefeed-5.1-images.tar.gz /tmp/lf/          # чтобы образ достался без сети
+tar -xzf livefeed-5.1.1-source.tar.gz -C /tmp/lf
+cp livefeed-5.1.1-images.tar.gz /tmp/lf/          # чтобы образ достался без сети
 ADMIN_PASSWORD=ВАШ_ПАРОЛЬ bash /tmp/lf/deploy.sh
 ```
 
@@ -212,12 +212,12 @@ docker compose up -d             # поднять обратно
 ### Обновить на новую версию
 
 ```bash
-scp НОВЫЙ/livefeed-5.1-source.tar.gz root@АДРЕС:/tmp/
-scp НОВЫЙ/livefeed-5.1-images.tar.gz root@АДРЕС:/tmp/
+scp НОВЫЙ/livefeed-5.1.1-source.tar.gz root@АДРЕС:/tmp/
+scp НОВЫЙ/livefeed-5.1.1-images.tar.gz root@АДРЕС:/tmp/
 
 ssh root@АДРЕС
-rm -rf /tmp/lf && tar -xzf /tmp/livefeed-5.1-source.tar.gz -C /tmp/lf
-cp /tmp/livefeed-5.1-images.tar.gz /tmp/lf/
+rm -rf /tmp/lf && tar -xzf /tmp/livefeed-5.1.1-source.tar.gz -C /tmp/lf
+cp /tmp/livefeed-5.1.1-images.tar.gz /tmp/lf/
 ADMIN_PASSWORD=СТАРЫЙ_ПАРОЛЬ bash /tmp/lf/deploy.sh
 ```
 
@@ -227,7 +227,7 @@ ADMIN_PASSWORD=СТАРЫЙ_ПАРОЛЬ bash /tmp/lf/deploy.sh
 
 ```bash
 cd /opt/livefeed
-sed -i 's|image: livefeed:5.1|image: livefeed:5.0|' docker-compose.yml
+sed -i 's|image: livefeed:5.1.1|image: livefeed:5.0|' docker-compose.yml
 docker compose up -d
 ```
 
@@ -244,13 +244,13 @@ docker compose up -d
 ```powershell
 # на своей машине — архивы уже собраны в dist/
 python verify_kit.py        # проверить, что комплект целый
-scp dist/livefeed-5.1-images.tar.gz dist/livefeed-5.1-source.tar.gz root@АДРЕС:/tmp/
+scp dist/livefeed-5.1.1-images.tar.gz dist/livefeed-5.1.1-source.tar.gz root@АДРЕС:/tmp/
 ```
 
 На сервере разворачивается как обычно, тремя строками из раздела «Коротко».
 
 `verify_kit.py` проверяет то, что можно проверить без Docker: целостность
-gzip, состав архива, что в манифесте лежат именно `livefeed:5.1` и
+gzip, состав архива, что в манифесте лежат именно `livefeed:5.1.1` и
 `nginx:1.27-alpine` (и **нет** старой версии — иначе на другой машине
 развернётся не то), что в образе задан пользователь `livefeed` и прописано
 хранилище `/app/data`, и что в исходниках нет CRLF.
@@ -259,7 +259,7 @@ gzip, состав архива, что в манифесте лежат име�
 ожидаемые значения лежат в `SHA256SUMS.txt`:
 
 ```bash
-python -c "import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" livefeed-5.1-images.tar.gz
+python -c "import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" livefeed-5.1.1-images.tar.gz
 ```
 
 Если файл переписывали через сеть, сходиться будет именно с `SHA256SUMS.txt`,

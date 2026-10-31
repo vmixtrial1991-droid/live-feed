@@ -218,6 +218,35 @@ async def main() -> None:
                              where=lambda m: m["screen"].get("splash_visible") is False)
         check("экран узнал об уходе заставки", msg is not None)
 
+    print("\n=== «Заново» не теряет заставку ===")
+    # Кнопка «Заново» шлёт два запроса: reset и reset-shown. Второй раньше
+    # собирал ответ вручную и забывал поле splash, поэтому экран прятал
+    # картинку, оставляя слой заставки включённым.
+    async with websockets.connect(f"{WS}/ws/display?d={SCREEN_KEY}") as ws:
+        await wait_for(ws, "init")
+        await asyncio.to_thread(
+            mod.post, "/api/moderator/screen", {"action": "splash", "value": "1"}
+        )
+        await wait_for(ws, "screen",
+                       where=lambda m: m["screen"].get("splash_visible") is True)
+
+        st, res = await asyncio.to_thread(mod.post, "/api/moderator/reset-shown", {})
+        check("сброс отметок прошёл", st == 200, str(st))
+        check("в ответе сброса есть адрес заставки", res.get("splash") == url,
+              f'{res.get("splash")!r} вместо {url!r}')
+
+        msg = await wait_for(ws, "refresh", where=lambda m: "splash" in m)
+        check("экран получил обновление вместе с заставкой", msg is not None)
+        if msg:
+            check("в обновлении тот же адрес заставки", msg.get("splash") == url,
+                  str(msg.get("splash")))
+            check("заставка осталась включённой",
+                  msg.get("screen", {}).get("splash_visible") is True)
+
+        await asyncio.to_thread(
+            mod.post, "/api/moderator/screen", {"action": "splash", "value": "0"}
+        )
+
     print("\n=== Заставка останавливает показ ===")
     async with websockets.connect(f"{WS}/ws/display?d={SCREEN_KEY}") as ws:
         await wait_for(ws, "init")

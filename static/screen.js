@@ -1472,7 +1472,7 @@ connectWS(withKey(ev('/ws/display')), {
         // init приходит и при переподключении — старые слайды надо забыть
         messages.clear();
         gallery.clear();
-        setSplashUrl(msg.splash);
+        if ('splash' in msg) setSplashUrl(msg.splash);
         (msg.messages || []).forEach((m) => messages.set(m.id, m));
         (msg.gallery || []).forEach((g) => gallery.set(g.id, g));
         order = byPosition([...messages.keys()]);
@@ -1499,7 +1499,9 @@ connectWS(withKey(ev('/ws/display')), {
         const fresh = new Set();
         (msg.messages || []).forEach((m) => { messages.set(m.id, m); fresh.add(m.id); });
         for (const id of [...messages.keys()]) if (!fresh.has(id)) messages.delete(id);
-        setSplashUrl(msg.splash);
+        // поле приходит не во всех рассылках: отсутствие ключа значит
+        // «ничего не менялось», а не «заставку убрали»
+        if ('splash' in msg) setSplashUrl(msg.splash);
         // галерея приходит целиком: снимок мог уйти из ленты и остаться здесь
         gallery.clear();
         (msg.gallery || []).forEach((g) => gallery.set(g.id, g));

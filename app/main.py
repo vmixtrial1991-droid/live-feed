@@ -1146,14 +1146,10 @@ async def api_reset_shown(slug: str, request: Request):
     event = _event_or_404(slug)
     _require_moderator(request, event)
     event.store.reset_shown()
-    payload = {
-        "type": "refresh",
-        "messages": event.store.live_messages(),
-        "gallery": event.store.gallery_items(),
-        "stats": event.store.stats(),
-        "screen": _runtime(event).screen.state(),
-    }
-    await registry.get(event.slug).hub.broadcast_all(payload)
+    # Пересборку и рассылку делает _refresh: там же лежит поле splash.
+    # Раньше здесь собирался такой же ответ вручную и забывал про заставку —
+    # экран получал refresh без splash и прятал картинку заставки.
+    payload = await _refresh(event)
     return {"ok": True, **payload}
 
 

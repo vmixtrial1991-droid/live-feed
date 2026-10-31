@@ -29,6 +29,11 @@ COPY app ./app
 COPY static ./static
 COPY run.py ./
 
+# Лицензия и уведомление об авторстве — часть поставки: Apache 2.0 требует
+# передавать их вместе с копией программы. В образе лежат по путям /app/LICENSE,
+# /app/NOTICE и /app/THIRD-PARTY.md, доступны без запуска приложения.
+COPY LICENSE NOTICE THIRD-PARTY.md ./
+
 # Данные вынесены наружу через volume. Внутри data/ появятся папки событий,
 # их создаёт само приложение при первом событии.
 RUN mkdir -p /app/data && chown -R livefeed:livefeed /app
